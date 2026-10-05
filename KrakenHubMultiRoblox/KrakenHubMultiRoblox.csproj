@@ -1,13 +1,18 @@
 <Project Sdk="Microsoft.NET.Sdk">
+
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
-    <UseWPF>true</UseWPF>
-    <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <PlatformTarget>x64</PlatformTarget>
     <AssemblyName>KrakenHubMultiRoblox</AssemblyName>
     <RootNamespace>KrakenHubMultiRoblox</RootNamespace>
-    <Platforms>x64</Platforms>
+    <ApplicationIcon />
+    <StartupObject />
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
   </PropertyGroup>
+
 </Project>
