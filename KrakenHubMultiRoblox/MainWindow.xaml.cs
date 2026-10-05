@@ -223,6 +223,17 @@ public partial class MainWindow : Window
 
     private void RefreshStatuses()
     {
+        var used = instances.Where(x => x.Process is { HasExited: false }).Select(x => x.Process!.Id).ToHashSet();
+        var available = Process.GetProcessesByName("RobloxPlayerBeta").Where(p => !used.Contains(p.Id)).ToList();
+        foreach (var item in instances.Where(x => x.Process == null || x.Process.HasExited))
+        {
+            var process = available.FirstOrDefault();
+            if (process == null) break;
+            item.Process = process;
+            item.StartedAt = DateTime.Now - process.TotalProcessorTime;
+            available.Remove(process);
+        }
+
         int running = 0;
         foreach (var item in instances)
         {
@@ -236,7 +247,7 @@ public partial class MainWindow : Window
                 running++;
                 status!.Text = "● Running";
                 status.Foreground = Brushes.SpringGreen;
-                pid!.Text = $"PID {item.Process.Id}  •  {DateTime.Now - item.StartedAt:hh\\:mm\\:ss}";
+                pid!.Text = $"PID {item.Process.Id}  •  {(DateTime.Now - item.StartedAt):hh\:mm\:ss}";
             }
             else
             {
