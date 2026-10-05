@@ -4,7 +4,8 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
-using System.Windows.Threading;\nusing Microsoft.Win32;
+using System.Windows.Threading;
+using Microsoft.Win32;
 
 namespace KrakenHubMultiRoblox;
 
@@ -83,14 +84,33 @@ public partial class MainWindow : Window
         return card;
     }
 
-    private void BrowseRunner_Click(object sender, RoutedEventArgs e)\n    {\n        var dialog = new OpenFileDialog { Filter = "Executable (*.exe)|*.exe|All files (*.*)|*.*" };\n        if (dialog.ShowDialog() == true) RunnerPathBox.Text = dialog.FileName;\n    }\n\n    private void TestRunner_Click(object sender, RoutedEventArgs e)\n    {\n        var path = RunnerPathBox.Text.Trim();\n        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))\n        {\n            MessageBox.Show("เลือกไฟล์โปรแกรม Runner (.exe) ก่อน", "Runner");\n            return;\n        }\n        try { Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true }); }\n        catch (Exception ex) { MessageBox.Show(ex.Message, "Runner launch failed"); }\n    }\n\n    private void Launch(RobloxInstance item)
+    private void BrowseRunner_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog { Filter = "Executable (*.exe)|*.exe|All files (*.*)|*.*" };
+        if (dialog.ShowDialog() == true) RunnerPathBox.Text = dialog.FileName;
+    }
+
+    private void TestRunner_Click(object sender, RoutedEventArgs e)
+    {
+        var path = RunnerPathBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        {
+            MessageBox.Show("เลือกไฟล์โปรแกรม Runner (.exe) ก่อน", "Runner");
+            return;
+        }
+        try { Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true }); }
+        catch (Exception ex) { MessageBox.Show(ex.Message, "Runner launch failed"); }
+    }
+
+    private void Launch(RobloxInstance item)
     {
         if (item.Process is { HasExited: false }) return;
 
         var exe = FindRoblox();
         if (exe == null)
         {
-            MessageBox.Show("หา RobloxPlayerBeta.exe ไม่เจอ\nเปิด Roblox อย่างน้อย 1 ครั้งก่อน แล้วลองใหม่", "Roblox not found");
+            MessageBox.Show("หา RobloxPlayerBeta.exe ไม่เจอ
+เปิด Roblox อย่างน้อย 1 ครั้งก่อน แล้วลองใหม่", "Roblox not found");
             return;
         }
 
