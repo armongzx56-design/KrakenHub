@@ -1,35 +1,51 @@
-name: Build Multi Roblox Manager
+name: Build KrakenHub Multi Roblox
 
 on:
   push:
-    paths:
-      - "KrakenHubMultiRoblox/**"
-      - ".github/workflows/build-multi-roblox.yml"
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: windows-latest
+
     steps:
-      - name: Checkout
+      - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Setup .NET
+      - name: Setup .NET 8
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
 
-      - name: Restore
+      - name: Restore Dependencies
         run: dotnet restore KrakenHubMultiRoblox/KrakenHubMultiRoblox.csproj
 
       - name: Build
         run: dotnet build KrakenHubMultiRoblox/KrakenHubMultiRoblox.csproj -c Release --no-restore -p:Platform=x64
 
-      - name: Publish EXE
-        run: dotnet publish KrakenHubMultiRoblox/KrakenHubMultiRoblox.csproj -c Release -r win-x64 --self-contained true --no-restore -p:Platform=x64 -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:DebugSymbols=false -o publish
+      - name: Publish Single EXE
+        run: dotnet publish KrakenHubMultiRoblox/KrakenHubMultiRoblox.csproj -c Release -r win-x64 --self-contained true --no-restore -p:Platform=x64 -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:DebugSymbols=false -o ./publish
 
-      - name: Upload EXE
+      - name: Verify EXE
+        shell: pwsh
+        run: |
+          $exe = "./publish/KrakenHubMultiRoblox.exe"
+          if (!(Test-Path $exe)) {
+            Write-Error "EXE was not generated."
+            exit 1
+          }
+          $size = (Get-Item $exe).Length
+          Write-Host "EXE generated successfully. Size: $size bytes"
+
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: MultiRobloxManager-win-x64
-          path: publish/*.exe
+          name: KrakenHubMultiRoblox-x64
+          path: ./publish/KrakenHubMultiRoblox.exe
