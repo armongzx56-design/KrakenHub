@@ -18,7 +18,9 @@ public partial class MainWindow : Window
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hWnd);
     [DllImport("user32.dll")] private static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint);
-    [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);\n    [DllImport("kernel32.dll", SetLastError = true)] private static extern IntPtr OpenProcess(uint access, bool inheritHandle, uint processId);\n    [DllImport("kernel32.dll", SetLastError = true)] private static extern bool CloseHandle(IntPtr handle);\n    [DllImport("psapi.dll", SetLastError = true)] private static extern bool EmptyWorkingSet(IntPtr hProcess);\n    private const uint PROCESS_SET_QUOTA = 0x0100;\n    private const uint PROCESS_QUERY_INFORMATION = 0x0400;
+    [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);\n    [DllImport("kernel32.dll", SetLastError = true)] private static extern IntPtr OpenProcess(uint access, bool inheritHandle, uint processId);\n    [DllImport("kernel32.dll", SetLastError = true)] private static extern bool CloseHandle(IntPtr handle);\n    [DllImport("psapi.dll", SetLastError = true)] private static extern bool EmptyWorkingSet(IntPtr hProcess);
+    private const uint PROCESS_SET_QUOTA = 0x0100;
+    private const uint PROCESS_QUERY_INFORMATION = 0x0400;
     private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
     public MainWindow()
@@ -109,8 +111,7 @@ public partial class MainWindow : Window
         var exe = FindRoblox();
         if (exe == null)
         {
-            MessageBox.Show("หา RobloxPlayerBeta.exe ไม่เจอ
-เปิด Roblox อย่างน้อย 1 ครั้งก่อน แล้วลองใหม่", "Roblox not found");
+            MessageBox.Show("หา RobloxPlayerBeta.exe ไม่เจอ\nเปิด Roblox อย่างน้อย 1 ครั้งก่อน แล้วลองใหม่", "Roblox not found");
             return;
         }
 
