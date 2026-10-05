@@ -196,12 +196,12 @@ public partial class MainWindow : Window
         LaunchAll_Click(sender, e);
     }
 
-    private static int GetComboInt(ComboBox box, int fallback)
+    private static int GetComboInt(System.Windows.Controls.ComboBox box, int fallback)
     {
         return box.SelectedItem is ComboBoxItem item && int.TryParse(item.Content?.ToString(), out var value) ? value : fallback;
     }
 
-    private static int GetDelayMs(ComboBox box, int fallback)
+    private static int GetDelayMs(System.Windows.Controls.ComboBox box, int fallback)
     {
         var text = (box.SelectedItem as ComboBoxItem)?.Content?.ToString()?.Replace("s", "");
         return double.TryParse(text, out var seconds) ? (int)(seconds * 1000) : fallback;
