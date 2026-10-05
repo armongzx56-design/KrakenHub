@@ -189,8 +189,8 @@ public partial class MainWindow : Window
 
     private void ArrangeWindows()
     {
-        int rows = int.TryParse(RowsBox.Text, out var r) ? Math.Clamp(r, 1, 8) : 2;
-        int cols = int.TryParse(ColsBox.Text, out var c) ? Math.Clamp(c, 1, 8) : 2;
+        int rows = int.TryParse(RowsBox.Text, out var r) ? Math.Clamp(r, 1, 10) : 2;
+        int cols = int.TryParse(ColsBox.Text, out var c) ? Math.Clamp(c, 1, 10) : 2;
         var area = System.Windows.Forms.Screen.PrimaryScreen?.WorkingArea;
         if (area == null) return;
 
@@ -213,7 +213,8 @@ public partial class MainWindow : Window
     private void Arrange_Click(object sender, RoutedEventArgs e) => ArrangeWindows();
     private void Layout2_Click(object sender, RoutedEventArgs e) { RowsBox.Text = "2"; ColsBox.Text = "2"; ArrangeWindows(); }
     private void Layout3_Click(object sender, RoutedEventArgs e) { RowsBox.Text = "3"; ColsBox.Text = "3"; ArrangeWindows(); }
-    private void Layout4_Click(object sender, RoutedEventArgs e) { RowsBox.Text = "4"; ColsBox.Text = "4"; ArrangeWindows(); }\n    private void Layout50_Click(object sender, RoutedEventArgs e) { RowsBox.Text = "5"; ColsBox.Text = "10"; ArrangeWindows(); }
+    private void Layout4_Click(object sender, RoutedEventArgs e) { RowsBox.Text = "4"; ColsBox.Text = "4"; ArrangeWindows(); }
+    private void Layout50_Click(object sender, RoutedEventArgs e) { RowsBox.Text = "5"; ColsBox.Text = "10"; ArrangeWindows(); }
 
     private void InstanceCountBox_Changed(object sender, SelectionChangedEventArgs e)
     {
