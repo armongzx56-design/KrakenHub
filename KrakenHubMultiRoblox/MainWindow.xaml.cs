@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
-using System.Windows.Threading;
+using System.Windows.Threading;\nusing Microsoft.Win32;
 
 namespace KrakenHubMultiRoblox;
 
@@ -83,7 +83,7 @@ public partial class MainWindow : Window
         return card;
     }
 
-    private void Launch(RobloxInstance item)
+    private void BrowseRunner_Click(object sender, RoutedEventArgs e)\n    {\n        var dialog = new OpenFileDialog { Filter = "Executable (*.exe)|*.exe|All files (*.*)|*.*" };\n        if (dialog.ShowDialog() == true) RunnerPathBox.Text = dialog.FileName;\n    }\n\n    private void TestRunner_Click(object sender, RoutedEventArgs e)\n    {\n        var path = RunnerPathBox.Text.Trim();\n        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))\n        {\n            MessageBox.Show("เลือกไฟล์โปรแกรม Runner (.exe) ก่อน", "Runner");\n            return;\n        }\n        try { Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true }); }\n        catch (Exception ex) { MessageBox.Show(ex.Message, "Runner launch failed"); }\n    }\n\n    private void Launch(RobloxInstance item)
     {
         if (item.Process is { HasExited: false }) return;
 
