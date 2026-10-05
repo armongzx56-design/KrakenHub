@@ -18,7 +18,7 @@ public partial class MainWindow : Window
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hWnd);
     [DllImport("user32.dll")] private static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint);
-    [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);\n    [DllImport("kernel32.dll", SetLastError = true)] private static extern IntPtr OpenProcess(uint access, bool inheritHandle, uint processId);\n    [DllImport("kernel32.dll", SetLastError = true)] private static extern bool CloseHandle(IntPtr handle);\n    [DllImport("psapi.dll", SetLastError = true)] private static extern bool EmptyWorkingSet(IntPtr hProcess);\n    private const uint PROCESS_SET_QUOTA = 0x0100;\n    private const uint PROCESS_QUERY_INFORMATION = 0x0400;
     private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
     public MainWindow()
@@ -150,6 +150,49 @@ public partial class MainWindow : Window
         }
         catch { }
         item.Process = null;
+    }
+
+    private void ReduceRam_Click(object sender, RoutedEventArgs e)
+    {
+        int trimmed = 0;
+        long before = 0;
+        long after = 0;
+
+        foreach (var item in instances)
+        {
+            var process = item.Process;
+            if (process is not { HasExited: false }) continue;
+
+            try
+            {
+                process.Refresh();
+                before += process.WorkingSet64;
+
+                var handle = OpenProcess(PROCESS_SET_QUOTA | PROCESS_QUERY_INFORMATION, false, (uint)process.Id);
+                if (handle == IntPtr.Zero) continue;
+
+                try
+                {
+                    if (EmptyWorkingSet(handle))
+                        trimmed++;
+                }
+                finally
+                {
+                    CloseHandle(handle);
+                }
+
+                process.Refresh();
+                after += process.WorkingSet64;
+            }
+            catch
+            {
+                // A process can exit between the checks; skip it.
+            }
+        }
+
+        RefreshStatuses();
+        var releasedMb = Math.Max(0, (before - after) / 1024 / 1024);
+        StatusText.Text = $"RAM optimized  •  {trimmed} clients  •  ~{releasedMb} MB trimmed";
     }
 
     private void StopAll_Click(object sender, RoutedEventArgs e) => instances.ToList().ForEach(Stop);
