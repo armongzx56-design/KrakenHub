@@ -319,14 +319,3 @@ public partial class MainWindow : Window
     }
 }
 
-public sealed class RobloxInstance(int id) : IDisposable
-{
-    public int Id { get; } = id;
-    public Process? Process { get; set; }
-    public DateTime StartedAt { get; set; }
-
-    public void Dispose()
-    {
-        try { Process?.Dispose(); } catch { }
-    }
-}
