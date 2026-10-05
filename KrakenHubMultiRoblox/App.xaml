@@ -3,21 +3,11 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              StartupUri="MainWindow.xaml">
     <Application.Resources>
-        <SolidColorBrush x:Key="Bg" Color="#070A12"/>
-        <SolidColorBrush x:Key="Panel" Color="#0D1220"/>
-        <SolidColorBrush x:Key="Panel2" Color="#11182A"/>
-        <SolidColorBrush x:Key="Border" Color="#202A40"/>
-        <SolidColorBrush x:Key="Accent" Color="#635BFF"/>
-        <SolidColorBrush x:Key="Text" Color="#F5F7FF"/>
-        <SolidColorBrush x:Key="Muted" Color="#8E99B3"/>
-        <Style TargetType="Button">
-            <Setter Property="Foreground" Value="{StaticResource Text}"/>
-            <Setter Property="Background" Value="{StaticResource Panel2}"/>
-            <Setter Property="BorderBrush" Value="{StaticResource Border}"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="Padding" Value="14,8"/>
-            <Setter Property="Margin" Value="3"/>
-            <Setter Property="Cursor" Value="Hand"/>
-        </Style>
+        <SolidColorBrush x:Key="BackgroundBrush" Color="#0F111A"/>
+        <SolidColorBrush x:Key="PanelBrush" Color="#161925"/>
+        <SolidColorBrush x:Key="Panel2Brush" Color="#1E2235"/>
+        <SolidColorBrush x:Key="BorderBrush" Color="#2E344D"/>
+        <SolidColorBrush x:Key="AccentBrush" Color="#6C5CE7"/>
+        <SolidColorBrush x:Key="MutedBrush" Color="#8C93A8"/>
     </Application.Resources>
 </Application>
