@@ -12,7 +12,7 @@ namespace KrakenHubMultiRoblox;
 public partial class MainWindow : Window
 {
     private readonly ObservableCollection<RobloxInstance> instances = new();
-    private readonly DispatcherTimer monitor = new() { Interval = TimeSpan.FromSeconds(1) };
+    private readonly DispatcherTimer monitor = new() { Interval = TimeSpan.FromSeconds(2) };
 
     [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
@@ -197,7 +197,7 @@ public partial class MainWindow : Window
         var live = instances.Where(x => x.Process is { HasExited: false }).ToList();
         if (live.Count == 0) return;
 
-        int gap = 8;
+        int gap = 4;
         int w = Math.Max(250, (area.Value.Width - gap * (cols + 1)) / cols);
         int h = Math.Max(180, (area.Value.Height - gap * (rows + 1)) / rows);
 
@@ -213,7 +213,7 @@ public partial class MainWindow : Window
     private void Arrange_Click(object sender, RoutedEventArgs e) => ArrangeWindows();
     private void Layout2_Click(object sender, RoutedEventArgs e) { RowsBox.Text = "2"; ColsBox.Text = "2"; ArrangeWindows(); }
     private void Layout3_Click(object sender, RoutedEventArgs e) { RowsBox.Text = "3"; ColsBox.Text = "3"; ArrangeWindows(); }
-    private void Layout4_Click(object sender, RoutedEventArgs e) { RowsBox.Text = "4"; ColsBox.Text = "4"; ArrangeWindows(); }
+    private void Layout4_Click(object sender, RoutedEventArgs e) { RowsBox.Text = "4"; ColsBox.Text = "4"; ArrangeWindows(); }\n    private void Layout50_Click(object sender, RoutedEventArgs e) { RowsBox.Text = "5"; ColsBox.Text = "10"; ArrangeWindows(); }
 
     private void InstanceCountBox_Changed(object sender, SelectionChangedEventArgs e)
     {
