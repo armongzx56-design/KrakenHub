@@ -2922,25 +2922,88 @@ local function GetMerchantCycleTime()
 end
 
 local function FindMerchantNPC()
-    -- 1. ค้นหาโมเดลที่มีชื่อ SecretShopNPC ใน Workspace
+    -- 1. ค้นหาโมเดล SecretShopNPC ใน Workspace (รองรับทุกหมายเลข _1, _2, _3, _4, ...)
     for _, obj in ipairs(Workspace:GetChildren()) do
         if obj:IsA("Model") and string.find(obj.Name, "SecretShopNPC") then
-            local hrp = obj:FindFirstChild("HumanoidRootPart") or obj:FindFirstChildWhichIsA("BasePart")
+            local hrp = obj:FindFirstChild("HumanoidRootPart")
+                     or obj:FindFirstChild("Torso")
+                     or obj:FindFirstChild("Head")
+                     or obj:FindFirstChild("UpperTorso")
+                     or obj.PrimaryPart
+                     or obj:FindFirstChildWhichIsA("BasePart", true)
+
+            -- กรณีติด StreamingEnabled ทำให้ชิ้นส่วนตัวละครยังไม่โหลดมาที่เครื่อง (Streamed Out)
+            -- Model:GetPivot() ของ Roblox จะเก็บพิกัด 3D ที่แท้จริงไว้เสมอ
+            if not hrp then
+                local pivot = obj:GetPivot()
+                if pivot and pivot.Position ~= Vector3.zero then
+                    if not Hub.LocalMerchantAnchor or not Hub.LocalMerchantAnchor.Parent then
+                        local anchor = Instance.new("Part")
+                        anchor.Name = "KrakenMerchantAnchor"
+                        anchor.Size = Vector3.new(2, 5, 2)
+                        anchor.Transparency = 1
+                        anchor.CanCollide = false
+                        anchor.Anchored = true
+                        anchor.Parent = Workspace
+                        Hub.LocalMerchantAnchor = anchor
+                    end
+                    Hub.LocalMerchantAnchor.CFrame = pivot
+                    pcall(function()
+                        LocalPlayer:RequestStreamAroundAsync(pivot.Position)
+                    end)
+                    hrp = Hub.LocalMerchantAnchor
+                end
+            end
+
             if hrp then
                 return obj, hrp
             end
         end
     end
 
-    -- 2. ค้นหาจาก ProximityPrompt ที่มีข้อความ "พ่อค้าพเนจร"
+    -- 2. ค้นหาในโฟลเดอร์ย่อยของ Workspace
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        if obj:IsA("Model") and (string.find(obj.Name, "SecretShopNPC") or string.find(obj.Name, "พ่อค้าพเนจร")) then
+            local hrp = obj:FindFirstChild("HumanoidRootPart")
+                     or obj:FindFirstChild("Torso")
+                     or obj:FindFirstChild("Head")
+                     or obj.PrimaryPart
+                     or obj:FindFirstChildWhichIsA("BasePart", true)
+            if not hrp then
+                local pivot = obj:GetPivot()
+                if pivot and pivot.Position ~= Vector3.zero then
+                    if not Hub.LocalMerchantAnchor or not Hub.LocalMerchantAnchor.Parent then
+                        local anchor = Instance.new("Part")
+                        anchor.Name = "KrakenMerchantAnchor"
+                        anchor.Size = Vector3.new(2, 5, 2)
+                        anchor.Transparency = 1
+                        anchor.CanCollide = false
+                        anchor.Anchored = true
+                        anchor.Parent = Workspace
+                        Hub.LocalMerchantAnchor = anchor
+                    end
+                    Hub.LocalMerchantAnchor.CFrame = pivot
+                    hrp = Hub.LocalMerchantAnchor
+                end
+            end
+            if hrp then
+                return obj, hrp
+            end
+        end
+    end
+
+    -- 3. ค้นหาจาก ProximityPrompt
     for _, desc in ipairs(Workspace:GetDescendants()) do
-        if desc:IsA("ProximityPrompt") and desc.ObjectText == "พ่อค้าพเนจร" then
-            local part = desc.Parent:IsA("BasePart") and desc.Parent
-                      or (desc.Parent:IsA("Attachment") and desc.Parent.Parent:IsA("BasePart") and desc.Parent.Parent)
-                      or (desc.Parent and desc.Parent:FindFirstChild("HumanoidRootPart"))
-            if part then
-                local model = part:FindFirstAncestorOfClass("Model") or part
-                return model, part
+        if desc:IsA("ProximityPrompt") then
+            local t = (desc.ObjectText or "") .. " " .. (desc.ActionText or "")
+            if t:find("พ่อค้าพเนจร") or t:find("Secret") or t:find("พ่อค้าลับ") then
+                local part = desc.Parent:IsA("BasePart") and desc.Parent
+                          or (desc.Parent:IsA("Attachment") and desc.Parent.Parent:IsA("BasePart") and desc.Parent.Parent)
+                          or (desc.Parent and desc.Parent:FindFirstChild("HumanoidRootPart"))
+                if part then
+                    local model = part:FindFirstAncestorOfClass("Model") or part
+                    return model, part
+                end
             end
         end
     end
@@ -2953,6 +3016,20 @@ local function ClearMerchantESP()
         pcall(function() obj:Destroy() end)
     end
     table.clear(MerchantESPObjects)
+    if Hub.LocalMerchantAnchor then
+        pcall(function() Hub.LocalMerchantAnchor:Destroy() end)
+        Hub.LocalMerchantAnchor = nil
+    end
+    pcall(function()
+        for _, c in ipairs(targetGuiParent:GetChildren()) do
+            if c:IsA("BillboardGui") and c.Name == "MerchantBillboard" then
+                c:Destroy()
+            end
+            if c:IsA("Highlight") and c.Name == "MerchantHighlight" then
+                c:Destroy()
+            end
+        end
+    end)
 end
 
 local function UpdateMerchantESP()
@@ -2967,10 +3044,23 @@ local function UpdateMerchantESP()
         return
     end
 
-    local existingBB = hrp:FindFirstChild("MerchantBillboard")
-    local existingHL = model:FindFirstChild("MerchantHighlight")
+    local existingBB = nil
+    for _, obj in ipairs(MerchantESPObjects) do
+        if obj:IsA("BillboardGui") and obj.Name == "MerchantBillboard" then
+            existingBB = obj
+            break
+        end
+    end
 
-    if not existingHL then
+    local existingHL = nil
+    for _, obj in ipairs(MerchantESPObjects) do
+        if obj:IsA("Highlight") and obj.Name == "MerchantHighlight" then
+            existingHL = obj
+            break
+        end
+    end
+
+    if not existingHL and model:IsA("Model") then
         local hl = Instance.new("Highlight")
         hl.Name = "MerchantHighlight"
         hl.FillColor = Color3.fromRGB(255, 215, 0)
@@ -2978,13 +3068,8 @@ local function UpdateMerchantESP()
         hl.FillTransparency = 0.35
         hl.OutlineTransparency = 0
         hl.Adornee = model
-        hl.Parent = model
+        hl.Parent = targetGuiParent
         table.insert(MerchantESPObjects, hl)
-    end
-
-    if existingBB and existingBB:FindFirstChild("Frame") then
-        existingBB:Destroy()
-        existingBB = nil
     end
 
     if not existingBB then
@@ -3019,9 +3104,11 @@ local function UpdateMerchantESP()
         subLbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
         subLbl.Text = "กำลังคำนวณระยะห่าง..."
 
-        bb.Parent = hrp
+        bb.Parent = targetGuiParent
         table.insert(MerchantESPObjects, bb)
         existingBB = bb
+    else
+        existingBB.Adornee = hrp
     end
 
     if existingBB then
@@ -3138,24 +3225,22 @@ local function GetMerchantStatusDisplay()
     end
 
     local isCycleOpen, cycleSec = GetMerchantCycleTime()
-    local isActuallyOpen = MerchantData.IsOpen or (model ~= nil) or (tf and tf.Visible) or isCycleOpen
+    local isActuallyOpen = (model ~= nil) or (tf and tf.Visible) or (MerchantData.IsOpen and MerchantData.RemainingTime > 0)
 
-    local title = isActuallyOpen and "🛒 พ่อค้าพเนจร: เปิดร้านอยู่ (OPEN)" or "⏳ พ่อค้าพเนจร: ปิดร้านแล้ว (CLOSED)"
+    local title = isActuallyOpen and "🛒 พ่อค้าพเนจร: เปิดร้านอยู่ (OPEN)" or "⏳ พ่อค้าพเนจร: ปิดร้านอยู่ (CLOSED)"
     local timeDesc = ""
 
     if isActuallyOpen then
-        local rem = (MerchantData.RemainingTime > 0) and MerchantData.RemainingTime or cycleSec
+        local rem = (MerchantData.RemainingTime > 0) and MerchantData.RemainingTime or (tf and 600 or cycleSec)
         local m = math.floor(rem / 60)
         local s = math.floor(rem % 60)
         timeDesc = string.format("• ⏱️ เวลาที่เหลือ: %d นาที %02d วินาที", m, s)
     else
         if MerchantData.NextSpawnTime > os.clock() then
             local diff = math.floor(MerchantData.NextSpawnTime - os.clock())
-            timeDesc = string.format("• ⏱️ จะมาถึงในอีกประมาณ: %d นาที %02d วินาที (รอบเซิร์ฟเวอร์)", math.floor(diff / 60), math.floor(diff % 60))
+            timeDesc = string.format("• ⏱️ จะมาถึงในอีกประมาณ: %d นาที %02d วินาที", math.floor(diff / 60), math.floor(diff % 60))
         else
-            local m = math.floor(cycleSec / 60)
-            local s = math.floor(cycleSec % 60)
-            timeDesc = string.format("• ⏱️ จะมาถึงในอีกประมาณ: %d นาที %02d วินาที (คำนวณจากเวลาเซิร์ฟเวอร์)", m, s)
+            timeDesc = "• ⏱️ สถานะ: ปิดร้านพักผ่อน (จะแจ้งเตือนและขึ้น ESP ทันทีที่มาถึง)"
         end
     end
 
@@ -3164,7 +3249,7 @@ local function GetMerchantStatusDisplay()
         local p = hrp.Position
         locDesc = string.format("• 📍 ตำแหน่ง: (%.0f, %.0f, %.0f)\n• 📏 ระยะห่าง: อีก %d เมตร", p.X, p.Y, p.Z, math.floor(MerchantData.Distance * 0.28))
     else
-        locDesc = "• 📍 ตำแหน่ง: กำลังเดินทาง (จะสแกนพิกัดทันทีเมื่อมาถึง)\n• 📏 ระยะห่าง: --"
+        locDesc = "• 📍 ตำแหน่ง: ยังไม่ปรากฏตัวในแมพ\n• ℹ️ เมื่อเปิดร้าน ESP จะแสดงป้ายลอยในแมพและวาร์ปได้ทันที"
     end
 
     return title, timeDesc .. "\n" .. locDesc
@@ -3309,8 +3394,15 @@ MerchantESPToggle:OnChanged(function()
     State.MerchantESP = Options.MerchantESPOn.Value
     if not State.MerchantESP then
         ClearMerchantESP()
+        Notify("พ่อค้าพเนจร", "ปิดการแสดงผล ESP พ่อค้าพเนจรแล้ว", "", 2.5)
     else
         UpdateMerchantESP()
+        local model, hrp = FindMerchantNPC()
+        if model and hrp then
+            Notify("พ่อค้าพเนจร", "พบพ่อค้าพเนจรในแมพ! แสดงตำแหน่ง ESP เรียบร้อย", "", 3)
+        else
+            Notify("พ่อค้าพเนจร", "เปิดระบบ ESP พ่อค้าแล้ว (ขณะนี้พ่อค้าปิดร้านอยู่ ระบบจะแสดง ESP ทันทีที่มาถึง)", "", 4)
+        end
     end
 end)
 
