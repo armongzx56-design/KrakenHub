@@ -2907,10 +2907,80 @@ local MerchantData = {
     RootPart = nil,
     Distance = 0,
     NextSpawnTime = 0,
+    ServerAnchor = 493,
 }
 local MerchantESPObjects = {}
 local FindMerchantNPC = nil
 local UpdateMerchantESPSubInfo = nil
+
+local MERCHANT_ANCHOR_FILE = "KrakenHub/merchant_anchor.json"
+
+local function SaveMerchantAnchor(serverNextSpawn, anchorMod)
+    pcall(function()
+        local data = {
+            jobId = game.JobId,
+            nextSpawn = serverNextSpawn,
+            anchorMod = anchorMod or 493,
+            updatedAt = workspace:GetServerTimeNow()
+        }
+        _G._KrakenMerchantAnchor = data
+        if writefile then
+            local HttpService = game:GetService("HttpService")
+            writefile(MERCHANT_ANCHOR_FILE, HttpService:JSONEncode(data))
+        end
+    end)
+end
+
+local function LoadMerchantAnchor()
+    local anchor = _G._KrakenMerchantAnchor
+    if not anchor and isfile and isfile(MERCHANT_ANCHOR_FILE) and readfile then
+        pcall(function()
+            local HttpService = game:GetService("HttpService")
+            local raw = readfile(MERCHANT_ANCHOR_FILE)
+            local parsed = HttpService:JSONDecode(raw)
+            if parsed and parsed.jobId == game.JobId then
+                anchor = parsed
+                _G._KrakenMerchantAnchor = parsed
+            end
+        end)
+    end
+    return anchor
+end
+
+local function GetEstimatedNextMerchantSpawnSec()
+    local sNow = workspace:GetServerTimeNow()
+    local anchor = LoadMerchantAnchor()
+    if anchor and anchor.nextSpawn then
+        local diff = anchor.nextSpawn - sNow
+        while diff < 0 do
+            diff = diff + 1800
+        end
+        return math.max(1, math.floor(diff))
+    end
+
+    local anchorMod = (anchor and anchor.anchorMod) or 493
+    local cyclePos = (sNow - anchorMod) % 1800
+    local diff = (1800 - cyclePos) % 1800
+    if diff <= 0 then
+        diff = 1800
+    end
+    return math.max(1, math.floor(diff))
+end
+
+local function SyncMerchantServerCycle(remainingSec)
+    local sNow = workspace:GetServerTimeNow()
+    if remainingSec and remainingSec > 0 then
+        local despawnServer = sNow + remainingSec
+        local nextSpawnServer = despawnServer + 1200
+        local anchorMod = math.floor((despawnServer - 600) % 1800)
+        MerchantData.DespawnTimestamp = os.clock() + remainingSec
+        MerchantData.NextSpawnTime = os.clock() + remainingSec + 1200
+        SaveMerchantAnchor(nextSpawnServer, anchorMod)
+    else
+        local estSec = GetEstimatedNextMerchantSpawnSec()
+        MerchantData.NextSpawnTime = os.clock() + estSec
+    end
+end
 
 local function GetRealtimeMerchantTimeString()
     -- 1. ดึงตรงจาก TimerLabel ของเกม (หากเปิดร้านอยู่และนับถอยหลัง)
@@ -3234,8 +3304,8 @@ pcall(function()
                 local sec = tonumber(remainingSec) or 600
                 MerchantData.IsOpen = true
                 MerchantData.RemainingTime = sec
-                MerchantData.DespawnTimestamp = os.clock() + sec
                 MerchantData.ShopName = shopName or "พ่อค้าพเนจร"
+                SyncMerchantServerCycle(sec)
                 if State.AutoNotifyMerchant then
                     Notify("🛒 พ่อค้าพเนจรเปิดร้าน!", string.format("เหลือเวลาอีก %d นาที %02d วินาที", math.floor(sec / 60), math.floor(sec % 60)), "เปิดเมนูเพื่อวาร์ปหรือเปิดร้าน", 5)
                 end
@@ -3252,18 +3322,19 @@ pcall(function()
                     MerchantData.IsOpen = true
                     MerchantData.LocationName = locName or "จุดลับ"
                     MerchantData.RemainingTime = dur
-                    MerchantData.DespawnTimestamp = os.clock() + dur
+                    SyncMerchantServerCycle(dur)
                     if State.AutoNotifyMerchant then
                         Notify("🛒 พ่อค้าพเนจรมาถึงแล้ว!", "อยู่ที่: " .. tostring(locName), "เปิดเมนูเพื่อตรวจสอบตำแหน่ง", 5)
                     end
                     UpdateMerchantESP()
                     UpdateMerchantESPSubInfo()
                 elseif state == "close" then
+                    local dur = tonumber(duration) or 1200
                     MerchantData.IsOpen = false
                     MerchantData.RemainingTime = 0
                     MerchantData.DespawnTimestamp = 0
-                    local dur = tonumber(duration) or 1200
                     MerchantData.NextSpawnTime = os.clock() + dur
+                    SaveMerchantAnchor(workspace:GetServerTimeNow() + dur)
                     ClearMerchantESP()
                     if State.AutoNotifyMerchant then
                         Notify("🛒 พ่อค้าพเนจรปิดร้านแล้ว", string.format("จะกลับมาใหม่ในอีกประมาณ %d นาที", math.floor(dur / 60)), "", 4)
@@ -3325,7 +3396,7 @@ local function GetMerchantStatusDisplay()
             remainingSec = tonumber(m) * 60 + tonumber(s)
             if remainingSec > 0 then
                 isActuallyOpen = true
-                MerchantData.DespawnTimestamp = os.clock() + remainingSec
+                SyncMerchantServerCycle(remainingSec)
             end
         end
     end
@@ -3339,6 +3410,7 @@ local function GetMerchantStatusDisplay()
         isActuallyOpen = true
         if not MerchantData.DespawnTimestamp or MerchantData.DespawnTimestamp <= os.clock() then
             MerchantData.DespawnTimestamp = os.clock() + 600
+            SyncMerchantServerCycle(600)
         end
         remainingSec = math.max(0, math.floor(MerchantData.DespawnTimestamp - os.clock()))
     end
@@ -3346,20 +3418,27 @@ local function GetMerchantStatusDisplay()
     MerchantData.IsOpen = isActuallyOpen
     MerchantData.RemainingTime = remainingSec
 
-    local title = isActuallyOpen and "🛒 พ่อค้าพเนจร: เปิดร้านอยู่ (OPEN)" or "⏳ พ่อค้าพเนจร: ปิดร้านอยู่ (CLOSED)"
+    local title = ""
     local timeDesc = ""
 
     if isActuallyOpen then
         local m = math.floor(remainingSec / 60)
         local s = math.floor(remainingSec % 60)
-        timeDesc = string.format("• ⏱️ เวลาที่เหลือ: %d นาที %02d วินาที", m, s)
+        title = string.format("🛒 พ่อค้าพเนจร: เปิดร้านอยู่ (%d:%02d)", m, s)
+        timeDesc = string.format("• ⏱️ เวลาที่เหลือ: %d นาที %02d วินาที (กำลังเปิดร้าน)", m, s)
     else
+        local diff = 0
         if MerchantData.NextSpawnTime and MerchantData.NextSpawnTime > os.clock() then
-            local diff = math.max(0, math.floor(MerchantData.NextSpawnTime - os.clock()))
-            timeDesc = string.format("• ⏱️ จะมาถึงในอีกประมาณ: %d นาที %02d วินาที", math.floor(diff / 60), math.floor(diff % 60))
+            diff = math.max(1, math.floor(MerchantData.NextSpawnTime - os.clock()))
         else
-            timeDesc = "• ⏱️ สถานะ: ปิดร้านพักผ่อน (จะแจ้งเตือนและขึ้น ESP ทันทีที่มาถึง)"
+            diff = GetEstimatedNextMerchantSpawnSec()
+            MerchantData.NextSpawnTime = os.clock() + diff
         end
+
+        local m = math.floor(diff / 60)
+        local s = math.floor(diff % 60)
+        title = string.format("⏳ พ่อค้าพเนจร: ปิดร้านอยู่ (จะมาในอีก %d:%02d)", m, s)
+        timeDesc = string.format("• ⏱️ จะมาถึงในอีกประมาณ: %d นาที %02d วินาที (นับถอยหลัง Real-time)", m, s)
     end
 
     local myHRP = GetHRP()
@@ -3370,11 +3449,11 @@ local function GetMerchantStatusDisplay()
     end
 
     local locDesc = ""
-    if hrp then
+    if isActuallyOpen and hrp then
         local p = hrp.Position
         locDesc = string.format("• 📍 ตำแหน่ง: (%.0f, %.0f, %.0f)\n• 📏 ระยะห่าง: อีก %d เมตร", p.X, p.Y, p.Z, math.floor(MerchantData.Distance * 0.28))
     else
-        locDesc = "• 📍 ตำแหน่ง: ยังไม่ปรากฏตัวในแมพ\n• ℹ️ เมื่อเปิดร้าน ESP จะแสดงป้ายลอยในแมพและวาร์ปได้ทันที"
+        locDesc = "• 📍 ตำแหน่ง: กำลังเดินทาง (จะแสดงจุดเกิดและป้ายลอย ESP ทันทีที่เปิดร้าน)\n• ℹ️ เมื่อเปิดร้าน ระบบจะแจ้งเตือนและสามารถกดวาร์ปได้ทันที"
     end
 
     return title, timeDesc .. "\n" .. locDesc
@@ -3541,6 +3620,22 @@ Tabs.Merchant:AddButton({
     Description = "วาร์ปตัวละครไปยืนอยู่ตรงหน้าพ่อค้าทันที",
     Callback = function()
         TeleportToMerchant()
+    end
+})
+
+Tabs.Merchant:AddButton({
+    Title = "🔄 ซิงค์เวลาเซิร์ฟเวอร์ (Force Sync Server Timer)",
+    Description = "ดึงข้อมูลและซิงค์รอบเวลาพ่อค้าพเนจรจากเซิร์ฟเวอร์ใหม่ทันที",
+    Callback = function()
+        pcall(function()
+            SyncMerchantServerCycle()
+            local title, desc = GetMerchantStatusDisplay()
+            if MerchantStatusParagraph and type(MerchantStatusParagraph.SetTitle) == "function" then
+                MerchantStatusParagraph:SetTitle(title)
+                MerchantStatusParagraph:SetDesc(desc)
+            end
+        end)
+        Notify("พ่อค้าพเนจร", "ซิงค์เวลาเซิร์ฟเวอร์สำเร็จ!", "", 2.5)
     end
 })
 
