@@ -2230,59 +2230,50 @@ local function UpdateESP()
                         if entry.Highlight then pcall(function() entry.Highlight:Destroy() end) end
                     end
 
+                    -- Soft subtle Highlight (high transparency, thin outline)
                     local hl = Instance.new("Highlight")
                     hl.Name = "KrakenESP_HL_" .. p.Name
                     hl.Adornee = char
-                    hl.FillTransparency = 0.55
+                    hl.FillTransparency = 0.85
                     hl.OutlineTransparency = 0.2
                     hl.Parent = targetGuiParent
 
+                    -- Clean, frameless BillboardGui (compact & minimal)
                     local bb = Instance.new("BillboardGui")
                     bb.Name = "KrakenESP_BB_" .. p.Name
                     bb.Adornee = hrp
-                    bb.Size = UDim2.new(0, 160, 0, 58)
-                    bb.StudsOffset = Vector3.new(0, 3.4, 0)
+                    bb.Size = UDim2.new(0, 120, 0, 24)
+                    bb.StudsOffset = Vector3.new(0, 2.1, 0)
                     bb.AlwaysOnTop = true
                     bb.Parent = targetGuiParent
 
-                    local frame = Instance.new("Frame", bb)
-                    frame.Size = UDim2.new(1, 0, 1, 0)
-                    frame.BackgroundTransparency = 0.35
-                    frame.BackgroundColor3 = Color3.fromRGB(12, 14, 18)
-                    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 6)
-                    local stroke = Instance.new("UIStroke", frame)
-                    stroke.Thickness = 1.2
-                    stroke.Transparency = 0.3
-
-                    local nameLbl = Instance.new("TextLabel", frame)
-                    nameLbl.Size = UDim2.new(1, -10, 0, 16)
-                    nameLbl.Position = UDim2.new(0, 5, 0, 2)
+                    -- Line 1: School Tag + Player Name
+                    local nameLbl = Instance.new("TextLabel", bb)
+                    nameLbl.Size = UDim2.new(1, 0, 0, 11)
+                    nameLbl.Position = UDim2.new(0, 0, 0, 0)
                     nameLbl.BackgroundTransparency = 1
                     nameLbl.Font = Enum.Font.GothamBold
-                    nameLbl.TextSize = 11
-                    nameLbl.TextStrokeTransparency = 0.5
+                    nameLbl.TextSize = 10
+                    nameLbl.TextStrokeTransparency = 0.2
+                    nameLbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 
-                    local infoLbl = Instance.new("TextLabel", frame)
-                    infoLbl.Size = UDim2.new(1, -10, 0, 13)
-                    infoLbl.Position = UDim2.new(0, 5, 0, 18)
+                    -- Line 2: Weapon • Distance • Health in one clean line
+                    local infoLbl = Instance.new("TextLabel", bb)
+                    infoLbl.Size = UDim2.new(1, 0, 0, 10)
+                    infoLbl.Position = UDim2.new(0, 0, 0, 11)
                     infoLbl.BackgroundTransparency = 1
-                    infoLbl.TextColor3 = Color3.fromRGB(235, 235, 235)
+                    infoLbl.TextColor3 = Color3.fromRGB(230, 230, 230)
                     infoLbl.Font = Enum.Font.GothamMedium
-                    infoLbl.TextSize = 10
-                    infoLbl.TextStrokeTransparency = 0.5
+                    infoLbl.TextSize = 9
+                    infoLbl.TextStrokeTransparency = 0.2
+                    infoLbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 
-                    local wepLbl = Instance.new("TextLabel", frame)
-                    wepLbl.Size = UDim2.new(1, -10, 0, 13)
-                    wepLbl.Position = UDim2.new(0, 5, 0, 31)
-                    wepLbl.BackgroundTransparency = 1
-                    wepLbl.Font = Enum.Font.GothamBold
-                    wepLbl.TextSize = 10
-                    wepLbl.TextStrokeTransparency = 0.5
-
-                    local hpBg = Instance.new("Frame", frame)
-                    hpBg.Size = UDim2.new(1, -12, 0, 4)
-                    hpBg.Position = UDim2.new(0, 6, 0, 48)
-                    hpBg.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+                    -- Line 3: Micro Health Line (48px wide, 2px tall)
+                    local hpBg = Instance.new("Frame", bb)
+                    hpBg.Size = UDim2.new(0, 48, 0, 2)
+                    hpBg.Position = UDim2.new(0.5, -24, 1, -2)
+                    hpBg.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+                    hpBg.BackgroundTransparency = 0.3
                     hpBg.BorderSizePixel = 0
                     Instance.new("UICorner", hpBg).CornerRadius = UDim.new(1, 0)
 
@@ -2293,10 +2284,8 @@ local function UpdateESP()
                     entry = {
                         Highlight = hl,
                         Billboard = bb,
-                        Stroke = stroke,
                         NameLabel = nameLbl,
                         InfoLabel = infoLbl,
-                        WeaponLabel = wepLbl,
                         HealthBg = hpBg,
                         HealthFill = hpFill,
                         Player = p,
@@ -2306,7 +2295,7 @@ local function UpdateESP()
                 end
 
                 local schoolCol, schoolShort, schoolIcon = GetPlayerSchoolInfo(p)
-                local wepText, wepCol = GetEquippedWeaponInfo(char)
+                local wepText = GetEquippedWeaponInfo(char)
                 local hp, maxHp, hpRatio, hpCol = GetHealthVisuals(hum)
 
                 entry.Highlight.Enabled = true
@@ -2314,27 +2303,23 @@ local function UpdateESP()
                 entry.Billboard.MaxDistance = State.ESPMaxDistance or 500
 
                 entry.Highlight.FillColor = schoolCol
-                entry.Highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-                entry.Stroke.Color = schoolCol
+                entry.Highlight.OutlineColor = schoolCol
 
                 entry.NameLabel.TextColor3 = schoolCol
                 entry.NameLabel.Text = string.format("[%s %s] %s", schoolIcon, schoolShort, p.DisplayName)
 
+                -- Compact info line: [Weapon] • Distance • HP
+                local parts = {}
+                if State.ESPShowWeapon and wepText ~= "" then
+                    table.insert(parts, wepText)
+                end
                 if State.ESPShowDistance then
-                    entry.InfoLabel.Text = string.format("%d HP • %d studs (%.0fm)", math.floor(hp), math.floor(dist), dist * 0.28)
-                    entry.InfoLabel.Visible = true
-                else
-                    entry.InfoLabel.Text = string.format("%d / %d HP", math.floor(hp), math.floor(maxHp))
-                    entry.InfoLabel.Visible = true
+                    table.insert(parts, string.format("%.0fm", dist * 0.28))
                 end
+                table.insert(parts, string.format("%dHP", math.floor(hp)))
 
-                if State.ESPShowWeapon then
-                    entry.WeaponLabel.Text = string.format("[%s]", wepText)
-                    entry.WeaponLabel.TextColor3 = wepCol
-                    entry.WeaponLabel.Visible = true
-                else
-                    entry.WeaponLabel.Visible = false
-                end
+                entry.InfoLabel.Text = table.concat(parts, " • ")
+                entry.InfoLabel.Visible = true
 
                 if State.ESPShowHealthBar then
                     entry.HealthBg.Visible = true
