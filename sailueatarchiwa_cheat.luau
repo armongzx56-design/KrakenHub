@@ -1982,8 +1982,7 @@ task.spawn(function()
                     local color = (prevCat == "เหล็ก" and Color3.fromRGB(255, 145, 0))
                                or (prevCat == "กำแพง" and Color3.fromRGB(0, 240, 160))
                                or Color3.fromRGB(190, 110, 255)
-                    local icon = (prevCat == "กำแพง" and "🧱") or (prevCat == "เหล็ก" and "🔩") or "🪨"
-                    SetTargetESP(prevSpot, string.format("จุดเริ่มฟาร์ม: %s %s", icon, (prevCat or "ก่อสร้าง")), color, "[พร้อมเริ่มฟาร์ม]")
+                    SetTargetESP(prevSpot, "จุดเริ่มฟาร์ม: " .. (prevCat or "ก่อสร้าง"), color, "[พร้อมเริ่มฟาร์ม]")
                 else
                     ClearTargetESP()
                 end
