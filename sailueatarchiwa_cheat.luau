@@ -124,6 +124,7 @@ local Hub = {
     Connections = {},
     ESPObjects = {},
     AllJobESPObjects = {},
+    PlayerESPRegistry = {},
     Unloaded = false,
     State = {
         Running = true,
@@ -145,6 +146,10 @@ local Hub = {
         FlySpeed = 50,
         InfJump = false,
         ESP = false,
+        ESPMaxDistance = 500,
+        ESPShowWeapon = true,
+        ESPShowDistance = true,
+        ESPShowHealthBar = true,
         FullBright = false,
         -- ปืน & Combat
         NoSpread = false,
@@ -2090,52 +2095,278 @@ local function StopFly()
     if flyBG then flyBG:Destroy(); flyBG = nil end
 end
 
+--------------------------------------------------------------
+-- 👁️ ระบบมองทะลุผู้เล่น & แยกสีสถาบัน (FLICKER-FREE PLAYER ESP)
+-- 1. ปทุมคงคา: ฟ้า (Color3.fromRGB(0, 195, 255))
+-- 2. กรุงเทพช่างกล: สีเหลืองอ่อน (Color3.fromRGB(255, 240, 130))
+-- 3. พระ: สีส้ม (Color3.fromRGB(255, 135, 30))
+-- 4. เด็กบ้าน: สีขาว (Color3.fromRGB(245, 245, 245))
+-- 5. ตำรวจ: สีแดง (Color3.fromRGB(255, 45, 45))
+--------------------------------------------------------------
+local SchoolConfigs = {
+    { Key = "ปทุมคงคา", Short = "ปทุมคงคา", Color = Color3.fromRGB(0, 195, 255), Icon = "⚡" },
+    { Key = "กรุงเทพช่างกล", Short = "ช่างกล", Color = Color3.fromRGB(255, 240, 130), Icon = "🔧" },
+    { Key = "พระ", Short = "พระ", Color = Color3.fromRGB(255, 135, 30), Icon = "🙏" },
+    { Key = "เด็กบ้าน", Short = "เด็กบ้าน", Color = Color3.fromRGB(245, 245, 245), Icon = "🏠" },
+    { Key = "ตำรวจ", Short = "ตำรวจ", Color = Color3.fromRGB(255, 45, 45), Icon = "👮" },
+    { Key = "วัดสุ", Short = "วัดสุทธิ", Color = Color3.fromRGB(80, 230, 180), Icon = "📚" },
+    { Key = "สุธิ", Short = "วัดสุทธิ", Color = Color3.fromRGB(80, 230, 180), Icon = "📚" },
+    { Key = "สุทธิ", Short = "วัดสุทธิ", Color = Color3.fromRGB(80, 230, 180), Icon = "📚" },
+}
+
+local function GetPlayerSchoolInfo(plr)
+    local rawTeamName = ""
+    if plr.Team then
+        rawTeamName = tostring(plr.Team.Name)
+    end
+    if rawTeamName == "" and plr.Character then
+        for _, d in ipairs(plr.Character:GetDescendants()) do
+            if d:IsA("TextLabel") and d.Visible and d.Text and d.Text ~= "" then
+                for _, sc in ipairs(SchoolConfigs) do
+                    if string.find(d.Text, sc.Key, 1, true) then
+                        rawTeamName = sc.Key
+                        break
+                    end
+                end
+                if rawTeamName ~= "" then break end
+            end
+        end
+    end
+    for _, sc in ipairs(SchoolConfigs) do
+        if string.find(rawTeamName, sc.Key, 1, true) then
+            return sc.Color, sc.Short, sc.Icon
+        end
+    end
+    return Color3.fromRGB(46, 204, 113), rawTeamName ~= "" and rawTeamName or "ประชาชน", "👤"
+end
+
+local function GetEquippedWeaponInfo(char)
+    if not char then return "👊 มือเปล่า", Color3.fromRGB(180, 180, 180) end
+    local tool = char:FindFirstChildOfClass("Tool")
+    if not tool then
+        return "👊 มือเปล่า", Color3.fromRGB(180, 180, 180)
+    end
+    local name = tool.Name or ""
+    local lower = string.lower(name)
+    if lower == "fists" or lower == "fist" or name == "หมัด" or name == "มือเปล่า" then
+        return "👊 มือเปล่า", Color3.fromRGB(180, 180, 180)
+    end
+    if lower:find("glock") or lower:find("beretta") or lower:find("m9") or lower:find("deagle") 
+        or lower:find("remington") or lower:find("shotgun") or lower:find("pistol") or lower:find("rifle") 
+        or lower:find("smg") or lower:find("gun") or name:find("ปืน") or lower:find("uzi") or lower:find("colt")
+        or lower:find("ak") or lower:find("m4") or lower:find("revolver") or lower:find("ลูกซอง") then
+        return "🔫 " .. name, Color3.fromRGB(255, 85, 85)
+    end
+    if name:find("มีด") or name:find("ดาบ") or name:find("ขวาน") or lower:find("knife") or lower:find("blade") 
+        or lower:find("katana") or lower:find("axe") or lower:find("machete") or lower:find("sword") then
+        return "🔪 " .. name, Color3.fromRGB(255, 145, 50)
+    end
+    if name:find("กระบอง") or name:find("ไม้") or lower:find("bat") or lower:find("baton") or lower:find("club") then
+        return "🏏 " .. name, Color3.fromRGB(255, 215, 0)
+    end
+    if name:find("โล่") or lower:find("shield") then
+        return "🛡️ " .. name, Color3.fromRGB(100, 200, 255)
+    end
+    return "📦 " .. name, Color3.fromRGB(220, 220, 220)
+end
+
+local function GetHealthVisuals(hum)
+    local hp = math.max(0, hum and hum.Health or 0)
+    local maxHp = math.max(1, hum and hum.MaxHealth or 100)
+    local ratio = math.clamp(hp / maxHp, 0, 1)
+    local col
+    if ratio > 0.70 then
+        col = Color3.fromRGB(46, 204, 113)
+    elseif ratio > 0.35 then
+        col = Color3.fromRGB(243, 156, 18)
+    else
+        col = Color3.fromRGB(231, 76, 60)
+    end
+    return hp, maxHp, ratio, col
+end
+
+local function ClearPlayerESP()
+    for p, entry in pairs(Hub.PlayerESPRegistry) do
+        if entry.Billboard then pcall(function() entry.Billboard:Destroy() end) end
+        if entry.Highlight then pcall(function() entry.Highlight:Destroy() end) end
+    end
+    table.clear(Hub.PlayerESPRegistry)
+end
+
 local function UpdateESP()
-    for _, obj in pairs(Hub.ESPObjects) do pcall(function() obj:Destroy() end) end
-    table.clear(Hub.ESPObjects)
-    if not State.ESP or not State.Running then return end
+    if not State.ESP or not State.Running then
+        if next(Hub.PlayerESPRegistry) then ClearPlayerESP() end
+        return
+    end
+
+    local myChar = LocalPlayer.Character
+    local myHrp = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    if not myHrp then return end
+
+    local currentPlayers = {}
 
     for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer and p.Character then
+        if p ~= LocalPlayer then
+            currentPlayers[p] = true
             local char = p.Character
-            local hrp = char:FindFirstChild("HumanoidRootPart")
-            local hum = char:FindFirstChildOfClass("Humanoid")
-            if hrp and hum then
-                local hl = Instance.new("Highlight")
-                hl.Name = "KrakenESP_HL"
-                hl.FillColor = Color3.fromRGB(0, 180, 255)
-                hl.OutlineColor = Color3.fromRGB(255, 255, 255)
-                hl.FillTransparency = 0.5
-                hl.Adornee = char
-                hl.Parent = char
-                table.insert(Hub.ESPObjects, hl)
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
 
-                local bb = Instance.new("BillboardGui")
-                bb.Name = "KrakenESP_BB"
-                bb.Adornee = hrp
-                bb.Size = UDim2.new(0, 120, 0, 40)
-                bb.StudsOffset = Vector3.new(0, 3, 0)
-                bb.AlwaysOnTop = true
+            local isValid = char and hrp and hum and hum.Health > 0
+            local dist = isValid and (hrp.Position - myHrp.Position).Magnitude or 999999
+            local inRange = isValid and dist <= (State.ESPMaxDistance or 500)
 
-                local lbl = Instance.new("TextLabel", bb)
-                lbl.Size = UDim2.new(1, 0, 1, 0)
-                lbl.BackgroundTransparency = 1
-                lbl.TextColor3 = Color3.fromRGB(255, 255, 255)
-                lbl.TextStrokeTransparency = 0
-                lbl.Font = Enum.Font.GothamBold
-                lbl.TextSize = 11
-                lbl.Text = p.Name .. " [" .. math.floor(hum.Health) .. " HP]"
-                bb.Parent = hrp
-                table.insert(Hub.ESPObjects, bb)
+            local entry = Hub.PlayerESPRegistry[p]
+
+            if not inRange then
+                if entry then
+                    if entry.Billboard then entry.Billboard.Enabled = false end
+                    if entry.Highlight then entry.Highlight.Enabled = false end
+                end
+            else
+                if not entry or entry.Character ~= char or not entry.Billboard or not entry.Billboard.Parent or not entry.Highlight or not entry.Highlight.Parent then
+                    if entry then
+                        if entry.Billboard then pcall(function() entry.Billboard:Destroy() end) end
+                        if entry.Highlight then pcall(function() entry.Highlight:Destroy() end) end
+                    end
+
+                    local hl = Instance.new("Highlight")
+                    hl.Name = "KrakenESP_HL_" .. p.Name
+                    hl.Adornee = char
+                    hl.FillTransparency = 0.55
+                    hl.OutlineTransparency = 0.2
+                    hl.Parent = targetGuiParent
+
+                    local bb = Instance.new("BillboardGui")
+                    bb.Name = "KrakenESP_BB_" .. p.Name
+                    bb.Adornee = hrp
+                    bb.Size = UDim2.new(0, 160, 0, 58)
+                    bb.StudsOffset = Vector3.new(0, 3.4, 0)
+                    bb.AlwaysOnTop = true
+                    bb.Parent = targetGuiParent
+
+                    local frame = Instance.new("Frame", bb)
+                    frame.Size = UDim2.new(1, 0, 1, 0)
+                    frame.BackgroundTransparency = 0.35
+                    frame.BackgroundColor3 = Color3.fromRGB(12, 14, 18)
+                    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 6)
+                    local stroke = Instance.new("UIStroke", frame)
+                    stroke.Thickness = 1.2
+                    stroke.Transparency = 0.3
+
+                    local nameLbl = Instance.new("TextLabel", frame)
+                    nameLbl.Size = UDim2.new(1, -10, 0, 16)
+                    nameLbl.Position = UDim2.new(0, 5, 0, 2)
+                    nameLbl.BackgroundTransparency = 1
+                    nameLbl.Font = Enum.Font.GothamBold
+                    nameLbl.TextSize = 11
+                    nameLbl.TextStrokeTransparency = 0.5
+
+                    local infoLbl = Instance.new("TextLabel", frame)
+                    infoLbl.Size = UDim2.new(1, -10, 0, 13)
+                    infoLbl.Position = UDim2.new(0, 5, 0, 18)
+                    infoLbl.BackgroundTransparency = 1
+                    infoLbl.TextColor3 = Color3.fromRGB(235, 235, 235)
+                    infoLbl.Font = Enum.Font.GothamMedium
+                    infoLbl.TextSize = 10
+                    infoLbl.TextStrokeTransparency = 0.5
+
+                    local wepLbl = Instance.new("TextLabel", frame)
+                    wepLbl.Size = UDim2.new(1, -10, 0, 13)
+                    wepLbl.Position = UDim2.new(0, 5, 0, 31)
+                    wepLbl.BackgroundTransparency = 1
+                    wepLbl.Font = Enum.Font.GothamBold
+                    wepLbl.TextSize = 10
+                    wepLbl.TextStrokeTransparency = 0.5
+
+                    local hpBg = Instance.new("Frame", frame)
+                    hpBg.Size = UDim2.new(1, -12, 0, 4)
+                    hpBg.Position = UDim2.new(0, 6, 0, 48)
+                    hpBg.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+                    hpBg.BorderSizePixel = 0
+                    Instance.new("UICorner", hpBg).CornerRadius = UDim.new(1, 0)
+
+                    local hpFill = Instance.new("Frame", hpBg)
+                    hpFill.BorderSizePixel = 0
+                    Instance.new("UICorner", hpFill).CornerRadius = UDim.new(1, 0)
+
+                    entry = {
+                        Highlight = hl,
+                        Billboard = bb,
+                        Stroke = stroke,
+                        NameLabel = nameLbl,
+                        InfoLabel = infoLbl,
+                        WeaponLabel = wepLbl,
+                        HealthBg = hpBg,
+                        HealthFill = hpFill,
+                        Player = p,
+                        Character = char,
+                    }
+                    Hub.PlayerESPRegistry[p] = entry
+                end
+
+                local schoolCol, schoolShort, schoolIcon = GetPlayerSchoolInfo(p)
+                local wepText, wepCol = GetEquippedWeaponInfo(char)
+                local hp, maxHp, hpRatio, hpCol = GetHealthVisuals(hum)
+
+                entry.Highlight.Enabled = true
+                entry.Billboard.Enabled = true
+                entry.Billboard.MaxDistance = State.ESPMaxDistance or 500
+
+                entry.Highlight.FillColor = schoolCol
+                entry.Highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+                entry.Stroke.Color = schoolCol
+
+                entry.NameLabel.TextColor3 = schoolCol
+                entry.NameLabel.Text = string.format("[%s %s] %s", schoolIcon, schoolShort, p.DisplayName)
+
+                if State.ESPShowDistance then
+                    entry.InfoLabel.Text = string.format("%d HP • %d studs (%.0fm)", math.floor(hp), math.floor(dist), dist * 0.28)
+                    entry.InfoLabel.Visible = true
+                else
+                    entry.InfoLabel.Text = string.format("%d / %d HP", math.floor(hp), math.floor(maxHp))
+                    entry.InfoLabel.Visible = true
+                end
+
+                if State.ESPShowWeapon then
+                    entry.WeaponLabel.Text = string.format("[%s]", wepText)
+                    entry.WeaponLabel.TextColor3 = wepCol
+                    entry.WeaponLabel.Visible = true
+                else
+                    entry.WeaponLabel.Visible = false
+                end
+
+                if State.ESPShowHealthBar then
+                    entry.HealthBg.Visible = true
+                    entry.HealthFill.Size = UDim2.new(hpRatio, 0, 1, 0)
+                    entry.HealthFill.BackgroundColor3 = hpCol
+                else
+                    entry.HealthBg.Visible = false
+                end
             end
+        end
+    end
+
+    for p, entry in pairs(Hub.PlayerESPRegistry) do
+        if not currentPlayers[p] or not p.Parent then
+            if entry.Billboard then pcall(function() entry.Billboard:Destroy() end) end
+            if entry.Highlight then pcall(function() entry.Highlight:Destroy() end) end
+            Hub.PlayerESPRegistry[p] = nil
         end
     end
 end
 
 task.spawn(function()
     while State.Running and _G._KrakenScriptId == MY_SCRIPT_ID do
-        task.wait(2.5)
-        if State.ESP then UpdateESP() end
+        if State.ESP then
+            pcall(UpdateESP)
+            task.wait(0.05)
+        else
+            if next(Hub.PlayerESPRegistry) then
+                ClearPlayerESP()
+            end
+            task.wait(0.3)
+        end
     end
 end)
 
@@ -3022,10 +3253,60 @@ InfJumpToggle:OnChanged(function()
     State.InfJump = Options.InfJumpOn.Value
 end)
 
-local ESPToggle = Tabs.Player:AddToggle("ESPOn", { Title = "👁️ มองทะลุผู้เล่นทุกคน (Player ESP)", Default = false })
+Tabs.Player:AddParagraph({
+    Title = "👁️ ระบบมองทะลุผู้เล่น & แยกสีสถาบัน (Player ESP)",
+    Content = "ปทุมคงคา (ฟ้า) | กรุงเทพช่างกล (เหลืองอ่อน) | พระ (ส้ม) | เด็กบ้าน (ขาว) | ตำรวจ (แดง)"
+})
+
+local ESPToggle = Tabs.Player:AddToggle("ESPOn", {
+    Title = "👁️ เปิด ESP ผู้เล่นแยกสีสถาบัน (School Player ESP)",
+    Description = "เรนเดอร์ Flicker-Free แสดงกรอบเรืองแสง, ข้อมูลสถาบัน, อาวุธ และหลอดเลือด",
+    Default = false
+})
 ESPToggle:OnChanged(function()
     State.ESP = Options.ESPOn.Value
-    UpdateESP()
+    if not State.ESP then
+        ClearPlayerESP()
+    end
+end)
+
+local ESPMaxDistSlider = Tabs.Player:AddSlider("ESPMaxDistVal", {
+    Title = "📏 ระยะแสดงผล ESP สูงสุด (Max Distance)",
+    Description = "จำกัดระยะตรวจจับผู้เล่นเพื่อลดแลคและไม่รกสายตา (Studs)",
+    Default = 500,
+    Min = 50,
+    Max = 1500,
+    Rounding = 0
+})
+ESPMaxDistSlider:OnChanged(function()
+    State.ESPMaxDistance = Options.ESPMaxDistVal.Value
+end)
+
+local ESPWeaponToggle = Tabs.Player:AddToggle("ESPShowWeapon", {
+    Title = "🔫 แสดงชื่ออาวุธที่ถือ (Equipped Weapon Display)",
+    Description = "ตรวจจับปืน, มีด, อาวุธระยะประชิด หรือมือเปล่าแบบ Realtime",
+    Default = true
+})
+ESPWeaponToggle:OnChanged(function()
+    State.ESPShowWeapon = Options.ESPShowWeapon.Value
+end)
+
+local ESPDistToggle = Tabs.Player:AddToggle("ESPShowDistance", {
+    Title = "📐 แสดงระยะห่าง (Distance Display)",
+    Description = "คำนวณระยะห่างระหว่างตัวละครเป็นเมตร (m) และ studs",
+    Default = true
+})
+ESPDistToggle:OnChanged(function()
+    State.ESPShowDistance = Options.ESPShowDistance.Value
+end)
+
+local ESPHealthToggle = Tabs.Player:AddToggle("ESPShowHealthBar", {
+    Title = "❤️ แสดงหลอดเลือดสี (Visual Health Bar)",
+    Description = "หลอดเลือดเปลี่ยนสีตามเลือด (เขียว >70% | ส้ม 35-70% | แดง <35%)",
+    Default = true
+})
+ESPHealthToggle:OnChanged(function()
+    State.ESPShowHealthBar = Options.ESPShowHealthBar.Value
 end)
 
 --------------------------------------------------------------
@@ -3197,6 +3478,7 @@ function Hub.Unload()
     end)
     for _, c in pairs(Connections) do pcall(function() c:Disconnect() end) end
     for _, obj in pairs(Hub.ESPObjects) do pcall(function() obj:Destroy() end) end
+    ClearPlayerESP()
     ClearMerchantESP()
     if State.FullBright then
         RestoreLighting()
