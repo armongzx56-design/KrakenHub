@@ -996,11 +996,30 @@ end
 --------------------------------------------------------------
 local function GetLogoAsset()
     if typeof(isfile) == "function" and typeof(writefile) == "function" and typeof(getcustomasset) == "function" then
-        if not isfile("k_community_logo.png") then
+        local needDownload = not isfile("k_community_logo.png")
+        if isfile("k_community_logo.png") and typeof(readfile) == "function" then
             pcall(function()
-                writefile("k_community_logo.png", game:HttpGet("https://raw.githubusercontent.com/armongzx56-design/KrakenHub/main/k_community_logo.png"))
+                local content = readfile("k_community_logo.png")
+                if not content or #content < 1000 or content:sub(1, 4) ~= "\137PNG" then
+                    needDownload = true
+                end
             end)
         end
+
+        if needDownload then
+            local logoUrls = {
+                "https://files.catbox.moe/t3q02s.png",
+                "https://raw.githubusercontent.com/armongzx56-design/KrakenHub/main/k_community_logo.png"
+            }
+            for _, url in ipairs(logoUrls) do
+                local s, data = pcall(function() return game:HttpGet(url) end)
+                if s and type(data) == "string" and #data > 1000 and data:sub(1, 4) == "\137PNG" then
+                    pcall(writefile, "k_community_logo.png", data)
+                    break
+                end
+            end
+        end
+
         if isfile("k_community_logo.png") then
             local s, asset = pcall(getcustomasset, "k_community_logo.png")
             if s and asset then return asset end
@@ -1177,6 +1196,120 @@ Hub.Fluent = Fluent
 Hub.Options = Options
 Hub.Tabs = Tabs
 Hub.Window = Window
+
+--------------------------------------------------------------
+-- 🎯 ปรับแต่ง SLIDER ให้คลิกที่ตัวเลขเพื่อพิมพ์ค่าได้โดยตรง (Direct Input Box)
+--------------------------------------------------------------
+local function HookSliderForDirectInput(slider)
+    if not slider or type(slider.SetValue) ~= "function" then return slider end
+
+    task.spawn(function()
+        task.wait(0.08)
+        local displayLabel = nil
+        local upvals = debug.getupvalues(slider.SetValue)
+        for _, u in pairs(upvals) do
+            if typeof(u) == "Instance" and u:IsA("TextLabel") then
+                displayLabel = u
+                break
+            end
+        end
+
+        if not displayLabel or not displayLabel.Parent then return end
+        local parentFrame = displayLabel.Parent
+
+        -- ซ่อน TextLabel เดิมของ Fluent
+        displayLabel.Visible = false
+
+        local oldBox = parentFrame:FindFirstChild("DirectInputBox")
+        if oldBox then oldBox:Destroy() end
+
+        -- สร้างช่องกรอกตัวเลขแบบ Interactive Modern Fluent
+        local box = Instance.new("TextBox")
+        box.Name = "DirectInputBox"
+        box.Size = UDim2.new(0, 48, 0, 18)
+        box.Position = displayLabel.Position
+        box.AnchorPoint = displayLabel.AnchorPoint
+        box.Text = tostring(slider.Value or displayLabel.Text)
+        box.TextSize = 12
+        box.Font = Enum.Font.GothamMedium
+        box.TextColor3 = Color3.fromRGB(240, 240, 240)
+        box.TextXAlignment = Enum.TextXAlignment.Center
+        box.BackgroundColor3 = Color3.fromRGB(35, 35, 42)
+        box.BackgroundTransparency = 0.5
+        box.ClearTextOnFocus = false
+        box.ClipsDescendants = true
+
+        local corner = Instance.new("UICorner", box)
+        corner.CornerRadius = UDim.new(0, 4)
+
+        local stroke = Instance.new("UIStroke", box)
+        stroke.Color = Color3.fromRGB(80, 80, 95)
+        stroke.Thickness = 1
+        stroke.Transparency = 0.4
+
+        box.MouseEnter:Connect(function()
+            if not box:IsFocused() then
+                box.BackgroundTransparency = 0.25
+                stroke.Color = Color3.fromRGB(120, 120, 140)
+                stroke.Transparency = 0.2
+            end
+        end)
+
+        box.MouseLeave:Connect(function()
+            if not box:IsFocused() then
+                box.BackgroundTransparency = 0.5
+                stroke.Color = Color3.fromRGB(80, 80, 95)
+                stroke.Transparency = 0.4
+            end
+        end)
+
+        box.Focused:Connect(function()
+            box.BackgroundTransparency = 0.2
+            stroke.Color = Color3.fromRGB(90, 90, 105)
+            stroke.Transparency = 0.3
+            stroke.Thickness = 1
+        end)
+
+        box.FocusLost:Connect(function()
+            box.BackgroundTransparency = 0.5
+            stroke.Color = Color3.fromRGB(80, 80, 95)
+            stroke.Transparency = 0.4
+            stroke.Thickness = 1
+
+            local inputNum = tonumber(box.Text)
+            if inputNum ~= nil then
+                local clamped = math.clamp(inputNum, slider.Min, slider.Max)
+                slider:SetValue(clamped)
+                box.Text = tostring(slider.Value)
+            else
+                box.Text = tostring(slider.Value)
+            end
+        end)
+
+        -- หากมีการลากเลื่อน Slider ด้วยเมาส์ ให้อัปเดตตัวเลขในช่อง TextBox อัตโนมัติ
+        displayLabel:GetPropertyChangedSignal("Text"):Connect(function()
+            if not box:IsFocused() then
+                box.Text = displayLabel.Text
+            end
+        end)
+
+        box.Parent = parentFrame
+    end)
+
+    return slider
+end
+
+-- นำไปครอบทุก Tab เพื่อให้ Slider ทุกอันในสคริปต์รองรับการคลิกพิมพ์อัตโนมัติ
+for _, tab in pairs(Tabs) do
+    if type(tab) == "table" and type(tab.AddSlider) == "function" then
+        local rawAddSlider = tab.AddSlider
+        tab.AddSlider = function(self, idx, config)
+            local s = rawAddSlider(self, idx, config)
+            HookSliderForDirectInput(s)
+            return s
+        end
+    end
+end
 
 local function Notify(title, content, sub, duration)
     Fluent:Notify({
@@ -2124,6 +2257,7 @@ local SchoolConfigs = {
 local function CleanupSinglePlayerESP(p, entry)
     if not entry then return end
     if entry.Billboard then pcall(function() entry.Billboard:Destroy() end) end
+    if entry.HealthBB then pcall(function() entry.HealthBB:Destroy() end) end
     if entry.Highlight then pcall(function() entry.Highlight:Destroy() end) end
     if entry.NativeTag and entry.NativeTag.Parent then
         pcall(function() entry.NativeTag.Enabled = true end)
@@ -2138,7 +2272,7 @@ local function ClearAllPlayerESP()
     table.clear(Hub.PlayerESPRegistry)
     pcall(function()
         for _, c in ipairs(targetGuiParent:GetChildren()) do
-            if c:IsA("BillboardGui") and c.Name:find("KrakenESP_BB_") then
+            if c:IsA("BillboardGui") and (c.Name:find("KrakenESP_BB_") or c.Name:find("KrakenESP_Health_")) then
                 c:Destroy()
             end
             if c:IsA("Highlight") and c.Name:find("KrakenESP_HL_") then
@@ -2177,6 +2311,7 @@ local function UnifiedPlayerESPUpdate()
             if not inRange then
                 if entry then
                     if entry.Billboard then entry.Billboard.Enabled = false end
+                    if entry.HealthBB then entry.HealthBB.Enabled = false end
                     if entry.Highlight then entry.Highlight.Enabled = false end
                     if entry.NativeTag and entry.NativeTag.Parent then
                         entry.NativeTag.Enabled = true
@@ -2190,7 +2325,7 @@ local function UnifiedPlayerESPUpdate()
                 end
 
                 -- 2. สร้าง GUI ใหม่เฉพาะกรณีที่ยังไม่มี หรือตัวละคร respawn ใหม่
-                if not entry or entry.Character ~= char or not entry.Billboard or not entry.Billboard.Parent or not entry.Highlight or not entry.Highlight.Parent then
+                if not entry or entry.Character ~= char or not entry.Billboard or not entry.Billboard.Parent or not entry.Highlight or not entry.Highlight.Parent or not entry.HealthBB or not entry.HealthBB.Parent then
                     if entry then
                         CleanupSinglePlayerESP(p, entry)
                     end
@@ -2202,10 +2337,11 @@ local function UnifiedPlayerESPUpdate()
                     hl.OutlineTransparency = 0.2
                     hl.Parent = targetGuiParent
 
+                    -- ป้ายชื่อลอยเหนือศีรษะ (ไร้กล่อง คลีน 2 บรรทัด)
                     local bb = Instance.new("BillboardGui")
                     bb.Name = "KrakenESP_BB_" .. p.Name
                     bb.Adornee = head
-                    bb.Size = UDim2.new(0, 120, 0, 24)
+                    bb.Size = UDim2.new(0, 120, 0, 22)
                     bb.StudsOffset = Vector3.new(0, 1.8, 0)
                     bb.AlwaysOnTop = true
                     bb.Parent = targetGuiParent
@@ -2229,25 +2365,36 @@ local function UnifiedPlayerESPUpdate()
                     infoLbl.TextStrokeTransparency = 0.2
                     infoLbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 
-                    local hpBg = Instance.new("Frame", bb)
-                    hpBg.Size = UDim2.new(0, 44, 0, 2)
-                    hpBg.Position = UDim2.new(0.5, -22, 1, -2)
-                    hpBg.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-                    hpBg.BackgroundTransparency = 0.3
+                    -- หลอดเลือดแนวตั้งด้านซ้ายตัวผู้เล่น (Vertical Health Bar)
+                    local bbHealth = Instance.new("BillboardGui")
+                    bbHealth.Name = "KrakenESP_Health_" .. p.Name
+                    bbHealth.Adornee = hrp
+                    bbHealth.Size = UDim2.new(0, 4, 0, 44)
+                    bbHealth.StudsOffset = Vector3.new(-1.8, 0, 0)
+                    bbHealth.AlwaysOnTop = true
+                    bbHealth.Parent = targetGuiParent
+
+                    local hpBg = Instance.new("Frame", bbHealth)
+                    hpBg.Size = UDim2.new(1, 0, 1, 0)
+                    hpBg.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+                    hpBg.BackgroundTransparency = 0.25
                     hpBg.BorderSizePixel = 0
-                    Instance.new("UICorner", hpBg).CornerRadius = UDim.new(1, 0)
+                    Instance.new("UICorner", hpBg).CornerRadius = UDim.new(0, 2)
 
                     local hpFill = Instance.new("Frame", hpBg)
+                    hpFill.Size = UDim2.new(1, 0, 1, 0)
+                    hpFill.Position = UDim2.new(0, 0, 0, 0)
+                    hpFill.BackgroundColor3 = Color3.fromRGB(46, 204, 113)
                     hpFill.BorderSizePixel = 0
-                    Instance.new("UICorner", hpFill).CornerRadius = UDim.new(1, 0)
+                    Instance.new("UICorner", hpFill).CornerRadius = UDim.new(0, 2)
 
                     entry = {
                         Highlight = hl,
                         Billboard = bb,
+                        HealthBB = bbHealth,
+                        HealthFill = hpFill,
                         NameLabel = nameLbl,
                         InfoLabel = infoLbl,
-                        HealthBg = hpBg,
-                        HealthFill = hpFill,
                         Player = p,
                         Character = char,
                         NativeTag = nativeTag
@@ -2322,12 +2469,15 @@ local function UnifiedPlayerESPUpdate()
                 entry.InfoLabel.Text = table.concat(parts, " • ")
                 entry.InfoLabel.Visible = true
 
+                -- อัปเดตหลอดเลือดแนวตั้งด้านข้างตัว
                 if State.ESPShowHealthBar then
-                    entry.HealthBg.Visible = true
-                    entry.HealthFill.Size = UDim2.new(hpRatio, 0, 1, 0)
+                    entry.HealthBB.Enabled = true
+                    entry.HealthBB.MaxDistance = State.ESPMaxDistance or 500
+                    entry.HealthFill.Size = UDim2.new(1, 0, hpRatio, 0)
+                    entry.HealthFill.Position = UDim2.new(0, 0, 1 - hpRatio, 0)
                     entry.HealthFill.BackgroundColor3 = hpCol
                 else
-                    entry.HealthBg.Visible = false
+                    entry.HealthBB.Enabled = false
                 end
             end
         end
@@ -2832,41 +2982,41 @@ local function UpdateMerchantESP()
         table.insert(MerchantESPObjects, hl)
     end
 
+    if existingBB and existingBB:FindFirstChild("Frame") then
+        existingBB:Destroy()
+        existingBB = nil
+    end
+
     if not existingBB then
         local bb = Instance.new("BillboardGui")
         bb.Name = "MerchantBillboard"
         bb.Adornee = hrp
-        bb.Size = UDim2.new(0, 210, 0, 54)
+        bb.Size = UDim2.new(0, 200, 0, 36)
         bb.StudsOffset = Vector3.new(0, 3.8, 0)
         bb.AlwaysOnTop = true
 
-        local frame = Instance.new("Frame", bb)
-        frame.Size = UDim2.new(1, 0, 1, 0)
-        frame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-        frame.BackgroundTransparency = 0.25
-        local stroke = Instance.new("UIStroke", frame)
-        stroke.Color = Color3.fromRGB(255, 215, 0)
-        stroke.Thickness = 1.5
-        local corner = Instance.new("UICorner", frame)
-        corner.CornerRadius = UDim.new(0, 6)
-
-        local titleLbl = Instance.new("TextLabel", frame)
-        titleLbl.Size = UDim2.new(1, 0, 0, 24)
-        titleLbl.Position = UDim2.new(0, 0, 0, 2)
+        local titleLbl = Instance.new("TextLabel", bb)
+        titleLbl.Name = "Title"
+        titleLbl.Size = UDim2.new(1, 0, 0, 18)
+        titleLbl.Position = UDim2.new(0, 0, 0, 0)
         titleLbl.BackgroundTransparency = 1
         titleLbl.Font = Enum.Font.GothamBold
         titleLbl.TextSize = 12
         titleLbl.TextColor3 = Color3.fromRGB(255, 215, 0)
+        titleLbl.TextStrokeTransparency = 0.2
+        titleLbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
         titleLbl.Text = "🛒 พ่อค้าพเนจร (Secret Shop)"
 
-        local subLbl = Instance.new("TextLabel", frame)
+        local subLbl = Instance.new("TextLabel", bb)
         subLbl.Name = "SubInfo"
-        subLbl.Size = UDim2.new(1, 0, 0, 22)
-        subLbl.Position = UDim2.new(0, 0, 0, 26)
+        subLbl.Size = UDim2.new(1, 0, 0, 16)
+        subLbl.Position = UDim2.new(0, 0, 0, 18)
         subLbl.BackgroundTransparency = 1
         subLbl.Font = Enum.Font.GothamMedium
         subLbl.TextSize = 11
-        subLbl.TextColor3 = Color3.fromRGB(240, 240, 240)
+        subLbl.TextColor3 = Color3.fromRGB(255, 230, 120)
+        subLbl.TextStrokeTransparency = 0.2
+        subLbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
         subLbl.Text = "กำลังคำนวณระยะห่าง..."
 
         bb.Parent = hrp
@@ -2875,15 +3025,16 @@ local function UpdateMerchantESP()
     end
 
     if existingBB then
-        local subLbl = existingBB:FindFirstChild("Frame") and existingBB.Frame:FindFirstChild("SubInfo")
+        local subLbl = existingBB:FindFirstChild("SubInfo")
         if subLbl then
             local myHRP = GetHRP()
-            local dist = myHRP and math.floor((myHRP.Position - hrp.Position).Magnitude) or 0
+            local dist = myHRP and (myHRP.Position - hrp.Position).Magnitude or 0
+            local meters = math.floor(dist * 0.28)
             local timeStr = ""
             if MerchantData.RemainingTime > 0 then
                 timeStr = string.format(" | ⏱️ %d:%02d", math.floor(MerchantData.RemainingTime / 60), math.floor(MerchantData.RemainingTime % 60))
             end
-            subLbl.Text = string.format("📍 %d studs%s", dist, timeStr)
+            subLbl.Text = string.format("อีก %d เมตร%s", meters, timeStr)
         end
     end
 end
@@ -3011,7 +3162,7 @@ local function GetMerchantStatusDisplay()
     local locDesc = ""
     if hrp then
         local p = hrp.Position
-        locDesc = string.format("• 📍 ตำแหน่ง: (%.0f, %.0f, %.0f)\n• 📏 ระยะห่าง: %d studs", p.X, p.Y, p.Z, MerchantData.Distance)
+        locDesc = string.format("• 📍 ตำแหน่ง: (%.0f, %.0f, %.0f)\n• 📏 ระยะห่าง: อีก %d เมตร", p.X, p.Y, p.Z, math.floor(MerchantData.Distance * 0.28))
     else
         locDesc = "• 📍 ตำแหน่ง: กำลังเดินทาง (จะสแกนพิกัดทันทีเมื่อมาถึง)\n• 📏 ระยะห่าง: --"
     end
