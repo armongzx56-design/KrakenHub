@@ -2104,14 +2104,14 @@ end
 -- 5. ตำรวจ: สีแดง (Color3.fromRGB(255, 45, 45))
 --------------------------------------------------------------
 local SchoolConfigs = {
-    { Key = "ปทุมคงคา", Short = "ปทุมคงคา", Color = Color3.fromRGB(0, 195, 255), Icon = "⚡" },
-    { Key = "กรุงเทพช่างกล", Short = "ช่างกล", Color = Color3.fromRGB(255, 240, 130), Icon = "🔧" },
-    { Key = "พระ", Short = "พระ", Color = Color3.fromRGB(255, 135, 30), Icon = "🙏" },
-    { Key = "เด็กบ้าน", Short = "เด็กบ้าน", Color = Color3.fromRGB(245, 245, 245), Icon = "🏠" },
-    { Key = "ตำรวจ", Short = "ตำรวจ", Color = Color3.fromRGB(255, 45, 45), Icon = "👮" },
-    { Key = "วัดสุ", Short = "วัดสุทธิ", Color = Color3.fromRGB(80, 230, 180), Icon = "📚" },
-    { Key = "สุธิ", Short = "วัดสุทธิ", Color = Color3.fromRGB(80, 230, 180), Icon = "📚" },
-    { Key = "สุทธิ", Short = "วัดสุทธิ", Color = Color3.fromRGB(80, 230, 180), Icon = "📚" },
+    { Key = "ปทุมคงคา", Short = "ปทุมคงคา", Color = Color3.fromRGB(0, 195, 255) },
+    { Key = "กรุงเทพช่างกล", Short = "ช่างกล", Color = Color3.fromRGB(255, 240, 130) },
+    { Key = "พระ", Short = "พระ", Color = Color3.fromRGB(255, 135, 30) },
+    { Key = "เด็กบ้าน", Short = "เด็กบ้าน", Color = Color3.fromRGB(245, 245, 245) },
+    { Key = "ตำรวจ", Short = "ตำรวจ", Color = Color3.fromRGB(255, 45, 45) },
+    { Key = "วัดสุ", Short = "วัดสุทธิ", Color = Color3.fromRGB(80, 230, 180) },
+    { Key = "สุธิ", Short = "วัดสุทธิ", Color = Color3.fromRGB(80, 230, 180) },
+    { Key = "สุทธิ", Short = "วัดสุทธิ", Color = Color3.fromRGB(80, 230, 180) },
 }
 
 local function GetPlayerSchoolInfo(plr)
@@ -2134,40 +2134,24 @@ local function GetPlayerSchoolInfo(plr)
     end
     for _, sc in ipairs(SchoolConfigs) do
         if string.find(rawTeamName, sc.Key, 1, true) then
-            return sc.Color, sc.Short, sc.Icon
+            return sc.Color, sc.Short
         end
     end
-    return Color3.fromRGB(46, 204, 113), rawTeamName ~= "" and rawTeamName or "ประชาชน", "👤"
+    return Color3.fromRGB(46, 204, 113), rawTeamName ~= "" and rawTeamName or "ประชาชน"
 end
 
 local function GetEquippedWeaponInfo(char)
-    if not char then return "👊 มือเปล่า", Color3.fromRGB(180, 180, 180) end
+    if not char then return "มือเปล่า" end
     local tool = char:FindFirstChildOfClass("Tool")
     if not tool then
-        return "👊 มือเปล่า", Color3.fromRGB(180, 180, 180)
+        return "มือเปล่า"
     end
     local name = tool.Name or ""
     local lower = string.lower(name)
     if lower == "fists" or lower == "fist" or name == "หมัด" or name == "มือเปล่า" then
-        return "👊 มือเปล่า", Color3.fromRGB(180, 180, 180)
+        return "มือเปล่า"
     end
-    if lower:find("glock") or lower:find("beretta") or lower:find("m9") or lower:find("deagle") 
-        or lower:find("remington") or lower:find("shotgun") or lower:find("pistol") or lower:find("rifle") 
-        or lower:find("smg") or lower:find("gun") or name:find("ปืน") or lower:find("uzi") or lower:find("colt")
-        or lower:find("ak") or lower:find("m4") or lower:find("revolver") or lower:find("ลูกซอง") then
-        return "🔫 " .. name, Color3.fromRGB(255, 85, 85)
-    end
-    if name:find("มีด") or name:find("ดาบ") or name:find("ขวาน") or lower:find("knife") or lower:find("blade") 
-        or lower:find("katana") or lower:find("axe") or lower:find("machete") or lower:find("sword") then
-        return "🔪 " .. name, Color3.fromRGB(255, 145, 50)
-    end
-    if name:find("กระบอง") or name:find("ไม้") or lower:find("bat") or lower:find("baton") or lower:find("club") then
-        return "🏏 " .. name, Color3.fromRGB(255, 215, 0)
-    end
-    if name:find("โล่") or lower:find("shield") then
-        return "🛡️ " .. name, Color3.fromRGB(100, 200, 255)
-    end
-    return "📦 " .. name, Color3.fromRGB(220, 220, 220)
+    return name
 end
 
 local function GetHealthVisuals(hum)
@@ -2294,7 +2278,7 @@ local function UpdateESP()
                     Hub.PlayerESPRegistry[p] = entry
                 end
 
-                local schoolCol, schoolShort, schoolIcon = GetPlayerSchoolInfo(p)
+                local schoolCol, schoolShort = GetPlayerSchoolInfo(p)
                 local wepText = GetEquippedWeaponInfo(char)
                 local hp, maxHp, hpRatio, hpCol = GetHealthVisuals(hum)
 
@@ -2306,7 +2290,7 @@ local function UpdateESP()
                 entry.Highlight.OutlineColor = schoolCol
 
                 entry.NameLabel.TextColor3 = schoolCol
-                entry.NameLabel.Text = string.format("[%s %s] %s", schoolIcon, schoolShort, p.DisplayName)
+                entry.NameLabel.Text = string.format("[%s] %s", schoolShort, p.DisplayName)
 
                 -- Compact info line: [Weapon] • Distance • HP
                 local parts = {}
