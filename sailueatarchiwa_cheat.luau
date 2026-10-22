@@ -135,6 +135,7 @@ local Hub = {
         FarmSpeed = 17.5,
         AutoSolveMinigame = false,
         AutoHire = true,
+        AutoClaimConstruction = false, -- เคลมเงินค่าจ้างงานก่อสร้างอัตโนมัติ
         ConstructionFilter = "กำแพง & เหล็ก", -- "ทั้งหมด", "กำแพง & เหล็ก", "เฉพาะกำแพง", "เฉพาะเหล็ก"
         ShowAllSpotsESP = false,
         -- Cheats
@@ -1913,11 +1914,70 @@ end
 -- 8. ลูปหลัก AUTO FARM PRO (100% ANTI-KICK & RELIABLE)
 --------------------------------------------------------------
 local lastCollectTime = 0
+local function ClaimConstructionWage(isAuto)
+    local now = tick()
+    if now - lastCollectTime < 2.5 then return false end
+    lastCollectTime = now
+
+    local successResult = false
+    pcall(function()
+        local const = ReplicatedStorage:FindFirstChild("Job") and ReplicatedStorage.Job:FindFirstChild("Construction")
+        local collect = const and const:FindFirstChild("Collect")
+        local hire = const and const:FindFirstChild("Hire")
+        if not collect then return end
+
+        local pgui = LocalPlayer:FindFirstChild("PlayerGui")
+        local cUI = pgui and pgui:FindFirstChild("ConstructionUI")
+        local mf = cUI and cUI:FindFirstChild("MainFrame")
+        local hp = mf and mf:FindFirstChild("HirePage")
+        if hp and hp.Visible and hire then
+            pcall(function() hire:InvokeServer() end)
+            task.wait(0.2)
+        end
+
+        local success, amount = collect:InvokeServer()
+        if success and typeof(amount) == "number" and amount > 0 then
+            successResult = true
+            Notify("งานก่อสร้าง", "💰 เคลมเงินสำเร็จ! ได้รับ " .. tostring(amount) .. " Cash เข้ากระเป๋า", "", 3.5)
+            if cUI and cUI:FindFirstChild("MainFrame") then
+                local wp = cUI.MainFrame:FindFirstChild("WorkPage")
+                local eb = wp and wp:FindFirstChild("EarningsBox")
+                local ea = eb and eb:FindFirstChild("EarningsAmount")
+                if ea then ea.Text = "0 Cash" end
+            end
+        elseif not isAuto then
+            Notify("งานก่อสร้าง", "ยังไม่มียอดเงินสะสมให้เคลม หรือทำงานก่อนนะ", "", 2.5)
+        end
+    end)
+    return successResult
+end
+
+-- 🔔 ดักจับ Event UpdateEarnings สำหรับระบบ Auto Claim
+pcall(function()
+    local const = ReplicatedStorage:FindFirstChild("Job") and ReplicatedStorage.Job:FindFirstChild("Construction")
+    local updateEarnings = const and const:FindFirstChild("UpdateEarnings")
+    if updateEarnings then
+        if Connections.AutoClaimUpdateConn then Connections.AutoClaimUpdateConn:Disconnect() end
+        Connections.AutoClaimUpdateConn = updateEarnings.OnClientEvent:Connect(function(newEarnings)
+            if State.Running and State.AutoClaimConstruction and typeof(newEarnings) == "number" and newEarnings >= 300 then
+                task.delay(0.6, function()
+                    if State.Running and State.AutoClaimConstruction then
+                        ClaimConstructionWage(true)
+                    end
+                end)
+            end
+        end)
+    end
+end)
 
 task.spawn(function()
     while State.Running and _G._KrakenScriptId == MY_SCRIPT_ID do
         task.wait(0.08)
+        if State.AutoClaimConstruction and (tick() - lastCollectTime) >= 15.0 then
+            ClaimConstructionWage(true)
+        end
         if State.AutoFarm then
+
             local hrp = GetHRP()
             local hum = GetHuman()
             local char = LocalPlayer.Character
@@ -3645,6 +3705,30 @@ AllSpotsToggle:OnChanged(function()
         UpdateAllJobESP()
     end
 end)
+
+Tabs.Farm:AddSection("💰 ระบบเงินค่าจ้าง (Wages & Claims)")
+
+local AutoClaimToggle = Tabs.Farm:AddToggle("AutoClaimConstructionOn", {
+    Title = "💰 เคลมเงินก่อสร้างอัตโนมัติ (Auto Claim Money)",
+    Description = "เคลมเงินค่าจ้างงานก่อสร้างเข้าตัวให้อัตโนมัติทันทีที่มีเงินสะสม",
+    Default = false
+})
+AutoClaimToggle:OnChanged(function()
+    State.AutoClaimConstruction = Options.AutoClaimConstructionOn.Value
+    if State.AutoClaimConstruction then
+        Notify("เคลมเงินอัตโนมัติ", "เปิดใช้งานเคลมเงินงานก่อสร้างอัตโนมัติแล้ว", "", 2.5)
+        ClaimConstructionWage(true)
+    end
+end)
+
+Tabs.Farm:AddButton({
+    Title = "💵 กดเคลมเงินก่อสร้างทันที (Claim Money Now)",
+    Description = "รับเงินค่าจ้างงานก่อสร้างที่สะสมอยู่ทั้งหมดเข้ากระเป๋าทันที 1 คลิก",
+    Callback = function()
+        ClaimConstructionWage(false)
+    end
+})
+
 
 --------------------------------------------------------------
 -- 🛒 สร้างเมนูใน TABS.MERCHANT (พ่อค้าพเนจร)
