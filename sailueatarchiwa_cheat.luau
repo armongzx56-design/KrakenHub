@@ -27,7 +27,10 @@ local ProximityPromptService = game:GetService("ProximityPromptService")
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
 
-print(">>> KRAKENHUB INITIALIZING <<<")
+_G._KrakenScriptId = (_G._KrakenScriptId or 0) + 1
+local MY_SCRIPT_ID = _G._KrakenScriptId
+
+print(">>> KRAKENHUB INITIALIZING (ID: " .. MY_SCRIPT_ID .. ") <<<")
 -- เคลียร์อินสแตนซ์และ UI เก่า
 if _G.KrakenHub_Sailueat and type(_G.KrakenHub_Sailueat.Unload) == "function" then
     pcall(function() _G.KrakenHub_Sailueat.Unload() end)
@@ -50,20 +53,23 @@ pcall(function()
     end
 end)
 
--- เคลียร์ Highlight ตกค้างใน Workspace และ CoreGui
+-- เคลียร์ Highlight และ Billboard ตกค้างใน Workspace และ CoreGui
 pcall(function()
     for _, desc in ipairs(Workspace:GetDescendants()) do
-        if desc:IsA("Highlight") and (desc.Name:find("Target") or desc.Name:find("Kraken") or desc.Name:find("Farm") or desc.Name:find("Test") or desc.Name == "Highlight") then
+        if desc:IsA("Highlight") and (desc.Name:find("Target") or desc.Name:find("Kraken") or desc.Name:find("Farm") or desc.Name:find("Test") or desc.Name:find("Merchant") or desc.Name == "Highlight") then
             if not desc.Parent or not desc.Parent.Name:find("MenuLights") then
                 desc:Destroy()
             end
         end
+        if desc:IsA("BillboardGui") and (desc.Name:find("Merchant") or desc.Name:find("Kraken")) then
+            desc:Destroy()
+        end
     end
     for _, c in ipairs(CoreGui:GetChildren()) do
-        if c:IsA("Highlight") and (c.Name:find("Target") or c.Name:find("Kraken") or c.Name:find("Farm") or c.Name:find("Test")) then
+        if c:IsA("Highlight") and (c.Name:find("Target") or c.Name:find("Kraken") or c.Name:find("Farm") or c.Name:find("Test") or c.Name:find("Merchant")) then
             c:Destroy()
         end
-        if c:IsA("BillboardGui") and (c.Name:find("Target") or c.Name:find("Kraken") or c.Name:find("Farm")) then
+        if c:IsA("BillboardGui") and (c.Name:find("Target") or c.Name:find("Kraken") or c.Name:find("Farm") or c.Name:find("Merchant")) then
             c:Destroy()
         end
     end
@@ -488,7 +494,7 @@ local function SetTargetESP(targetInstance, titleText, customColor, statusText)
             bb.Size = UDim2.new(0, 180, 0, 48)
             bb.StudsOffset = Vector3.new(0, 3.4, 0)
             bb.AlwaysOnTop = true
-            bb.MaxDistance = 600
+            bb.MaxDistance = 45
 
             local frame = Instance.new("Frame")
             frame.Size = UDim2.new(1, 0, 1, 0)
@@ -600,7 +606,7 @@ local function UpdateAllJobESP()
 end
 
 task.spawn(function()
-    while State.Running do
+    while State.Running and _G._KrakenScriptId == MY_SCRIPT_ID do
         task.wait(3.5)
         if State.ShowAllSpotsESP then
             UpdateAllJobESP()
@@ -1336,7 +1342,7 @@ end)
 
 -- ตอกตะปู / ล้อรถ / ขุดขยะ / น็อตเครื่องยนต์ / เทน้ำมัน
 task.spawn(function()
-    while State.Running do
+    while State.Running and _G._KrakenScriptId == MY_SCRIPT_ID do
         task.wait(0.12)
         if State.AutoSolveMinigame then
             local pgui = LocalPlayer:FindFirstChild("PlayerGui")
@@ -1520,6 +1526,20 @@ local function GetOtherPlayerPositions()
 end
 
 local ScannedConstructionSpots = {}
+
+local function IsInConstructionZone(pos)
+    if not pos then return false end
+    local constJob = Workspace:FindFirstChild("Job") and Workspace.Job:FindFirstChild("งานก่อสร้าง")
+    local zb = constJob and constJob:FindFirstChild("Zone") and constJob.Zone:FindFirstChild("ZoneBound")
+    if zb and zb:IsA("BasePart") then
+        local lp = zb.CFrame:PointToObjectSpace(pos)
+        local hs = zb.Size / 2
+        return math.abs(lp.X) <= (hs.X + 4) and math.abs(lp.Y) <= (hs.Y + 8) and math.abs(lp.Z) <= (hs.Z + 4)
+    end
+    local center = Vector3.new(2450.8, 14.2, -357.8)
+    local distH = (Vector2.new(pos.X, pos.Z) - Vector2.new(center.X, center.Z)).Magnitude
+    return distH <= 75 and math.abs(pos.Y - center.Y) <= 20
+end
 
 local function ScanConstructionWorkSpots()
     local constJob = Workspace:FindFirstChild("Job") and Workspace.Job:FindFirstChild("งานก่อสร้าง")
@@ -1755,7 +1775,7 @@ end
 local lastCollectTime = 0
 
 task.spawn(function()
-    while State.Running do
+    while State.Running and _G._KrakenScriptId == MY_SCRIPT_ID do
         task.wait(0.08)
         if State.AutoFarm then
             local hrp = GetHRP()
@@ -1975,19 +1995,31 @@ task.spawn(function()
             end
 
         else
-            -- Preview Mode: แสดง ESP นำทางล่วงหน้า ให้รู้ว่าจะไปเริ่มฟาร์มจุดไหน แม้ยังไม่ได้กดเปิดออโต้ฟาร์ม
+            -- Preview Mode: แสดง ESP นำทางเฉพาะเมื่ออยู่ใน "ขอบเขตฟาร์มใกล้ๆ" เท่านั้น (ไม่แสดงลอยข้ามถนนหรือนอกรั้ว)
+            local hrp = GetHRP()
             if State.SelectedJob == "งานก่อสร้าง" then
-                local prevSpot, prevPrompt, prevDist, prevName, prevPos, prevCat = GetNearestOpenSpot("งานก่อสร้าง")
-                if prevSpot then
-                    local color = (prevCat == "เหล็ก" and Color3.fromRGB(255, 145, 0))
-                               or (prevCat == "กำแพง" and Color3.fromRGB(0, 240, 160))
-                               or Color3.fromRGB(190, 110, 255)
-                    SetTargetESP(prevSpot, "จุดเริ่มฟาร์ม: " .. (prevCat or "ก่อสร้าง"), color, "[พร้อมเริ่มฟาร์ม]")
+                local inZone = hrp and IsInConstructionZone(hrp.Position)
+                if inZone then
+                    local prevSpot, prevPrompt, prevDist, prevName, prevPos, prevCat = GetNearestOpenSpot("งานก่อสร้าง")
+                    if prevSpot and prevDist and prevDist <= 45 then
+                        local color = (prevCat == "เหล็ก" and Color3.fromRGB(255, 145, 0))
+                                   or (prevCat == "กำแพง" and Color3.fromRGB(0, 240, 160))
+                                   or Color3.fromRGB(190, 110, 255)
+                        local icon = (prevCat == "กำแพง" and "🧱") or (prevCat == "เหล็ก" and "🔩") or "🪨"
+                        SetTargetESP(prevSpot, string.format("จุดเริ่มฟาร์ม: %s %s", icon, (prevCat or "ก่อสร้าง")), color, "[พร้อมเริ่มฟาร์ม]")
+                    else
+                        ClearTargetESP()
+                    end
                 else
                     ClearTargetESP()
                 end
             else
-                ClearTargetESP()
+                local prevSpot, prevPrompt, prevDist, prevName = GetNearestOpenSpot(State.SelectedJob)
+                if prevSpot and prevDist and prevDist <= 25 then
+                    SetTargetESP(prevSpot, string.format("จุดเริ่มฟาร์ม: %s", (prevName or State.SelectedJob)), nil, "[พร้อมเริ่มฟาร์ม]")
+                else
+                    ClearTargetESP()
+                end
             end
             task.wait(0.25)
         end
@@ -2101,7 +2133,7 @@ local function UpdateESP()
 end
 
 task.spawn(function()
-    while State.Running do
+    while State.Running and _G._KrakenScriptId == MY_SCRIPT_ID do
         task.wait(2.5)
         if State.ESP then UpdateESP() end
     end
@@ -2249,7 +2281,7 @@ end)
 
 -- เฝ้าดูและปรับแต่งปืนที่ถืออยู่ทุก 1.5 วินาที
 task.spawn(function()
-    while State.Running do
+    while State.Running and _G._KrakenScriptId == MY_SCRIPT_ID do
         pcall(ApplyGunMods)
         task.wait(1.5)
     end
@@ -2511,6 +2543,18 @@ local MerchantData = {
 }
 local MerchantESPObjects = {}
 
+local function GetMerchantCycleTime()
+    local uptime = workspace.DistributedGameTime or 0
+    local cyclePos = uptime % 1800
+    if cyclePos < 1200 then
+        -- ช่วงร้านปิด: เหลือเวลาอีกกี่วินาทีก่อนจะเกิดรอบถัดไป
+        return false, math.max(0, math.floor(1200 - cyclePos))
+    else
+        -- ช่วงร้านเปิด: เหลือเวลาอีกกี่วินาทีก่อนจะปิดร้าน
+        return true, math.max(0, math.floor(1800 - cyclePos))
+    end
+end
+
 local function FindMerchantNPC()
     -- 1. ค้นหาโมเดลที่มีชื่อ SecretShopNPC ใน Workspace
     for _, obj in ipairs(Workspace:GetChildren()) do
@@ -2696,71 +2740,84 @@ pcall(function()
     end
 end)
 
+local function GetMerchantStatusDisplay()
+    local model, hrp = FindMerchantNPC()
+    MerchantData.Model = model
+    MerchantData.RootPart = hrp
+
+    local pgui = LocalPlayer:FindFirstChild("PlayerGui")
+    local gunShop = pgui and pgui:FindFirstChild("GunShopGui")
+    local tf = gunShop and gunShop:FindFirstChild("TimerFrame")
+    if tf and tf.Visible then
+        MerchantData.IsOpen = true
+        local tl = tf:FindFirstChild("TimerLabel")
+        if tl and tl.Text ~= "" then
+            local m, s = string.match(tl.Text, "(%d+):(%d+)")
+            if m and s then
+                MerchantData.RemainingTime = tonumber(m) * 60 + tonumber(s)
+            end
+        end
+    elseif model then
+        MerchantData.IsOpen = true
+    else
+        MerchantData.IsOpen = false
+    end
+
+    local myHRP = GetHRP()
+    if myHRP and hrp then
+        MerchantData.Distance = math.floor((myHRP.Position - hrp.Position).Magnitude)
+    else
+        MerchantData.Distance = 0
+    end
+
+    local isCycleOpen, cycleSec = GetMerchantCycleTime()
+    local isActuallyOpen = MerchantData.IsOpen or (model ~= nil) or (tf and tf.Visible) or isCycleOpen
+
+    local title = isActuallyOpen and "🛒 พ่อค้าพเนจร: เปิดร้านอยู่ (OPEN)" or "⏳ พ่อค้าพเนจร: ปิดร้านแล้ว (CLOSED)"
+    local timeDesc = ""
+
+    if isActuallyOpen then
+        local rem = (MerchantData.RemainingTime > 0) and MerchantData.RemainingTime or cycleSec
+        local m = math.floor(rem / 60)
+        local s = math.floor(rem % 60)
+        timeDesc = string.format("• ⏱️ เวลาที่เหลือ: %d นาที %02d วินาที", m, s)
+    else
+        if MerchantData.NextSpawnTime > os.clock() then
+            local diff = math.floor(MerchantData.NextSpawnTime - os.clock())
+            timeDesc = string.format("• ⏱️ จะมาถึงในอีกประมาณ: %d นาที %02d วินาที (รอบเซิร์ฟเวอร์)", math.floor(diff / 60), math.floor(diff % 60))
+        else
+            local m = math.floor(cycleSec / 60)
+            local s = math.floor(cycleSec % 60)
+            timeDesc = string.format("• ⏱️ จะมาถึงในอีกประมาณ: %d นาที %02d วินาที (คำนวณจากเวลาเซิร์ฟเวอร์)", m, s)
+        end
+    end
+
+    local locDesc = ""
+    if hrp then
+        local p = hrp.Position
+        locDesc = string.format("• 📍 ตำแหน่ง: (%.0f, %.0f, %.0f)\n• 📏 ระยะห่าง: %d studs", p.X, p.Y, p.Z, MerchantData.Distance)
+    else
+        locDesc = "• 📍 ตำแหน่ง: กำลังเดินทาง (จะสแกนพิกัดทันทีเมื่อมาถึง)\n• 📏 ระยะห่าง: --"
+    end
+
+    return title, timeDesc .. "\n" .. locDesc
+end
+
 local MerchantStatusParagraph = nil
 task.spawn(function()
-    while State.Running do
+    while State.Running and _G._KrakenScriptId == MY_SCRIPT_ID do
         task.wait(1.0)
         pcall(function()
-            local model, hrp = FindMerchantNPC()
-            MerchantData.Model = model
-            MerchantData.RootPart = hrp
-
-            local pgui = LocalPlayer:FindFirstChild("PlayerGui")
-            local gunShop = pgui and pgui:FindFirstChild("GunShopGui")
-            local tf = gunShop and gunShop:FindFirstChild("TimerFrame")
-            if tf and tf.Visible then
-                MerchantData.IsOpen = true
-                local tl = tf:FindFirstChild("TimerLabel")
-                if tl and tl.Text ~= "" then
-                    local m, s = string.match(tl.Text, "(%d+):(%d+)")
-                    if m and s then
-                        MerchantData.RemainingTime = tonumber(m) * 60 + tonumber(s)
-                    end
-                end
-            elseif model then
-                MerchantData.IsOpen = true
-            else
-                MerchantData.IsOpen = false
-                if MerchantData.RemainingTime > 0 then
-                    MerchantData.RemainingTime = math.max(0, MerchantData.RemainingTime - 1)
-                end
-            end
-
-            local myHRP = GetHRP()
-            if myHRP and hrp then
-                MerchantData.Distance = math.floor((myHRP.Position - hrp.Position).Magnitude)
-            else
-                MerchantData.Distance = 0
+            if MerchantData.RemainingTime > 0 and not MerchantData.IsOpen then
+                MerchantData.RemainingTime = math.max(0, MerchantData.RemainingTime - 1)
             end
 
             UpdateMerchantESP()
 
             if MerchantStatusParagraph and type(MerchantStatusParagraph.SetTitle) == "function" then
-                local title = MerchantData.IsOpen and "🛒 พ่อค้าพเนจร: เปิดร้านอยู่ (OPEN)" or "⏳ พ่อค้าพเนจร: ปิดร้านแล้ว (CLOSED)"
-                local timeDesc = ""
-                if MerchantData.IsOpen then
-                    local m = math.floor(MerchantData.RemainingTime / 60)
-                    local s = math.floor(MerchantData.RemainingTime % 60)
-                    timeDesc = string.format("• ⏱️ เวลาที่เหลือ: %d นาที %02d วินาที", m, s)
-                else
-                    if MerchantData.NextSpawnTime > os.clock() then
-                        local diff = math.floor(MerchantData.NextSpawnTime - os.clock())
-                        timeDesc = string.format("• ⏱️ รอรอบถัดไปในอีกประมาณ: %d นาที %02d วินาที", math.floor(diff / 60), math.floor(diff % 60))
-                    else
-                        timeDesc = "• ⏱️ รอรอบถัดไป: กำลังรอการสุ่มเกิดจากเซิร์ฟเวอร์"
-                    end
-                end
-
-                local locDesc = ""
-                if hrp then
-                    local p = hrp.Position
-                    locDesc = string.format("• 📍 ตำแหน่ง: (%.0f, %.0f, %.0f)\n• 📏 ระยะห่าง: %d studs", p.X, p.Y, p.Z, MerchantData.Distance)
-                else
-                    locDesc = "• 📍 ตำแหน่ง: ยังไม่เกิดในเซิร์ฟเวอร์ (รอรอบใหม่)\n• 📏 ระยะห่าง: --"
-                end
-
+                local title, desc = GetMerchantStatusDisplay()
                 MerchantStatusParagraph:SetTitle(title)
-                MerchantStatusParagraph:SetDesc(timeDesc .. "\n" .. locDesc)
+                MerchantStatusParagraph:SetDesc(desc)
             end
         end)
     end
@@ -2870,9 +2927,10 @@ end)
 --------------------------------------------------------------
 -- 🛒 สร้างเมนูใน TABS.MERCHANT (พ่อค้าพเนจร)
 --------------------------------------------------------------
+local initMerchantTitle, initMerchantDesc = GetMerchantStatusDisplay()
 MerchantStatusParagraph = Tabs.Merchant:AddParagraph({
-    Title = "🛒 พ่อค้าพเนจร: กำลังตรวจสอบ...",
-    Content = "• ⏱️ เวลาที่เหลือ: กำลังตรวจสอบ...\n• 📍 ตำแหน่ง: กำลังสแกนแมพ...\n• 📏 ระยะห่าง: --"
+    Title = initMerchantTitle,
+    Content = initMerchantDesc
 })
 
 local MerchantESPToggle = Tabs.Merchant:AddToggle("MerchantESPOn", {
