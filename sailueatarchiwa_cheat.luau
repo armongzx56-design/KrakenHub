@@ -2900,6 +2900,7 @@ end)
 local MerchantData = {
     IsOpen = false,
     RemainingTime = 0,
+    DespawnTimestamp = 0,
     ShopName = "พ่อค้าพเนจร",
     LocationName = "จุดลับ",
     Model = nil,
@@ -2908,20 +2909,70 @@ local MerchantData = {
     NextSpawnTime = 0,
 }
 local MerchantESPObjects = {}
+local FindMerchantNPC = nil
+local UpdateMerchantESPSubInfo = nil
 
-local function GetMerchantCycleTime()
-    local uptime = workspace.DistributedGameTime or 0
-    local cyclePos = uptime % 1800
-    if cyclePos < 1200 then
-        -- ช่วงร้านปิด: เหลือเวลาอีกกี่วินาทีก่อนจะเกิดรอบถัดไป
-        return false, math.max(0, math.floor(1200 - cyclePos))
-    else
-        -- ช่วงร้านเปิด: เหลือเวลาอีกกี่วินาทีก่อนจะปิดร้าน
-        return true, math.max(0, math.floor(1800 - cyclePos))
+local function GetRealtimeMerchantTimeString()
+    -- 1. ดึงตรงจาก TimerLabel ของเกม (หากเปิดร้านอยู่และนับถอยหลัง)
+    local pgui = LocalPlayer:FindFirstChild("PlayerGui")
+    local gunShop = pgui and pgui:FindFirstChild("GunShopGui")
+    local tf = gunShop and gunShop:FindFirstChild("TimerFrame")
+    if tf and tf.Visible then
+        local tl = tf:FindFirstChild("TimerLabel")
+        if tl and tl.Text ~= "" then
+            local timeMatch = string.match(tl.Text, "(%d+:%d+)")
+            if timeMatch and timeMatch ~= "0:00" then
+                local m, s = string.match(timeMatch, "(%d+):(%d+)")
+                if m and s then
+                    local totalSec = tonumber(m) * 60 + tonumber(s)
+                    if totalSec > 0 then
+                        MerchantData.DespawnTimestamp = os.clock() + totalSec
+                    end
+                end
+                return " | ⏱️ " .. timeMatch
+            end
+        end
     end
+
+    -- 2. ดึงจากการ์ดแจ้งเตือน SecretShopNotice ด้านบน
+    local ssn = pgui and pgui:FindFirstChild("SecretShopNotice")
+    local card = ssn and ssn:FindFirstChild("Card")
+    if card and card.Visible then
+        local timeLbl = card:FindFirstChild("Time")
+        if timeLbl and timeLbl.Text ~= "" then
+            local timeMatch = string.match(timeLbl.Text, "(%d+:%d+)")
+            if timeMatch and timeMatch ~= "0:00" then
+                return " | ⏱️ " .. timeMatch
+            end
+        end
+    end
+
+    -- 3. คำนวณจาก Timestamp ตามเวลาจริงระดับ Real-time (แม่นยำระดับเสี้ยววินาที)
+    if MerchantData.DespawnTimestamp and MerchantData.DespawnTimestamp > os.clock() then
+        local rem = math.max(0, math.floor(MerchantData.DespawnTimestamp - os.clock()))
+        local m = math.floor(rem / 60)
+        local s = math.floor(rem % 60)
+        return string.format(" | ⏱️ %d:%02d", m, s)
+    end
+
+    -- 4. หากพ่อค้าปรากฏในแมพแต่ยังไม่มีข้อมูลเวลา เริ่มต้นนับ 10 นาที (600 วินาที)
+    if FindMerchantNPC then
+        local model, hrp = FindMerchantNPC()
+        if model and hrp then
+            if not MerchantData.DespawnTimestamp or MerchantData.DespawnTimestamp <= os.clock() then
+                MerchantData.DespawnTimestamp = os.clock() + 600
+            end
+            local rem = math.max(0, math.floor(MerchantData.DespawnTimestamp - os.clock()))
+            local m = math.floor(rem / 60)
+            local s = math.floor(rem % 60)
+            return string.format(" | ⏱️ %d:%02d", m, s)
+        end
+    end
+
+    return ""
 end
 
-local function FindMerchantNPC()
+FindMerchantNPC = function()
     -- 1. ค้นหาโมเดล SecretShopNPC ใน Workspace (รองรับทุกหมายเลข _1, _2, _3, _4, ...)
     for _, obj in ipairs(Workspace:GetChildren()) do
         if obj:IsA("Model") and string.find(obj.Name, "SecretShopNPC") then
@@ -3112,18 +3163,39 @@ local function UpdateMerchantESP()
     end
 
     if existingBB then
-        local subLbl = existingBB:FindFirstChild("SubInfo")
-        if subLbl then
-            local myHRP = GetHRP()
-            local dist = myHRP and (myHRP.Position - hrp.Position).Magnitude or 0
-            local meters = math.floor(dist * 0.28)
-            local timeStr = ""
-            if MerchantData.RemainingTime > 0 then
-                timeStr = string.format(" | ⏱️ %d:%02d", math.floor(MerchantData.RemainingTime / 60), math.floor(MerchantData.RemainingTime % 60))
-            end
-            subLbl.Text = string.format("อีก %d เมตร%s", meters, timeStr)
+        UpdateMerchantESPSubInfo()
+    end
+end
+
+UpdateMerchantESPSubInfo = function()
+    if not State.MerchantESP or not State.Running then return end
+    local bb = nil
+    for _, obj in ipairs(MerchantESPObjects) do
+        if obj:IsA("BillboardGui") and obj.Name == "MerchantBillboard" then
+            bb = obj
+            break
         end
     end
+    if not bb or not bb.Parent then return end
+    local subLbl = bb:FindFirstChild("SubInfo")
+    if not subLbl then return end
+
+    local myHRP = GetHRP()
+    local hrp = bb.Adornee
+    if not hrp or not hrp.Parent then
+        if FindMerchantNPC then
+            local _, newHrp = FindMerchantNPC()
+            if newHrp then
+                bb.Adornee = newHrp
+                hrp = newHrp
+            end
+        end
+    end
+
+    local dist = (myHRP and hrp and hrp:IsA("BasePart")) and (myHRP.Position - hrp.Position).Magnitude or 0
+    local meters = math.floor(dist * 0.28)
+    local timeStr = GetRealtimeMerchantTimeString()
+    subLbl.Text = string.format("อีก %d เมตร%s", meters, timeStr)
 end
 
 local function TeleportToMerchant()
@@ -3152,8 +3224,6 @@ local function TeleportToMerchant()
     return true
 end
 
-
-
 -- เชื่อมต่อระบบ Event ของพ่อค้าพเนจร
 pcall(function()
     local Black = ReplicatedStorage:WaitForChild("Shop", 5):WaitForChild("Black", 5)
@@ -3161,12 +3231,16 @@ pcall(function()
         local SecretShopTimer = Black:FindFirstChild("SecretShopTimer")
         if SecretShopTimer then
             Connections.SecretShopTimer = SecretShopTimer.OnClientEvent:Connect(function(remainingSec, shopName)
+                local sec = tonumber(remainingSec) or 600
                 MerchantData.IsOpen = true
-                MerchantData.RemainingTime = remainingSec
+                MerchantData.RemainingTime = sec
+                MerchantData.DespawnTimestamp = os.clock() + sec
                 MerchantData.ShopName = shopName or "พ่อค้าพเนจร"
                 if State.AutoNotifyMerchant then
-                    Notify("🛒 พ่อค้าพเนจรเปิดร้าน!", string.format("เหลือเวลาอีก %d นาที %02d วินาที", math.floor(remainingSec / 60), math.floor(remainingSec % 60)), "เปิดเมนูเพื่อวาร์ปหรือเปิดร้าน", 5)
+                    Notify("🛒 พ่อค้าพเนจรเปิดร้าน!", string.format("เหลือเวลาอีก %d นาที %02d วินาที", math.floor(sec / 60), math.floor(sec % 60)), "เปิดเมนูเพื่อวาร์ปหรือเปิดร้าน", 5)
                 end
+                UpdateMerchantESP()
+                UpdateMerchantESPSubInfo()
             end)
         end
 
@@ -3174,23 +3248,61 @@ pcall(function()
         if SecretShopAnnounce then
             Connections.SecretShopAnnounce = SecretShopAnnounce.OnClientEvent:Connect(function(state, locName, duration)
                 if state == "open" then
+                    local dur = tonumber(duration) or 600
                     MerchantData.IsOpen = true
                     MerchantData.LocationName = locName or "จุดลับ"
-                    MerchantData.RemainingTime = duration or 600
+                    MerchantData.RemainingTime = dur
+                    MerchantData.DespawnTimestamp = os.clock() + dur
                     if State.AutoNotifyMerchant then
                         Notify("🛒 พ่อค้าพเนจรมาถึงแล้ว!", "อยู่ที่: " .. tostring(locName), "เปิดเมนูเพื่อตรวจสอบตำแหน่ง", 5)
                     end
+                    UpdateMerchantESP()
+                    UpdateMerchantESPSubInfo()
                 elseif state == "close" then
                     MerchantData.IsOpen = false
                     MerchantData.RemainingTime = 0
-                    MerchantData.NextSpawnTime = os.clock() + (duration or 1200)
+                    MerchantData.DespawnTimestamp = 0
+                    local dur = tonumber(duration) or 1200
+                    MerchantData.NextSpawnTime = os.clock() + dur
                     ClearMerchantESP()
                     if State.AutoNotifyMerchant then
-                        Notify("🛒 พ่อค้าพเนจรปิดร้านแล้ว", string.format("จะกลับมาใหม่ในอีกประมาณ %d นาที", math.floor((duration or 1200) / 60)), "", 4)
+                        Notify("🛒 พ่อค้าพเนจรปิดร้านแล้ว", string.format("จะกลับมาใหม่ในอีกประมาณ %d นาที", math.floor(dur / 60)), "", 4)
                     end
                 end
             end)
         end
+    end
+end)
+
+-- เชื่อมต่อตัวตรวจจับการเปลี่ยนข้อความของ TimerLabel ของเกม (Real-time 0ms drift)
+pcall(function()
+    local pgui = LocalPlayer:FindFirstChild("PlayerGui")
+    local gunShop = pgui and pgui:FindFirstChild("GunShopGui")
+    local tf = gunShop and gunShop:FindFirstChild("TimerFrame")
+    local tl = tf and tf:FindFirstChild("TimerLabel")
+    if tl then
+        if Connections.MerchantTimerLabelChanged then
+            pcall(function() Connections.MerchantTimerLabelChanged:Disconnect() end)
+        end
+        Connections.MerchantTimerLabelChanged = tl:GetPropertyChangedSignal("Text"):Connect(function()
+            if State.MerchantESP and State.Running then
+                UpdateMerchantESPSubInfo()
+            end
+        end)
+    end
+end)
+
+-- ลูป Heartbeat เพื่ออัปเดตระยะทางและเวลาแบบเรียลไทม์ลื่นไหล (10 Hz)
+local lastMerchantTick = 0
+if Connections.MerchantHeartbeat then
+    pcall(function() Connections.MerchantHeartbeat:Disconnect() end)
+end
+Connections.MerchantHeartbeat = RunService.Heartbeat:Connect(function()
+    if not State.MerchantESP or not State.Running then return end
+    local now = os.clock()
+    if now - lastMerchantTick >= 0.1 then
+        lastMerchantTick = now
+        UpdateMerchantESPSubInfo()
     end
 end)
 
@@ -3202,19 +3314,52 @@ local function GetMerchantStatusDisplay()
     local pgui = LocalPlayer:FindFirstChild("PlayerGui")
     local gunShop = pgui and pgui:FindFirstChild("GunShopGui")
     local tf = gunShop and gunShop:FindFirstChild("TimerFrame")
-    if tf and tf.Visible then
-        MerchantData.IsOpen = true
-        local tl = tf:FindFirstChild("TimerLabel")
-        if tl and tl.Text ~= "" then
-            local m, s = string.match(tl.Text, "(%d+):(%d+)")
-            if m and s then
-                MerchantData.RemainingTime = tonumber(m) * 60 + tonumber(s)
+    local tl = tf and tf:FindFirstChild("TimerLabel")
+
+    local isActuallyOpen = false
+    local remainingSec = 0
+
+    if tf and tf.Visible and tl and tl.Text ~= "" then
+        local m, s = string.match(tl.Text, "(%d+):(%d+)")
+        if m and s then
+            remainingSec = tonumber(m) * 60 + tonumber(s)
+            if remainingSec > 0 then
+                isActuallyOpen = true
+                MerchantData.DespawnTimestamp = os.clock() + remainingSec
             end
         end
-    elseif model then
-        MerchantData.IsOpen = true
+    end
+
+    if not isActuallyOpen and MerchantData.DespawnTimestamp and MerchantData.DespawnTimestamp > os.clock() then
+        remainingSec = math.max(0, math.floor(MerchantData.DespawnTimestamp - os.clock()))
+        isActuallyOpen = true
+    end
+
+    if not isActuallyOpen and model ~= nil then
+        isActuallyOpen = true
+        if not MerchantData.DespawnTimestamp or MerchantData.DespawnTimestamp <= os.clock() then
+            MerchantData.DespawnTimestamp = os.clock() + 600
+        end
+        remainingSec = math.max(0, math.floor(MerchantData.DespawnTimestamp - os.clock()))
+    end
+
+    MerchantData.IsOpen = isActuallyOpen
+    MerchantData.RemainingTime = remainingSec
+
+    local title = isActuallyOpen and "🛒 พ่อค้าพเนจร: เปิดร้านอยู่ (OPEN)" or "⏳ พ่อค้าพเนจร: ปิดร้านอยู่ (CLOSED)"
+    local timeDesc = ""
+
+    if isActuallyOpen then
+        local m = math.floor(remainingSec / 60)
+        local s = math.floor(remainingSec % 60)
+        timeDesc = string.format("• ⏱️ เวลาที่เหลือ: %d นาที %02d วินาที", m, s)
     else
-        MerchantData.IsOpen = false
+        if MerchantData.NextSpawnTime and MerchantData.NextSpawnTime > os.clock() then
+            local diff = math.max(0, math.floor(MerchantData.NextSpawnTime - os.clock()))
+            timeDesc = string.format("• ⏱️ จะมาถึงในอีกประมาณ: %d นาที %02d วินาที", math.floor(diff / 60), math.floor(diff % 60))
+        else
+            timeDesc = "• ⏱️ สถานะ: ปิดร้านพักผ่อน (จะแจ้งเตือนและขึ้น ESP ทันทีที่มาถึง)"
+        end
     end
 
     local myHRP = GetHRP()
@@ -3222,26 +3367,6 @@ local function GetMerchantStatusDisplay()
         MerchantData.Distance = math.floor((myHRP.Position - hrp.Position).Magnitude)
     else
         MerchantData.Distance = 0
-    end
-
-    local isCycleOpen, cycleSec = GetMerchantCycleTime()
-    local isActuallyOpen = (model ~= nil) or (tf and tf.Visible) or (MerchantData.IsOpen and MerchantData.RemainingTime > 0)
-
-    local title = isActuallyOpen and "🛒 พ่อค้าพเนจร: เปิดร้านอยู่ (OPEN)" or "⏳ พ่อค้าพเนจร: ปิดร้านอยู่ (CLOSED)"
-    local timeDesc = ""
-
-    if isActuallyOpen then
-        local rem = (MerchantData.RemainingTime > 0) and MerchantData.RemainingTime or (tf and 600 or cycleSec)
-        local m = math.floor(rem / 60)
-        local s = math.floor(rem % 60)
-        timeDesc = string.format("• ⏱️ เวลาที่เหลือ: %d นาที %02d วินาที", m, s)
-    else
-        if MerchantData.NextSpawnTime > os.clock() then
-            local diff = math.floor(MerchantData.NextSpawnTime - os.clock())
-            timeDesc = string.format("• ⏱️ จะมาถึงในอีกประมาณ: %d นาที %02d วินาที", math.floor(diff / 60), math.floor(diff % 60))
-        else
-            timeDesc = "• ⏱️ สถานะ: ปิดร้านพักผ่อน (จะแจ้งเตือนและขึ้น ESP ทันทีที่มาถึง)"
-        end
     end
 
     local locDesc = ""
@@ -3260,10 +3385,6 @@ task.spawn(function()
     while State.Running and _G._KrakenScriptId == MY_SCRIPT_ID do
         task.wait(1.0)
         pcall(function()
-            if MerchantData.RemainingTime > 0 and not MerchantData.IsOpen then
-                MerchantData.RemainingTime = math.max(0, MerchantData.RemainingTime - 1)
-            end
-
             UpdateMerchantESP()
 
             if MerchantStatusParagraph and type(MerchantStatusParagraph.SetTitle) == "function" then
