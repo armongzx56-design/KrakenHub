@@ -163,6 +163,7 @@ local Hub = {
         SilentVelocity = false,
         CombatFOV = 150,
         DrawFOV = false,
+        HideGameCrosshair = true, -- ซ่อนเป้าสีดำกลางจอของเกม (เป้าหมัด/เป้าปืน)
         -- พ่อค้าพเนจร (Wandering Merchant)
         MerchantESP = true,
         AutoNotifyMerchant = true,
@@ -2733,6 +2734,41 @@ Connections.FOVCircleLoop = RunService.RenderStepped:Connect(function()
     end
 end)
 
+-- 🚫 ซ่อนเป้าสีดำกลางจอของเกม (เป้าหมัด / เป้าปืน) ตามที่สั่ง 100%
+Connections.HideGameCrosshairLoop = RunService.RenderStepped:Connect(function()
+    if State.Running and State.HideGameCrosshair then
+        local pgui = LocalPlayer:FindFirstChild("PlayerGui")
+        if pgui then
+            local fistgui = pgui:FindFirstChild("fistgui")
+            if fistgui then
+                local ch = fistgui:FindFirstChild("crosshair")
+                if ch then
+                    ch.Visible = false
+                    ch.ImageTransparency = 1
+                end
+            end
+            local gunGui = pgui:FindFirstChild("GunGUI")
+            if gunGui then
+                local ch = gunGui:FindFirstChild("Crosshair")
+                if ch then
+                    ch.Visible = false
+                    local main = ch:FindFirstChild("Main")
+                    if main then
+                        main.Visible = false
+                        for _, line in ipairs(main:GetChildren()) do
+                            if line:IsA("GuiObject") then
+                                line.Visible = false
+                                line.BackgroundTransparency = 1
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+
+
 local function IsWallClear(origin, targetPart, targetChar)
     local diff = (targetPart.Position - origin)
     local dist = diff.Magnitude
@@ -3862,6 +3898,15 @@ local DrawFOVToggle = Tabs.Combat:AddToggle("DrawFOVOn", {
 })
 DrawFOVToggle:OnChanged(function()
     State.DrawFOV = Options.DrawFOVOn.Value
+end)
+
+local HideGameCrosshairToggle = Tabs.Combat:AddToggle("HideGameCrosshairOn", {
+    Title = "🚫 ซ่อนเป้าสีดำกลางจอของเกม (Hide Black Crosshair)",
+    Description = "ลบ/ซ่อนเป้าหมายสีดำกึ่งกลางหน้าจอของเกม (เป้าหมัด/เป้าปืน) ให้หน้าจอโล่งสะอาด",
+    Default = true
+})
+HideGameCrosshairToggle:OnChanged(function()
+    State.HideGameCrosshair = Options.HideGameCrosshairOn.Value
 end)
 
 Tabs.Combat:AddSection("🔧 ปรับแต่งปืน & ความเสถียร (Gun Modifiers)")
