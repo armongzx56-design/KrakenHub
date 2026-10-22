@@ -2103,6 +2103,13 @@ end
 -- 4. เด็กบ้าน: สีขาว (Color3.fromRGB(245, 245, 245))
 -- 5. ตำรวจ: สีแดง (Color3.fromRGB(255, 45, 45))
 --------------------------------------------------------------
+--------------------------------------------------------------
+-- 👁️ ระบบ ESP ผู้เล่นรวมศูนย์สมบูรณ์แบบ (UNIFIED FLICKER-FREE PLAYER ESP)
+-- • รวมทุกระบบไว้ในฟังก์ชันเดียว: แยกสีสถาบัน, ตรวจอาวุธ, คำนวณระยะ, หลอดเลือด
+-- • แก้บัคชื่อซ้อน 100%: ปิด OverheadNameBill เดิมของเกมขณะเปิด ESP อัตโนมัติ และคืนค่าเมื่อปิด
+-- • แก้บัคกระพริบ 100%: ใช้ Instance Registry อัปเดตคุณสมบัติเดิมแบบ In-Place ไม่สร้าง/ทำลายซ้ำซ้อน
+-- • ดีไซน์ Minimalist: ปราศจากไอคอน/อิโมจิรบกวนสายตา ตัวหนังสือคมชัด ไม่บดบังตัวละคร
+--------------------------------------------------------------
 local SchoolConfigs = {
     { Key = "ปทุมคงคา", Short = "ปทุมคงคา", Color = Color3.fromRGB(0, 195, 255) },
     { Key = "กรุงเทพช่างกล", Short = "ช่างกล", Color = Color3.fromRGB(255, 240, 130) },
@@ -2114,72 +2121,36 @@ local SchoolConfigs = {
     { Key = "สุทธิ", Short = "วัดสุทธิ", Color = Color3.fromRGB(80, 230, 180) },
 }
 
-local function GetPlayerSchoolInfo(plr)
-    local rawTeamName = ""
-    if plr.Team then
-        rawTeamName = tostring(plr.Team.Name)
+local function CleanupSinglePlayerESP(p, entry)
+    if not entry then return end
+    if entry.Billboard then pcall(function() entry.Billboard:Destroy() end) end
+    if entry.Highlight then pcall(function() entry.Highlight:Destroy() end) end
+    if entry.NativeTag and entry.NativeTag.Parent then
+        pcall(function() entry.NativeTag.Enabled = true end)
     end
-    if rawTeamName == "" and plr.Character then
-        for _, d in ipairs(plr.Character:GetDescendants()) do
-            if d:IsA("TextLabel") and d.Visible and d.Text and d.Text ~= "" then
-                for _, sc in ipairs(SchoolConfigs) do
-                    if string.find(d.Text, sc.Key, 1, true) then
-                        rawTeamName = sc.Key
-                        break
-                    end
-                end
-                if rawTeamName ~= "" then break end
-            end
-        end
-    end
-    for _, sc in ipairs(SchoolConfigs) do
-        if string.find(rawTeamName, sc.Key, 1, true) then
-            return sc.Color, sc.Short
-        end
-    end
-    return Color3.fromRGB(46, 204, 113), rawTeamName ~= "" and rawTeamName or "ประชาชน"
+    Hub.PlayerESPRegistry[p] = nil
 end
 
-local function GetEquippedWeaponInfo(char)
-    if not char then return "มือเปล่า" end
-    local tool = char:FindFirstChildOfClass("Tool")
-    if not tool then
-        return "มือเปล่า"
-    end
-    local name = tool.Name or ""
-    local lower = string.lower(name)
-    if lower == "fists" or lower == "fist" or name == "หมัด" or name == "มือเปล่า" then
-        return "มือเปล่า"
-    end
-    return name
-end
-
-local function GetHealthVisuals(hum)
-    local hp = math.max(0, hum and hum.Health or 0)
-    local maxHp = math.max(1, hum and hum.MaxHealth or 100)
-    local ratio = math.clamp(hp / maxHp, 0, 1)
-    local col
-    if ratio > 0.70 then
-        col = Color3.fromRGB(46, 204, 113)
-    elseif ratio > 0.35 then
-        col = Color3.fromRGB(243, 156, 18)
-    else
-        col = Color3.fromRGB(231, 76, 60)
-    end
-    return hp, maxHp, ratio, col
-end
-
-local function ClearPlayerESP()
+local function ClearAllPlayerESP()
     for p, entry in pairs(Hub.PlayerESPRegistry) do
-        if entry.Billboard then pcall(function() entry.Billboard:Destroy() end) end
-        if entry.Highlight then pcall(function() entry.Highlight:Destroy() end) end
+        CleanupSinglePlayerESP(p, entry)
     end
     table.clear(Hub.PlayerESPRegistry)
+    pcall(function()
+        for _, c in ipairs(targetGuiParent:GetChildren()) do
+            if c:IsA("BillboardGui") and c.Name:find("KrakenESP_BB_") then
+                c:Destroy()
+            end
+            if c:IsA("Highlight") and c.Name:find("KrakenESP_HL_") then
+                c:Destroy()
+            end
+        end
+    end)
 end
 
-local function UpdateESP()
+local function UnifiedPlayerESPUpdate()
     if not State.ESP or not State.Running then
-        if next(Hub.PlayerESPRegistry) then ClearPlayerESP() end
+        if next(Hub.PlayerESPRegistry) then ClearAllPlayerESP() end
         return
     end
 
@@ -2187,16 +2158,17 @@ local function UpdateESP()
     local myHrp = myChar and myChar:FindFirstChild("HumanoidRootPart")
     if not myHrp then return end
 
-    local currentPlayers = {}
+    local currentActive = {}
 
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LocalPlayer then
-            currentPlayers[p] = true
+            currentActive[p] = true
             local char = p.Character
             local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            local head = char and char:FindFirstChild("Head")
             local hum = char and char:FindFirstChildOfClass("Humanoid")
 
-            local isValid = char and hrp and hum and hum.Health > 0
+            local isValid = char and hrp and head and hum and hum.Health > 0
             local dist = isValid and (hrp.Position - myHrp.Position).Magnitude or 999999
             local inRange = isValid and dist <= (State.ESPMaxDistance or 500)
 
@@ -2206,15 +2178,23 @@ local function UpdateESP()
                 if entry then
                     if entry.Billboard then entry.Billboard.Enabled = false end
                     if entry.Highlight then entry.Highlight.Enabled = false end
+                    if entry.NativeTag and entry.NativeTag.Parent then
+                        entry.NativeTag.Enabled = true
+                    end
                 end
             else
+                -- 1. ซ่อน OverheadNameBill เดิมของเกมเพื่อแก้ปัญหาชื่อซ้อน 100%
+                local nativeTag = head:FindFirstChild("OverheadNameBill")
+                if nativeTag and nativeTag.Enabled then
+                    nativeTag.Enabled = false
+                end
+
+                -- 2. สร้าง GUI ใหม่เฉพาะกรณีที่ยังไม่มี หรือตัวละคร respawn ใหม่
                 if not entry or entry.Character ~= char or not entry.Billboard or not entry.Billboard.Parent or not entry.Highlight or not entry.Highlight.Parent then
                     if entry then
-                        if entry.Billboard then pcall(function() entry.Billboard:Destroy() end) end
-                        if entry.Highlight then pcall(function() entry.Highlight:Destroy() end) end
+                        CleanupSinglePlayerESP(p, entry)
                     end
 
-                    -- Soft subtle Highlight (high transparency, thin outline)
                     local hl = Instance.new("Highlight")
                     hl.Name = "KrakenESP_HL_" .. p.Name
                     hl.Adornee = char
@@ -2222,16 +2202,14 @@ local function UpdateESP()
                     hl.OutlineTransparency = 0.2
                     hl.Parent = targetGuiParent
 
-                    -- Clean, frameless BillboardGui (compact & minimal)
                     local bb = Instance.new("BillboardGui")
                     bb.Name = "KrakenESP_BB_" .. p.Name
-                    bb.Adornee = hrp
+                    bb.Adornee = head
                     bb.Size = UDim2.new(0, 120, 0, 24)
-                    bb.StudsOffset = Vector3.new(0, 2.1, 0)
+                    bb.StudsOffset = Vector3.new(0, 1.8, 0)
                     bb.AlwaysOnTop = true
                     bb.Parent = targetGuiParent
 
-                    -- Line 1: School Tag + Player Name
                     local nameLbl = Instance.new("TextLabel", bb)
                     nameLbl.Size = UDim2.new(1, 0, 0, 11)
                     nameLbl.Position = UDim2.new(0, 0, 0, 0)
@@ -2241,7 +2219,6 @@ local function UpdateESP()
                     nameLbl.TextStrokeTransparency = 0.2
                     nameLbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 
-                    -- Line 2: Weapon • Distance • Health in one clean line
                     local infoLbl = Instance.new("TextLabel", bb)
                     infoLbl.Size = UDim2.new(1, 0, 0, 10)
                     infoLbl.Position = UDim2.new(0, 0, 0, 11)
@@ -2252,10 +2229,9 @@ local function UpdateESP()
                     infoLbl.TextStrokeTransparency = 0.2
                     infoLbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 
-                    -- Line 3: Micro Health Line (48px wide, 2px tall)
                     local hpBg = Instance.new("Frame", bb)
-                    hpBg.Size = UDim2.new(0, 48, 0, 2)
-                    hpBg.Position = UDim2.new(0.5, -24, 1, -2)
+                    hpBg.Size = UDim2.new(0, 44, 0, 2)
+                    hpBg.Position = UDim2.new(0.5, -22, 1, -2)
                     hpBg.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
                     hpBg.BackgroundTransparency = 0.3
                     hpBg.BorderSizePixel = 0
@@ -2274,14 +2250,56 @@ local function UpdateESP()
                         HealthFill = hpFill,
                         Player = p,
                         Character = char,
+                        NativeTag = nativeTag
                     }
                     Hub.PlayerESPRegistry[p] = entry
+                else
+                    entry.NativeTag = nativeTag
                 end
 
-                local schoolCol, schoolShort = GetPlayerSchoolInfo(p)
-                local wepText = GetEquippedWeaponInfo(char)
-                local hp, maxHp, hpRatio, hpCol = GetHealthVisuals(hum)
+                -- 3. ตรวจจับข้อมูลสถาบัน
+                local rawTeamName = p.Team and tostring(p.Team.Name) or ""
+                if rawTeamName == "" then
+                    for _, d in ipairs(char:GetDescendants()) do
+                        if d:IsA("TextLabel") and d.Visible and d.Text and d.Text ~= "" then
+                            for _, sc in ipairs(SchoolConfigs) do
+                                if string.find(d.Text, sc.Key, 1, true) then
+                                    rawTeamName = sc.Key; break
+                                end
+                            end
+                            if rawTeamName ~= "" then break end
+                        end
+                    end
+                end
 
+                local schoolCol = Color3.fromRGB(46, 204, 113)
+                local schoolShort = rawTeamName ~= "" and rawTeamName or "ประชาชน"
+                for _, sc in ipairs(SchoolConfigs) do
+                    if string.find(rawTeamName, sc.Key, 1, true) then
+                        schoolCol = sc.Color
+                        schoolShort = sc.Short
+                        break
+                    end
+                end
+
+                -- 4. ตรวจจับอาวุธ
+                local wepText = "มือเปล่า"
+                local tool = char:FindFirstChildOfClass("Tool")
+                if tool and tool.Name then
+                    local tName = tool.Name
+                    local lower = string.lower(tName)
+                    if lower ~= "fists" and lower ~= "fist" and tName ~= "หมัด" and tName ~= "มือเปล่า" then
+                        wepText = tName
+                    end
+                end
+
+                -- 5. คำนวณหลอดเลือด
+                local curHp = math.max(0, hum.Health)
+                local maxHp = math.max(1, hum.MaxHealth)
+                local hpRatio = math.clamp(curHp / maxHp, 0, 1)
+                local hpCol = hpRatio > 0.7 and Color3.fromRGB(46, 204, 113) or (hpRatio > 0.35 and Color3.fromRGB(243, 156, 18) or Color3.fromRGB(231, 76, 60))
+
+                -- 6. อัปเดตข้อมูลบน GUI เดิมแบบ In-Place (ไม่กระพริบ 100%)
                 entry.Highlight.Enabled = true
                 entry.Billboard.Enabled = true
                 entry.Billboard.MaxDistance = State.ESPMaxDistance or 500
@@ -2292,7 +2310,6 @@ local function UpdateESP()
                 entry.NameLabel.TextColor3 = schoolCol
                 entry.NameLabel.Text = string.format("[%s] %s", schoolShort, p.DisplayName)
 
-                -- Compact info line: [Weapon] • Distance • HP
                 local parts = {}
                 if State.ESPShowWeapon and wepText ~= "" then
                     table.insert(parts, wepText)
@@ -2300,7 +2317,7 @@ local function UpdateESP()
                 if State.ESPShowDistance then
                     table.insert(parts, string.format("%.0fm", dist * 0.28))
                 end
-                table.insert(parts, string.format("%dHP", math.floor(hp)))
+                table.insert(parts, string.format("%dHP", math.floor(curHp)))
 
                 entry.InfoLabel.Text = table.concat(parts, " • ")
                 entry.InfoLabel.Visible = true
@@ -2316,11 +2333,10 @@ local function UpdateESP()
         end
     end
 
+    -- ล้างข้อมูลผู้เล่นที่ออกจากเซิร์ฟเวอร์
     for p, entry in pairs(Hub.PlayerESPRegistry) do
-        if not currentPlayers[p] or not p.Parent then
-            if entry.Billboard then pcall(function() entry.Billboard:Destroy() end) end
-            if entry.Highlight then pcall(function() entry.Highlight:Destroy() end) end
-            Hub.PlayerESPRegistry[p] = nil
+        if not currentActive[p] or not p.Parent then
+            CleanupSinglePlayerESP(p, entry)
         end
     end
 end
@@ -2328,11 +2344,11 @@ end
 task.spawn(function()
     while State.Running and _G._KrakenScriptId == MY_SCRIPT_ID do
         if State.ESP then
-            pcall(UpdateESP)
-            task.wait(0.05)
+            pcall(UnifiedPlayerESPUpdate)
+            task.wait(0.04)
         else
             if next(Hub.PlayerESPRegistry) then
-                ClearPlayerESP()
+                ClearAllPlayerESP()
             end
             task.wait(0.3)
         end
@@ -3235,7 +3251,7 @@ local ESPToggle = Tabs.Player:AddToggle("ESPOn", {
 ESPToggle:OnChanged(function()
     State.ESP = Options.ESPOn.Value
     if not State.ESP then
-        ClearPlayerESP()
+        ClearAllPlayerESP()
     end
 end)
 
@@ -3447,7 +3463,7 @@ function Hub.Unload()
     end)
     for _, c in pairs(Connections) do pcall(function() c:Disconnect() end) end
     for _, obj in pairs(Hub.ESPObjects) do pcall(function() obj:Destroy() end) end
-    ClearPlayerESP()
+    ClearAllPlayerESP()
     ClearMerchantESP()
     if State.FullBright then
         RestoreLighting()
