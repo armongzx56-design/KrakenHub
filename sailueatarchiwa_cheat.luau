@@ -53,23 +53,23 @@ pcall(function()
     end
 end)
 
--- เคลียร์ Highlight และ Billboard ตกค้างใน Workspace และ CoreGui
+-- เคลียร์ Highlight และ Billboard ตกค้างใน Workspace และ CoreGui ทุกชนิด
 pcall(function()
     for _, desc in ipairs(Workspace:GetDescendants()) do
-        if desc:IsA("Highlight") and (desc.Name:find("Target") or desc.Name:find("Kraken") or desc.Name:find("Farm") or desc.Name:find("Test") or desc.Name:find("Merchant") or desc.Name == "Highlight") then
+        if desc:IsA("Highlight") and (desc.Name:find("Target") or desc.Name:find("Kraken") or desc.Name:find("Farm") or desc.Name:find("Test") or desc.Name:find("Merchant") or desc.Name:find("ESP") or desc.Name:find("Minimal") or desc.Name:find("B3_") or desc.Name == "Highlight") then
             if not desc.Parent or not desc.Parent.Name:find("MenuLights") then
                 desc:Destroy()
             end
         end
-        if desc:IsA("BillboardGui") and (desc.Name:find("Merchant") or desc.Name:find("Kraken")) then
+        if desc:IsA("BillboardGui") and (desc.Name:find("Merchant") or desc.Name:find("Kraken") or desc.Name:find("Farm") or desc.Name:find("ESP") or desc.Name:find("Minimal") or desc.Name:find("B3_") or desc.Name:find("Test") or desc.Name:find("Proto")) then
             desc:Destroy()
         end
     end
     for _, c in ipairs(CoreGui:GetChildren()) do
-        if c:IsA("Highlight") and (c.Name:find("Target") or c.Name:find("Kraken") or c.Name:find("Farm") or c.Name:find("Test") or c.Name:find("Merchant")) then
+        if c:IsA("Highlight") and not c.Name:find("Roblox") then
             c:Destroy()
         end
-        if c:IsA("BillboardGui") and (c.Name:find("Target") or c.Name:find("Kraken") or c.Name:find("Farm") or c.Name:find("Merchant")) then
+        if c:IsA("BillboardGui") and not c.Name:find("Roblox") and not c.Name:find("Chat") and not c.Name:find("Purchase") and not c.Name:find("InGameMenu") then
             c:Destroy()
         end
     end
