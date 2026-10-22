@@ -1,5 +1,5 @@
 -- ==============================================================
--- 🐙 KRAKENHUB V6.1 | สายเลือดอาชีวะ I Sailueatarchiwa ไทย
+-- 🔥 KRAKENHUB V1.0 | สายเลือดอาชีวะ I Sailueatarchiwa ไทย
 -- ออกแบบด้วย Fluent UI (BYPASS CODE: 261 & ALL ANTI-SYSTEM KICKS 100%)
 -- • HOOKMETAMETHOD BYPASS: บล็อก Remote รายงานการแบนและตรวจจับทั้งหมด (ReportClientViolation, Report, BanPlayer)
 -- • BYPASS CODE 261 (SPEED/MOVEMENT CHECK): คุมความเร็ววิ่งฟาร์มที่ 17 studs/s (ไม่เกินเพดาน 18 ของคนทั่วไป) + ล็อค Velocity เป็น 0 สนิทขณะทำงาน/มินิเกม
@@ -20,10 +20,14 @@ local VirtualInputManager = game:GetService("VirtualInputManager")
 local TweenService = game:GetService("TweenService")
 local PathfindingService = game:GetService("PathfindingService")
 local Lighting = game:GetService("Lighting")
+local CollectionService = game:GetService("CollectionService")
+local CS = CollectionService
+local ProximityPromptService = game:GetService("ProximityPromptService")
 
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
 
+print(">>> KRAKENHUB INITIALIZING <<<")
 -- เคลียร์อินสแตนซ์และ UI เก่า
 if _G.KrakenHub_Sailueat and type(_G.KrakenHub_Sailueat.Unload) == "function" then
     pcall(function() _G.KrakenHub_Sailueat.Unload() end)
@@ -34,7 +38,7 @@ end
 
 local CoreGui = game:GetService("CoreGui")
 local targetGuiParent = pcall(function() return CoreGui.Name end) and CoreGui or LocalPlayer:WaitForChild("PlayerGui")
-for _, name in ipairs({"SailueatHub_V3", "SailueatHub_V3_5", "SailueatHub_V3_6", "SailueatHub_V3_7", "SailueatHub_V3_8", "SailueatHub_V3_9", "SailueatHub_V2", "SailueatHub_V1", "Fluent"}) do
+for _, name in ipairs({"KrakenHub_ToggleButton", "SailueatHub_V3", "SailueatHub_V3_5", "SailueatHub_V3_6", "SailueatHub_V3_7", "SailueatHub_V3_8", "SailueatHub_V3_9", "SailueatHub_V2", "SailueatHub_V1", "Fluent"}) do
     local old = targetGuiParent:FindFirstChild(name)
     if old then pcall(function() old:Destroy() end) end
 end
@@ -120,9 +124,10 @@ local Hub = {
         -- Farm
         SelectedJob = "งานก่อสร้าง",
         AutoFarm = false,
-        FarmSpeed = 21,
-        AutoSolveMinigame = true,
-        AutoCollectCash = true,
+        FarmSpeed = 17.5,
+        AutoSolveMinigame = false,
+        AutoHire = true,
+        ConstructionFilter = "กำแพง & เหล็ก", -- "ทั้งหมด", "กำแพง & เหล็ก", "เฉพาะกำแพง", "เฉพาะเหล็ก"
         ShowAllSpotsESP = false,
         -- Cheats
         Speed = false,
@@ -135,6 +140,20 @@ local Hub = {
         InfJump = false,
         ESP = false,
         FullBright = false,
+        -- ปืน & Combat
+        NoSpread = false,
+        NoRecoil = false,
+        FastBullet = false,
+        SilentAim = false,
+        SilentPart = "Head",
+        SilentHitChance = 100,
+        SilentWallCheck = false,
+        SilentVelocity = false,
+        CombatFOV = 150,
+        DrawFOV = false,
+        -- พ่อค้าพเนจร (Wandering Merchant)
+        MerchantESP = true,
+        AutoNotifyMerchant = true,
     }
 }
 _G.KrakenHub_Sailueat = Hub
@@ -162,7 +181,7 @@ local IsCurrentlyWorking
 --------------------------------------------------------------
 -- 🏃 3. ระบบสปรินต์ความเร็วปลอดภัยสูงสุด (BYPASS CODE: 261)
 -- ความเร็วปกติของคนในแมพนี้: เดิน 8 studs/s, วิ่ง (Shift) 18 studs/s, VIP 22 studs/s
--- ปรับ FarmSpeed ได้อิสระ (ค่าเริ่มต้น 21 studs/s): วิ่งไว คล่องตัว ไม่เกินเกณฑ์เตะ 261
+-- ปรับ FarmSpeed ได้ปลอดภัย (ค่าเริ่มต้น 17.5 studs/s): วิ่งไว คล่องตัว ไม่เกินเกณฑ์เตะ 261 (ห้ามเกิน 18 เด็ดขาด)
 -- ตอนหยุดวิ่งคืนค่าเป็น 8 studs/s เสมอ
 -- ขณะทำงานก่อสร้าง/มินิเกม ล็อค WalkSpeed = 0 และ Velocity = 0 สนิท
 --------------------------------------------------------------
@@ -170,46 +189,91 @@ local NORMAL_WALK_SPEED = 8
 local runAnimTrack = nil
 local isCurrentlySprinting = false
 
+local function GetRunButton()
+    local pgui = LocalPlayer:FindFirstChild("PlayerGui")
+    return pgui and pgui:FindFirstChild("MobileGUI") and pgui.MobileGUI:FindFirstChild("MobileButtons") and pgui.MobileGUI.MobileButtons:FindFirstChild("RunButton")
+end
+
 local function SetSprinting(enabled)
     local char = LocalPlayer.Character
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     if not hum or hum.Health <= 0 then return end
 
     local fn = GetRunSystemRenderFn()
+    local runBtn = GetRunButton()
+    local pgui = LocalPlayer:FindFirstChild("PlayerGui")
+    local rs = pgui and pgui:FindFirstChild("RunSystem")
+    local isBlocked = rs and rs:GetAttribute("BlockStamina") == true
+
     if enabled then
-        if IsCurrentlyWorking and IsCurrentlyWorking() then
-            if fn then pcall(debug.setupvalue, fn, 3, false) end
+        if (IsCurrentlyWorking and IsCurrentlyWorking()) or isBlocked then
+            if fn and debug.getupvalue(fn, 3) == true then
+                if runBtn and typeof(firesignal) == "function" then
+                    firesignal(runBtn.MouseButton1Click)
+                else
+                    pcall(debug.setupvalue, fn, 3, false)
+                end
+            end
             hum.WalkSpeed = 0
             return
         end
+
         isCurrentlySprinting = true
         if fn then
+            local isRunning = debug.getupvalue(fn, 3)
             local isExhausted = debug.getupvalue(fn, 5)
             local stamina = debug.getupvalue(fn, 10)
-            -- ถ้ายังไม่เหนื่อยหอบ และสเตมิน่ายังเหลือ ให้เปิดระบบวิ่งแท้ของเกม (เหมือนกด LeftShift)
+
+            -- ถ้ายังไม่เหนื่อยหอบ และสเตมิน่ายังเหลือ
             if not isExhausted and (stamina == nil or stamina > 2) then
-                pcall(debug.setupvalue, fn, 3, true)
-                hum.WalkSpeed = (State.AutoFarm and State.FarmSpeed) or 18
+                if not isRunning then
+                    -- 🏃 กดปุ่ม Shift แท้ของเกมผ่าน RunButton (100% Native Game Sprint)
+                    if runBtn and typeof(firesignal) == "function" then
+                        firesignal(runBtn.MouseButton1Click)
+                    else
+                        pcall(debug.setupvalue, fn, 3, true)
+                        hum.WalkSpeed = 18
+                    end
+                end
+                hum.WalkSpeed = 18
                 hum.JumpPower = 35
             else
-                -- สเตมิน่าหมด ปล่อยให้ RunSystem คุมความเร็วเดินพักฟื้นตามธรรมชาติ (6-8 studs/s)
-                pcall(debug.setupvalue, fn, 3, false)
+                -- สเตมิน่าหมด ปิดวิ่งให้เดินฟื้นตามธรรมชาติ (เหมือนปล่อย Shift)
+                if isRunning then
+                    if runBtn and typeof(firesignal) == "function" then
+                        firesignal(runBtn.MouseButton1Click)
+                    else
+                        pcall(debug.setupvalue, fn, 3, false)
+                        hum.WalkSpeed = 8
+                    end
+                end
             end
         else
-            hum.WalkSpeed = (State.AutoFarm and State.FarmSpeed) or 18
+            hum.WalkSpeed = 18
             hum.JumpPower = 35
         end
     else
         isCurrentlySprinting = false
         if fn then
-            pcall(debug.setupvalue, fn, 3, false)
+            local isRunning = debug.getupvalue(fn, 3)
+            if isRunning then
+                -- 🛑 ปล่อยปุ่ม Shift แท้ คืนความเร็วเดิน 8 studs/s
+                if runBtn and typeof(firesignal) == "function" then
+                    firesignal(runBtn.MouseButton1Click)
+                else
+                    pcall(debug.setupvalue, fn, 3, false)
+                    hum.WalkSpeed = 8
+                end
+            end
         end
-        if not (IsCurrentlyWorking and IsCurrentlyWorking()) then
+        if not (IsCurrentlyWorking and IsCurrentlyWorking()) and not isBlocked then
             hum.WalkSpeed = NORMAL_WALK_SPEED
             hum.JumpPower = 35
         end
     end
 end
+
+
 
 -- ควบคุมความเร็วใน RenderStepped: ล็อคตัว 0 ขณะทำงาน, คืนการควบคุมให้ RunSystem ขณะเดินทาง, และรักษามุมกล้องให้นิ่งสนิท
 Connections.SpeedEnforcer = RunService.RenderStepped:Connect(function()
@@ -221,12 +285,9 @@ Connections.SpeedEnforcer = RunService.RenderStepped:Connect(function()
     -- 🛑 ล้างค่าสั่นมุมกล้อง math.noise ของ RunSystem ให้เป็น 0 (ป้องกันมุมกล้องกระตุก/สั่นขณะวิ่ง 100%)
     local fn = GetRunSystemRenderFn()
     if fn then
-        pcall(debug.setupvalue, fn, 15, 0) -- u14: target amplitude ของการสั่นกล้อง (แก้ปัญหามุมกล้องกระตุก 100%)
+        pcall(debug.setupvalue, fn, 15, 0) -- u14: target amplitude ของการสั่นกล้อง
         pcall(debug.setupvalue, fn, 18, 0) -- u15: current amplitude ของการสั่นกล้อง
         pcall(debug.setupvalue, fn, 23, 0) -- u16: phase ของ math.noise
-    end
-    if hum.CameraOffset.Magnitude > 0 then
-        hum.CameraOffset = Vector3.zero
     end
 
     -- ล็อคความเร็ว 0 เฉพาะตอนที่เปิด AutoFarm และกำลังทำงานก่อสร้าง / มินิเกม เท่านั้น
@@ -236,15 +297,21 @@ Connections.SpeedEnforcer = RunService.RenderStepped:Connect(function()
         hrp.AssemblyAngularVelocity = Vector3.zero
         if isCurrentlySprinting then
             isCurrentlySprinting = false
-            if fn then pcall(debug.setupvalue, fn, 3, false) end
+            if fn and debug.getupvalue(fn, 3) == true then
+                local runBtn = GetRunButton()
+                if runBtn and typeof(firesignal) == "function" then
+                    firesignal(runBtn.MouseButton1Click)
+                else
+                    pcall(debug.setupvalue, fn, 3, false)
+                end
+            end
         end
         return
     end
 
-    -- ปล่อยให้ RunSystem ดูแล WalkSpeed และ Stamina ตามธรรมชาติเหมือนกด LeftShift จริงๆ
-    -- หากผู้ใช้เปิด Cheats > Speed เสริมเอง ถึงจะปรับความเร็วพิเศษ:
+    -- หากผู้ใช้เปิด Cheats > Speed เสริมเอง ล็อคเพดานปลอดภัยไม่เกิน 18 studs/s
     if State.Speed then
-        hum.WalkSpeed = State.SpeedValue or 20
+        hum.WalkSpeed = math.min(State.SpeedValue or 18, 18)
     end
 end)
 
@@ -296,11 +363,12 @@ Connections.FullBrightLoop = RunService.RenderStepped:Connect(function()
 end)
 
 --------------------------------------------------------------
--- 🎯 4. ระบบ TARGET ESP สีเขียวสดใส ขอบเหลืองนีออน (กรองแผ่นพื้นยักษ์ออก)
+-- 🎯 4. ระบบ TARGET ESP สีชัดเจน แยกประเภท เหล็ก (ส้มทอง) / กำแพง (เขียวนีออน)
 --------------------------------------------------------------
 local currentTargetHighlight = nil
 local currentTargetBillboard = nil
 local currentTargetInstance = nil
+local currentTargetStatus = nil
 
 local function ClearTargetESP()
     if currentTargetHighlight then
@@ -312,20 +380,32 @@ local function ClearTargetESP()
         currentTargetBillboard = nil
     end
     currentTargetInstance = nil
+    currentTargetStatus = nil
 end
 
-local function SetTargetESP(targetInstance, titleText, customColor)
+local function SetTargetESP(targetInstance, titleText, customColor, statusText)
     if not targetInstance then
         ClearTargetESP()
         return
     end
 
-    if currentTargetInstance == targetInstance and currentTargetHighlight and currentTargetHighlight.Parent then
+    currentTargetStatus = statusText or "เป้าหมาย"
+
+    -- ถ้าเป็นเป้าหมายเดิม แค่อัปเดตข้อความหัวเรื่อง/สถานะ
+    if currentTargetInstance == targetInstance and currentTargetHighlight and currentTargetHighlight.Parent and currentTargetBillboard and currentTargetBillboard.Parent then
+        local frame = currentTargetBillboard:FindFirstChildOfClass("Frame")
+        if frame then
+            local tLabel = frame:FindFirstChild("TitleLabel")
+            if tLabel and titleText then
+                tLabel.Text = "🎯 " .. titleText
+            end
+        end
         return
     end
 
     ClearTargetESP()
     currentTargetInstance = targetInstance
+    currentTargetStatus = statusText or "เป้าหมาย"
 
     local adornee = targetInstance
     if adornee:IsA("ProximityPrompt") then
@@ -335,29 +415,34 @@ local function SetTargetESP(targetInstance, titleText, customColor)
         adornee = adornee.Parent
     end
 
-    -- กรองชิ้นส่วนขนาดใหญ่ (แผ่นพื้นฐานราก Union ขนาด 80+ studs)
-    if adornee:IsA("BasePart") and (adornee.Size.X > 14 or adornee.Size.Z > 14 or adornee.Size.Y > 14) then
-        local smallPart = adornee.Parent and adornee.Parent:FindFirstChildWhichIsA("BasePart")
-        if smallPart and smallPart.Size.X <= 14 and smallPart.Size.Z <= 14 then
-            adornee = smallPart
-        else
-            adornee = nil
-        end
-    elseif adornee:IsA("BasePart") and adornee.Parent and adornee.Parent:IsA("Model") and adornee.Parent ~= Workspace and adornee.Parent ~= Workspace:FindFirstChild("Job") then
-        local hasGiantPart = false
-        for _, p in ipairs(adornee.Parent:GetChildren()) do
-            if p:IsA("BasePart") and (p.Size.X > 14 or p.Size.Z > 14) then
-                hasGiantPart = true
-                break
-            end
-        end
-        if not hasGiantPart then
-            adornee = adornee.Parent
-        end
+    -- หากชิ้นส่วนอยู่ใต้ Model ประจำจุด (NailSite, WeldSite, DrillSite) ให้นำ Model นั้นมาทำ Highlight
+    if adornee:IsA("BasePart") and adornee.Parent and adornee.Parent:IsA("Model") and adornee.Parent ~= Workspace and adornee.Parent ~= Workspace:FindFirstChild("Job") and adornee.Parent.Name ~= "งาน" then
+        adornee = adornee.Parent
     end
 
-    local fillColor = customColor or Color3.fromRGB(120, 255, 40)   -- Lime Green สีเขียวสดใสตามรูป
-    local outlineColor = Color3.fromRGB(255, 255, 0)                  -- Neon Yellow ขอบเหลืองนีออนสว่างวาบ
+    -- กรองชิ้นส่วนขนาดใหญ่ของแมพ (Union ฐานราก, ZoneBound ขนาดเกิน 30 studs)
+    if adornee:IsA("BasePart") and (adornee.Size.X > 30 or adornee.Size.Z > 30 or adornee.Size.Y > 30) then
+        adornee = nil
+    end
+
+    -- กำหนดสีแยกประเภทอย่างชัดเจน
+    local textLower = string.lower(titleText or "")
+    local fillColor = customColor or Color3.fromRGB(0, 240, 160)
+    local outlineColor = Color3.fromRGB(160, 255, 255)
+
+    if titleText and (titleText:find("เหล็ก") or textLower:find("steel") or textLower:find("weld")) then
+        fillColor = Color3.fromRGB(255, 145, 0)      -- Neon Orange-Gold
+        outlineColor = Color3.fromRGB(255, 235, 70)   -- Neon Gold-Yellow Glow
+    elseif titleText and (titleText:find("กำแพง") or titleText:find("ตะปู") or textLower:find("nail") or textLower:find("wall")) then
+        fillColor = Color3.fromRGB(0, 240, 160)      -- Neon Cyan-Green
+        outlineColor = Color3.fromRGB(160, 255, 255)  -- Ice Cyan Glow
+    elseif titleText and (titleText:find("หิน") or textLower:find("drill") or textLower:find("rock")) then
+        fillColor = Color3.fromRGB(190, 110, 255)    -- Neon Purple
+        outlineColor = Color3.fromRGB(255, 200, 255)  -- Pink-White Glow
+    elseif titleText and titleText:find("NPC") then
+        fillColor = Color3.fromRGB(0, 210, 255)      -- Sky Blue
+        outlineColor = Color3.fromRGB(255, 255, 255)
+    end
 
     pcall(function()
         if adornee then
@@ -373,24 +458,42 @@ local function SetTargetESP(targetInstance, titleText, customColor)
             currentTargetHighlight = hl
         end
 
-        local attachPart = (targetInstance:IsA("BasePart") and targetInstance)
-                        or (adornee and adornee:IsA("BasePart") and adornee)
-                        or (targetInstance:IsA("Model") and targetInstance:FindFirstChildWhichIsA("BasePart", true))
-                        or (adornee and adornee:FindFirstChildWhichIsA("BasePart", true))
+        local attachPart = nil
+        if targetInstance:IsA("BasePart") then
+            attachPart = targetInstance
+        elseif targetInstance:IsA("Model") then
+            attachPart = targetInstance:FindFirstChild("WoodPlank")
+                      or targetInstance:FindFirstChild("Steel")
+                      or targetInstance:FindFirstChild("Mountain")
+                      or targetInstance:FindFirstChild("Prompt")
+                      or targetInstance.PrimaryPart
+                      or targetInstance:FindFirstChildWhichIsA("BasePart", true)
+        end
+        if not attachPart and adornee and adornee:IsA("Model") then
+            attachPart = adornee:FindFirstChild("WoodPlank")
+                      or adornee:FindFirstChild("Steel")
+                      or adornee:FindFirstChild("Mountain")
+                      or adornee:FindFirstChild("Prompt")
+                      or adornee.PrimaryPart
+                      or adornee:FindFirstChildWhichIsA("BasePart", true)
+        end
+        if not attachPart and adornee and adornee:IsA("BasePart") then
+            attachPart = adornee
+        end
 
         if attachPart then
             local bb = Instance.new("BillboardGui")
             bb.Name = "KrakenTargetFarmBillboard"
             bb.Adornee = attachPart
-            bb.Size = UDim2.new(0, 160, 0, 44)
-            bb.StudsOffset = Vector3.new(0, 3.2, 0)
+            bb.Size = UDim2.new(0, 180, 0, 48)
+            bb.StudsOffset = Vector3.new(0, 3.4, 0)
             bb.AlwaysOnTop = true
-            bb.MaxDistance = 500
+            bb.MaxDistance = 600
 
             local frame = Instance.new("Frame")
             frame.Size = UDim2.new(1, 0, 1, 0)
             frame.BackgroundColor3 = Color3.fromRGB(15, 20, 25)
-            frame.BackgroundTransparency = 0.22
+            frame.BackgroundTransparency = 0.18
             frame.BorderSizePixel = 0
             frame.Parent = bb
 
@@ -400,11 +503,12 @@ local function SetTargetESP(targetInstance, titleText, customColor)
 
             local uis = Instance.new("UIStroke")
             uis.Color = outlineColor
-            uis.Thickness = 1.8
+            uis.Thickness = 2.0
             uis.Parent = frame
 
             local tLabel = Instance.new("TextLabel")
-            tLabel.Size = UDim2.new(1, 0, 0.55, 0)
+            tLabel.Name = "TitleLabel"
+            tLabel.Size = UDim2.new(1, 0, 0.52, 0)
             tLabel.BackgroundTransparency = 1
             tLabel.Font = Enum.Font.GothamBold
             tLabel.TextSize = 12
@@ -414,13 +518,13 @@ local function SetTargetESP(targetInstance, titleText, customColor)
 
             local dLabel = Instance.new("TextLabel")
             dLabel.Name = "DistLabel"
-            dLabel.Size = UDim2.new(1, 0, 0.45, 0)
-            dLabel.Position = UDim2.new(0, 0, 0.55, 0)
+            dLabel.Size = UDim2.new(1, 0, 0.48, 0)
+            dLabel.Position = UDim2.new(0, 0, 0.52, 0)
             dLabel.BackgroundTransparency = 1
             dLabel.Font = Enum.Font.GothamMedium
             dLabel.TextSize = 11
             dLabel.TextColor3 = fillColor
-            dLabel.Text = "กำลังเดินทางไป..."
+            dLabel.Text = (currentTargetStatus or "เป้าหมาย") .. " • กำลังคำนวณ..."
             dLabel.Parent = frame
 
             bb.Parent = CoreGui
@@ -431,14 +535,17 @@ end
 
 Connections.TargetESPUpdate = RunService.Heartbeat:Connect(function()
     if currentTargetBillboard and currentTargetInstance then
-        local attachPart = (currentTargetInstance:IsA("BasePart") and currentTargetInstance) or currentTargetInstance:FindFirstChildWhichIsA("BasePart", true)
+        local attachPart = (currentTargetInstance:IsA("BasePart") and currentTargetInstance)
+                        or (currentTargetBillboard.Adornee and currentTargetBillboard.Adornee:IsA("BasePart") and currentTargetBillboard.Adornee)
+                        or currentTargetInstance:FindFirstChildWhichIsA("BasePart", true)
         local hrp = GetHRP()
         if attachPart and hrp then
             local dist = (hrp.Position - attachPart.Position).Magnitude
             local frame = currentTargetBillboard:FindFirstChildOfClass("Frame")
             local dLabel = frame and frame:FindFirstChild("DistLabel")
             if dLabel then
-                dLabel.Text = string.format("%.1f เมตร (%d studs)", dist / 3.57, math.floor(dist))
+                local st = currentTargetStatus or "เป้าหมาย"
+                dLabel.Text = string.format("%s • %.1f ม. (%d studs)", st, dist / 3.57, math.floor(dist))
             end
         end
     end
@@ -461,29 +568,27 @@ local function UpdateAllJobESP()
     local jobFolder = Workspace:FindFirstChild("Job")
     if not jobFolder then return end
 
-    local jobConfig = {
-        ["งานก่อสร้าง"] = { color = Color3.fromRGB(120, 255, 40), name = "ก่อสร้าง" },
-        ["ทำความสะอาด"] = { color = Color3.fromRGB(0, 220, 255), name = "ทำความสะอาด" },
-        ["ขยะ"] = { color = Color3.fromRGB(255, 170, 0), name = "ขยะ" },
-        ["ซ่อมรถ"] = { color = Color3.fromRGB(255, 60, 180), name = "ซ่อมรถ" },
-    }
-
-    for jobName, conf in pairs(jobConfig) do
-        local jf = jobFolder:FindFirstChild(jobName)
-        if jf then
-            for _, desc in ipairs(jf:GetDescendants()) do
-                if desc:IsA("ProximityPrompt") and desc.Enabled then
-                    local part = (desc.Parent:IsA("BasePart") and desc.Parent)
-                              or (desc.Parent:IsA("Attachment") and desc.Parent.Parent:IsA("BasePart") and desc.Parent.Parent)
-                              or desc:FindFirstAncestorWhichIsA("BasePart")
-                    if part and part ~= currentTargetInstance and part.Size.X <= 14 and part.Size.Z <= 14 then
+    local constJob = jobFolder:FindFirstChild("งานก่อสร้าง")
+    if constJob and constJob:FindFirstChild("งาน") then
+        local catColors = {
+            ["ตะปู"] = Color3.fromRGB(0, 240, 160),  -- กำแพง (Cyan-Green)
+            ["เหล็ก"] = Color3.fromRGB(255, 145, 0), -- เหล็ก (Orange-Gold)
+            ["หิน"] = Color3.fromRGB(190, 110, 255), -- หิน (Purple)
+        }
+        for _, cat in ipairs(constJob["งาน"]:GetChildren()) do
+            local color = catColors[cat.Name] or Color3.fromRGB(120, 255, 40)
+            for _, item in ipairs(cat:GetChildren()) do
+                local prompt = item:FindFirstChildWhichIsA("ProximityPrompt", true)
+                if prompt and prompt.Enabled then
+                    local targetAdornee = item
+                    if targetAdornee ~= currentTargetInstance and targetAdornee ~= (currentTargetBillboard and currentTargetBillboard.Adornee) then
                         local hl = Instance.new("Highlight")
                         hl.Name = "AllJobSpotHL"
-                        hl.Adornee = part
-                        hl.FillColor = conf.color
-                        hl.FillTransparency = 0.65
-                        hl.OutlineColor = conf.color
-                        hl.OutlineTransparency = 0.3
+                        hl.Adornee = targetAdornee
+                        hl.FillColor = color
+                        hl.FillTransparency = 0.72
+                        hl.OutlineColor = color
+                        hl.OutlineTransparency = 0.4
                         hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
                         hl.Parent = CoreGui
                         table.insert(Hub.AllJobESPObjects, hl)
@@ -676,9 +781,19 @@ local function NavigateTo(targetPos, stopDist, maxTime, targetPrompt)
         local dist3D = (hrp.Position - targetPos).Magnitude
         local hDist = (Vector2.new(hrp.Position.X, hrp.Position.Z) - Vector2.new(targetPos.X, targetPos.Z)).Magnitude
         local yDiff = math.abs(hrp.Position.Y - targetPos.Y)
+
         if targetPrompt then
-            if dist3D <= math.max(promptMaxD - 0.4, 3.6) then return true end
-            if hDist <= 3.8 and yDiff <= 5.5 then return true end
+            local pPart = (targetPrompt.Parent:IsA("BasePart") and targetPrompt.Parent)
+                       or (targetPrompt.Parent:IsA("Attachment") and targetPrompt.Parent.Parent:IsA("BasePart") and targetPrompt.Parent.Parent)
+            local pDist3D = pPart and (hrp.Position - pPart.Position).Magnitude or dist3D
+
+            -- เมื่อเข้าใกล้จุดยืนนำทาง (standPos) หรืออยู่ในระยะกด ProximityPrompt ได้ 100%
+            if (dist3D <= stopDist or (hDist <= stopDist and yDiff <= 3.5)) and pDist3D <= math.min(promptMaxD - 0.5, 4.3) then
+                return true
+            end
+            if pDist3D <= math.min(promptMaxD - 0.7, 4.0) then
+                return true
+            end
         else
             if dist3D <= stopDist then return true end
             if hDist <= stopDist and yDiff <= 4.0 then return true end
@@ -865,30 +980,192 @@ local function NavigateTo(targetPos, stopDist, maxTime, targetPrompt)
 end
 
 --------------------------------------------------------------
--- 🎨 โหลด FLUENT UI
 --------------------------------------------------------------
+-- 🎨 โหลด FLUENT UI & โลโก้ KRAKENHUB (K COMMUNITY)
+--------------------------------------------------------------
+local function GetLogoAsset()
+    if typeof(isfile) == "function" and typeof(writefile) == "function" and typeof(getcustomasset) == "function" then
+        if not isfile("k_community_logo.png") then
+            pcall(function()
+                writefile("k_community_logo.png", game:HttpGet("https://raw.githubusercontent.com/armongzx56-design/KrakenHub/main/k_community_logo.png"))
+            end)
+        end
+        if isfile("k_community_logo.png") then
+            local s, asset = pcall(getcustomasset, "k_community_logo.png")
+            if s and asset then return asset end
+        end
+        if isfile("k_logo.png") then
+            local s, asset = pcall(getcustomasset, "k_logo.png")
+            if s and asset then return asset end
+        end
+    end
+    return "rbxasset://5059d143b75fc7c70a58a871660c4f16/k_community_logo.png"
+end
+
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
 local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
 local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
 
 local Window = Fluent:CreateWindow({
-    Title = "🐙 KrakenHub | สายเลือดอาชีวะ",
-    SubTitle = "v6.0 — 100% Anti-Kick Bypass Pro (Zero Kicks Guaranteed)",
+    Title = "KrakenHub | สายเลือดอาชีวะ",
+    SubTitle = "v1.0",
     TabWidth = 165,
     Size = UDim2.fromOffset(630, 480),
     Acrylic = true,
-    Theme = "Dark",
+    Theme = "Darker",
     MinimizeKey = Enum.KeyCode.RightControl
 })
 
+-- ใส่โลโก้ K Community ใน TitleBar ของ Window (จัดกึ่งกลางให้ตรงกับข้อความเป๊ะๆ)
+pcall(function()
+    local tbFrame = Window and Window.TitleBar and Window.TitleBar.Frame
+    local titleContainer = tbFrame and tbFrame:FindFirstChildOfClass("Frame")
+    if titleContainer then
+        local layout = titleContainer:FindFirstChildOfClass("UIListLayout")
+        if layout then
+            layout.VerticalAlignment = Enum.VerticalAlignment.Center
+        end
+
+        local old = titleContainer:FindFirstChild("KrakenLogoIcon")
+        if old then old:Destroy() end
+
+        local logo = Instance.new("ImageLabel")
+        logo.Name = "KrakenLogoIcon"
+        logo.Size = UDim2.fromOffset(22, 22)
+        logo.BackgroundTransparency = 1
+        logo.Image = GetLogoAsset()
+        logo.ScaleType = Enum.ScaleType.Fit
+        logo.LayoutOrder = -1
+        logo.Parent = titleContainer
+    end
+end)
+
+-- สร้างปุ่มลอยสำหรับเปิด/ปิดเมนูสคริปต์ (Floating Toggle Button)
+local function CreateFloatingToggleButton(windowObj)
+    pcall(function()
+        local old = targetGuiParent:FindFirstChild("KrakenHub_ToggleButton")
+        if old then old:Destroy() end
+
+        local screenGui = Instance.new("ScreenGui")
+        screenGui.Name = "KrakenHub_ToggleButton"
+        screenGui.ResetOnSpawn = false
+        screenGui.DisplayOrder = 999
+        screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+        local mainBtn = Instance.new("ImageButton")
+        mainBtn.Name = "OpenCloseBtn"
+        mainBtn.Size = UDim2.fromOffset(48, 48)
+        mainBtn.Position = UDim2.new(0, 15, 0.5, -24)
+        mainBtn.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+        mainBtn.BackgroundTransparency = 0.15
+        mainBtn.AutoButtonColor = false
+        mainBtn.BorderSizePixel = 0
+        mainBtn.Parent = screenGui
+
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(0, 13)
+        corner.Parent = mainBtn
+
+        local stroke = Instance.new("UIStroke")
+        stroke.Color = Color3.fromRGB(255, 45, 45)
+        stroke.Thickness = 1.6
+        stroke.Transparency = 0.25
+        stroke.Parent = mainBtn
+
+        local logoImg = Instance.new("ImageLabel")
+        logoImg.Name = "Logo"
+        logoImg.Size = UDim2.fromScale(0.82, 0.82)
+        logoImg.Position = UDim2.fromScale(0.5, 0.5)
+        logoImg.AnchorPoint = Vector2.new(0.5, 0.5)
+        logoImg.BackgroundTransparency = 1
+        logoImg.Image = GetLogoAsset()
+        logoImg.ScaleType = Enum.ScaleType.Fit
+        logoImg.Parent = mainBtn
+
+        -- ลอจิกการลากปุ่ม (Smooth Draggable - รองรับทั้ง PC เมาส์ และมือถือ Touch)
+        local dragging = false
+        local dragStartPos = nil
+        local startFramePos = nil
+        local movedEnough = false
+
+        mainBtn.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                dragging = true
+                movedEnough = false
+                dragStartPos = input.Position
+                startFramePos = mainBtn.Position
+            end
+        end)
+
+        UserInputService.InputChanged:Connect(function(input)
+            if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+                local delta = input.Position - dragStartPos
+                if delta.Magnitude > 6 then
+                    movedEnough = true
+                end
+                mainBtn.Position = UDim2.new(
+                    startFramePos.X.Scale,
+                    startFramePos.X.Offset + delta.X,
+                    startFramePos.Y.Scale,
+                    startFramePos.Y.Offset + delta.Y
+                )
+            end
+        end)
+
+        UserInputService.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                dragging = false
+            end
+        end)
+
+        -- กดปุ่มเพื่อเปิด/ปิดหน้าต่างเมนูสคริปต์
+        mainBtn.Activated:Connect(function()
+            if not movedEnough then
+                TweenService:Create(mainBtn, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+                    Size = UDim2.fromOffset(42, 42)
+                }):Play()
+                task.wait(0.08)
+                TweenService:Create(mainBtn, TweenInfo.new(0.12, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+                    Size = UDim2.fromOffset(48, 48)
+                }):Play()
+
+                if windowObj then
+                    if windowObj.Minimize then
+                        windowObj:Minimize()
+                    elseif windowObj.Root then
+                        windowObj.Root.Visible = not windowObj.Root.Visible
+                    end
+                end
+            end
+        end)
+
+        -- เอฟเฟกต์เมื่อวางเมาส์เหนือปุ่ม
+        mainBtn.MouseEnter:Connect(function()
+            TweenService:Create(stroke, TweenInfo.new(0.2), { Transparency = 0, Thickness = 2.2 }):Play()
+        end)
+        mainBtn.MouseLeave:Connect(function()
+            TweenService:Create(stroke, TweenInfo.new(0.2), { Transparency = 0.25, Thickness = 1.6 }):Play()
+        end)
+
+        screenGui.Parent = targetGuiParent
+        Hub.ToggleButtonGui = screenGui
+    end)
+end
+CreateFloatingToggleButton(Window)
+
 local Tabs = {
-    Farm     = Window:AddTab({ Title = "งาน & ฟาร์มอัตโนมัติ", Icon = "hard-hat" }),
-    Player   = Window:AddTab({ Title = "ตัวละคร & เคลื่อนที่", Icon = "user" }),
-    World    = Window:AddTab({ Title = "วาร์ปทั่วแมพ",       Icon = "map-pin" }),
-    Settings = Window:AddTab({ Title = "ตั้งค่า",              Icon = "settings" })
+    Farm      = Window:AddTab({ Title = "งาน & ฟาร์มอัตโนมัติ", Icon = "hard-hat" }),
+    Merchant  = Window:AddTab({ Title = "พ่อค้าพเนจร",         Icon = "shopping-cart" }),
+    Combat    = Window:AddTab({ Title = "ระบบต่อสู้ (Combat)", Icon = "crosshair" }),
+    Player    = Window:AddTab({ Title = "ตัวละคร & เคลื่อนที่", Icon = "user" }),
+    Settings  = Window:AddTab({ Title = "ตั้งค่า",              Icon = "settings" })
 }
 
 local Options = Fluent.Options
+Hub.Fluent = Fluent
+Hub.Options = Options
+Hub.Tabs = Tabs
+Hub.Window = Window
 
 local function Notify(title, content, sub, duration)
     Fluent:Notify({
@@ -900,9 +1177,10 @@ local function Notify(title, content, sub, duration)
 end
 
 --------------------------------------------------------------
--- 🔨 6. ระบบแก้มินิเกมอัตโนมัติ (AUTO SOLVE MINIGAME 100%)
+-- 🔨 6. ระบบแก้มินิเกมอัตโนมัติ (ULTRA AUTO SOLVE MINIGAME 100%)
 --------------------------------------------------------------
 local isVIMHolding = false
+local activeMiniGame = nil
 
 local function ReleaseVIM()
     if isVIMHolding then
@@ -913,6 +1191,90 @@ local function ReleaseVIM()
     end
 end
 
+-- เชื่อมต่อระบบ Event ของเซิร์ฟเวอร์โดยตรง (แก้โจทย์ทันที ป้องกันการค้าง 100% ทุกกรณี)
+pcall(function()
+    local constJobRS = ReplicatedStorage:FindFirstChild("Job") and ReplicatedStorage.Job:FindFirstChild("Construction")
+    if constJobRS then
+        local mgRemote = constJobRS:FindFirstChild("MiniGame")
+        local keyRemote = constJobRS:FindFirstChild("ChallengeKeyUpdate")
+        local doneRemote = constJobRS:FindFirstChild("MiniGameDone")
+        local inputRemote = constJobRS:FindFirstChild("MiniGameInput")
+
+        local siteUpdate = constJobRS:FindFirstChild("SiteUpdate")
+        if siteUpdate then
+            Connections.SiteUpdateConn = siteUpdate.OnClientEvent:Connect(function() end)
+        end
+
+        if keyRemote then
+            Connections.ChallengeKeyConn = keyRemote.OnClientEvent:Connect(function(newKey)
+                if activeMiniGame then
+                    activeMiniGame.key = newKey
+                end
+                if State.AutoSolveMinigame and inputRemote and newKey then
+                    task.delay(0.06, function()
+                        pcall(function() inputRemote:FireServer(newKey) end)
+                    end)
+                end
+            end)
+        end
+
+
+
+        if mgRemote then
+            Connections.MiniGameConn = mgRemote.OnClientEvent:Connect(function(siteType, siteInstance, challengeKey)
+                if not State.AutoSolveMinigame or not State.Running then return end
+
+                local minWaitTimes = {
+                    NailSite = 3.5,
+                    WeldSite = 7.4,
+                    DrillSite = 7.4,
+                    SweepSite = 1.2,
+                    WheelSite = 8.2,
+                    OilSite = 5.2,
+                    EngineSite = 5.2,
+                    Sweep1Site = 1.2,
+                    TrashDigSite = 15.2,
+                }
+
+                local session = {
+                    siteType = siteType,
+                    siteInstance = siteInstance,
+                    key = challengeKey,
+                    startTime = tick(),
+                    minWait = minWaitTimes[siteType] or 3.5,
+                    completed = false
+                }
+                activeMiniGame = session
+
+                task.spawn(function()
+                    while State.Running and State.AutoSolveMinigame and not session.completed do
+                        task.wait(0.12)
+                        if session.key and inputRemote then
+                            pcall(function() inputRemote:FireServer(session.key) end)
+                        end
+
+                        local elapsed = tick() - session.startTime
+                        if elapsed >= session.minWait then
+                            session.completed = true
+                            pcall(function()
+                                if doneRemote then
+                                    doneRemote:FireServer(session.siteType, session.siteInstance)
+                                end
+                                local pgui = LocalPlayer:FindFirstChild("PlayerGui")
+                                local mgUI = pgui and pgui:FindFirstChild("MiniGameUI")
+                                if mgUI then mgUI.Enabled = false end
+                            end)
+                            ReleaseVIM()
+                            break
+                        end
+                    end
+                end)
+            end)
+        end
+    end
+end)
+
+-- ควบคุมเมาส์จำลอง VIM & UI Visuals ให้เป็นธรรมชาติ 100%
 Connections.MinigameHoldLoop = RunService.Heartbeat:Connect(function()
     if not State.AutoSolveMinigame or not State.Running then
         ReleaseVIM()
@@ -972,10 +1334,10 @@ Connections.MinigameHoldLoop = RunService.Heartbeat:Connect(function()
     end
 end)
 
--- ตอกตะปู / ล้อรถ / ขุดขยะ / น็อตเครื่องยนต์ / เทน้ำมัน (หน่วงเวลาปลอดภัย ไม่ถูกเรทลิมิต)
+-- ตอกตะปู / ล้อรถ / ขุดขยะ / น็อตเครื่องยนต์ / เทน้ำมัน
 task.spawn(function()
     while State.Running do
-        task.wait(0.14)
+        task.wait(0.12)
         if State.AutoSolveMinigame then
             local pgui = LocalPlayer:FindFirstChild("PlayerGui")
             local mg = pgui and pgui:FindFirstChild("MiniGameUI")
@@ -999,7 +1361,7 @@ task.spawn(function()
                                         VirtualInputManager:SendMouseButtonEvent(bx, by, 0, false, game, 0)
                                     end
                                 end)
-                                task.wait(0.2)
+                                task.wait(0.18)
                                 break
                             end
                         end
@@ -1012,7 +1374,7 @@ task.spawn(function()
                         local digResult = ReplicatedStorage.Job:FindFirstChild("ขยะ") and ReplicatedStorage.Job["ขยะ"]:FindFirstChild("DigResult")
                         if digResult then digResult:FireServer(true) end
                     end)
-                    task.wait(0.6)
+                    task.wait(0.5)
                 end
 
                 local wf = mg:FindFirstChild("WheelFrame")
@@ -1031,10 +1393,10 @@ task.spawn(function()
                                     VirtualInputManager:SendMouseButtonEvent(bx, by, 0, false, game, 0)
                                 end
                             end)
-                            task.wait(0.18)
+                            task.wait(0.15)
                         end
                     end
-                    task.wait(0.3)
+                    task.wait(0.25)
                 end
 
                 local ef = mg:FindFirstChild("EngineFrame")
@@ -1056,7 +1418,7 @@ task.spawn(function()
                                         VirtualInputManager:SendMouseButtonEvent(bx, by, 0, false, game, 0)
                                     end
                                 end)
-                                task.wait(0.2)
+                                task.wait(0.18)
                                 break
                             end
                         end
@@ -1107,6 +1469,21 @@ LocalPlayer.CharacterAdded:Connect(function(newChar)
     SetSprinting(false)
 end)
 
+local function StopWorkAnimations()
+    pcall(function()
+        local char = LocalPlayer.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        local animator = hum and hum:FindFirstChildOfClass("Animator")
+        if animator then
+            for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+                if track.Name == "_WorkAnim" then
+                    pcall(function() track:Stop() end)
+                end
+            end
+        end
+    end)
+end
+
 IsCurrentlyWorking = function()
     local pgui = LocalPlayer:FindFirstChild("PlayerGui")
     if pgui then
@@ -1124,19 +1501,10 @@ IsCurrentlyWorking = function()
         if lbl and lbl.Text:find("กำลังทำงาน") then return true end
     end
 
-    local char = LocalPlayer.Character
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
-    local animator = hum and hum:FindFirstChildOfClass("Animator")
-    if animator then
-        for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
-            if track.Name == "_WorkAnim" and track.IsPlaying then
-                return true
-            end
-        end
-    end
-
     return false
 end
+Hub.IsCurrentlyWorking = IsCurrentlyWorking
+Hub.StopWorkAnimations = StopWorkAnimations
 
 local function GetOtherPlayerPositions()
     local list = {}
@@ -1151,12 +1519,106 @@ local function GetOtherPlayerPositions()
     return list
 end
 
+local ScannedConstructionSpots = {}
+
+local function ScanConstructionWorkSpots()
+    local constJob = Workspace:FindFirstChild("Job") and Workspace.Job:FindFirstChild("งานก่อสร้าง")
+    local workFolder = constJob and constJob:FindFirstChild("งาน")
+    local spots = {}
+    local counts = { ["กำแพง"] = 0, ["เหล็ก"] = 0, ["หิน"] = 0 }
+
+    if workFolder then
+        local rayParams = RaycastParams.new()
+        rayParams.FilterType = Enum.RaycastFilterType.Exclude
+        if LocalPlayer.Character then
+            rayParams.FilterDescendantsInstances = {LocalPlayer.Character}
+        end
+
+        for _, cat in ipairs(workFolder:GetChildren()) do
+            local catRaw = cat.Name -- "ตะปู", "เหล็ก", "หิน"
+            local catName = catRaw
+            if catRaw == "ตะปู" then
+                catName = "กำแพง"
+            end
+            if counts[catName] == nil then counts[catName] = 0 end
+
+            for _, item in ipairs(cat:GetChildren()) do
+                local prompt = item:FindFirstChildWhichIsA("ProximityPrompt", true)
+                if prompt then
+                    local pPart = (prompt.Parent:IsA("BasePart") and prompt.Parent)
+                               or (prompt.Parent:IsA("Attachment") and prompt.Parent.Parent:IsA("BasePart") and prompt.Parent.Parent)
+                               or (item:IsA("BasePart") and item)
+                               or item:FindFirstChildWhichIsA("BasePart", true)
+
+                    if pPart then
+                        local spotPos = pPart.Position
+                        local standPos = nil
+                        local bestStandDist = 999
+                        local testAngles = {0, 45, 90, 135, 180, 225, 270, 315}
+
+                        for _, offsetDist in ipairs({2.0, 2.5, 3.0, 3.4}) do
+                            for _, deg in ipairs(testAngles) do
+                                local rad = math.rad(deg)
+                                local offset = Vector3.new(math.cos(rad) * offsetDist, 0, math.sin(rad) * offsetDist)
+                                local testP = spotPos + offset
+                                local rayDown = Workspace:Raycast(testP + Vector3.new(0, 5, 0), Vector3.new(0, -20, 0), rayParams)
+                                if rayDown then
+                                    local floorY = rayDown.Position.Y
+                                    local hrpY = floorY + 3.0
+                                    local candidateHRP = Vector3.new(testP.X, hrpY, testP.Z)
+                                    local dist3D = (candidateHRP - spotPos).Magnitude
+
+                                    if dist3D <= 4.4 and dist3D < bestStandDist then
+                                        local partsInBox = Workspace:GetPartBoundsInBox(CFrame.new(candidateHRP), Vector3.new(1.8, 3.0, 1.8))
+                                        local collides = false
+                                        for _, pt in ipairs(partsInBox) do
+                                            if pt.CanCollide and pt ~= rayDown.Instance and pt.Size.Y > 1.0 and pt.Name ~= "Ground" and pt.Name ~= "Union" and pt.Name ~= "ZoneBound" then
+                                                collides = true
+                                                break
+                                            end
+                                        end
+
+                                        if not collides then
+                                            standPos = candidateHRP
+                                            bestStandDist = dist3D
+                                        end
+                                    end
+                                end
+                            end
+                            if standPos then break end
+                        end
+
+                        if not standPos then
+                            standPos = Vector3.new(spotPos.X, spotPos.Y, spotPos.Z)
+                        end
+
+                        counts[catName] = (counts[catName] or 0) + 1
+                        table.insert(spots, {
+                            category = catName,
+                            rawCategory = catRaw,
+                            name = item.Name,
+                            item = item,
+                            part = pPart,
+                            spotPos = spotPos,
+                            standPos = standPos,
+                            prompt = prompt
+                        })
+                    end
+                end
+            end
+        end
+    end
+
+    ScannedConstructionSpots = spots
+    return spots, counts
+end
+
 local function GetNearestOpenSpot(jobType)
     local hrp = GetHRP()
-    if not hrp then return nil, nil, 999999, nil, nil end
+    if not hrp then return nil, nil, 999999, nil, nil, nil end
 
     local myPos = hrp.Position
-    local bestSpot, bestPrompt, bestDist, bestName, bestPos = nil, nil, 999999, nil, nil
+    local bestSpot, bestPrompt, bestDist, bestName, bestPos, bestCategory = nil, nil, 999999, nil, nil, nil
     local now = tick()
     local otherPositions = GetOtherPlayerPositions()
 
@@ -1170,36 +1632,37 @@ local function GetNearestOpenSpot(jobType)
     end
 
     if jobType == "งานก่อสร้าง" then
-        local constJob = Workspace:FindFirstChild("Job") and Workspace.Job:FindFirstChild("งานก่อสร้าง")
-        local workFolder = constJob and constJob:FindFirstChild("งาน")
-        if workFolder then
-            for _, folder in ipairs(workFolder:GetChildren()) do
-                for _, item in ipairs(folder:GetChildren()) do
-                    local prompt = item:FindFirstChildWhichIsA("ProximityPrompt", true)
-                    if prompt and prompt.Enabled then
-                        local part = (prompt.Parent:IsA("BasePart") and prompt.Parent)
-                                   or (prompt.Parent:IsA("Attachment") and prompt.Parent.Parent:IsA("BasePart") and prompt.Parent.Parent)
-                                   or (item:IsA("BasePart") and item)
-                                   or item:FindFirstChildWhichIsA("BasePart", true)
+        if #ScannedConstructionSpots == 0 then
+            ScanConstructionWorkSpots()
+        end
+        local filter = State.ConstructionFilter or "กำแพง & เหล็ก"
 
-                        if part and (part.Size.X > 14 or part.Size.Z > 14) then
-                            part = prompt.Parent:IsA("BasePart") and prompt.Parent or nil
-                        end
+        for _, spotInfo in ipairs(ScannedConstructionSpots) do
+            local prompt = spotInfo.prompt
+            local part = spotInfo.part
+            local cat = spotInfo.category
+            local item = spotInfo.item
 
-                        if part and (not failedSpotCooldowns[part] or now >= failedSpotCooldowns[part]) then
-                            local spotPos = (prompt.Parent:IsA("BasePart") and prompt.Parent.Position)
-                                         or (prompt.Parent:IsA("Attachment") and prompt.Parent.WorldPosition)
-                                         or part.Position
+            -- คัดกรองตามหมวดหมู่ก่อสร้างที่เลือก
+            if filter == "เฉพาะกำแพง" and cat ~= "กำแพง" then continue end
+            if filter == "เฉพาะเหล็ก" and cat ~= "เหล็ก" then continue end
+            if filter == "กำแพง & เหล็ก" and cat ~= "กำแพง" and cat ~= "เหล็ก" then continue end
 
-                            if not isOccupied(spotPos) then
-                                local d = (myPos - spotPos).Magnitude
-                                if math.abs(myPos.Y - spotPos.Y) <= 6.5 and d < bestDist then
-                                    bestDist = d
-                                    bestSpot = part
-                                    bestPrompt = prompt
-                                    bestName = "ก่อสร้าง: " .. folder.Name
-                                    bestPos = spotPos
-                                end
+            local targetObj = item or part
+            if prompt and prompt.Enabled and targetObj and targetObj.Parent then
+                if not failedSpotCooldowns[targetObj] or now >= failedSpotCooldowns[targetObj] then
+                    if not failedSpotCooldowns[part] or now >= failedSpotCooldowns[part] then
+                        local standPos = spotInfo.standPos or spotInfo.spotPos
+                        if not isOccupied(standPos) and not isOccupied(spotInfo.spotPos) then
+                            local d = (myPos - standPos).Magnitude
+                            if math.abs(myPos.Y - standPos.Y) <= 6.5 and d < bestDist then
+                                bestDist = d
+                                bestSpot = targetObj
+                                bestPrompt = prompt
+                                local icon = (cat == "กำแพง" and "🧱") or (cat == "เหล็ก" and "🔩") or "🪨"
+                                bestName = string.format("ก่อสร้าง: %s %s", icon, cat)
+                                bestPos = standPos
+                                bestCategory = cat
                             end
                         end
                     end
@@ -1283,7 +1746,7 @@ local function GetNearestOpenSpot(jobType)
         end
     end
 
-    return bestSpot, bestPrompt, bestDist, bestName, bestPos
+    return bestSpot, bestPrompt, bestDist, bestName, bestPos, bestCategory
 end
 
 --------------------------------------------------------------
@@ -1308,29 +1771,50 @@ task.spawn(function()
             local curJob = State.SelectedJob or "งานก่อสร้าง"
             local jobNpcPos = Vector3.new(2400.86, 3.16, -372.0)
 
-            -- หากเป็นงานก่อสร้าง และยังไม่ได้ชุดทำงาน -> ต้องไปหา NPC ก่อนเสมอ
+            -- หากเป็นงานก่อสร้าง และยังไม่ได้ชุดทำงาน -> วิ่งไปที่ไซต์ก่อสร้าง หา NPC ที่นั่งอยู่ แสดง ESP วิ่งไปกดสมัครงาน แล้วรับเสื้อ
             if curJob == "งานก่อสร้าง" and not hasCompletedNpcHiring then
                 local shirt = char:FindFirstChildOfClass("Shirt")
                 local hasUniform = shirt and shirt.ShirtTemplate:find("105971357123934")
 
                 if not hasUniform then
-                    local distToNPC = (hrp.Position - jobNpcPos).Magnitude
                     local jobNPC = Workspace:FindFirstChild("Job") and Workspace.Job:FindFirstChild("งานก่อสร้าง") and Workspace.Job["งานก่อสร้าง"]:FindFirstChild("NPC") and Workspace.Job["งานก่อสร้าง"].NPC:FindFirstChild("JobNPC")
-
-                    SetTargetESP(jobNPC or Workspace.Job["งานก่อสร้าง"].NPC, "สมัครงานรับชุด (JobNPC)", Color3.fromRGB(0, 210, 255))
-
                     local npcPrompt = jobNPC and jobNPC:FindFirstChildWhichIsA("ProximityPrompt", true)
-                    if distToNPC > 3.8 then
-                        NavigateTo(jobNpcPos, 3.5, 30, npcPrompt)
+                    local npcRoot = jobNPC and (jobNPC:FindFirstChild("HumanoidRootPart") or jobNPC:FindFirstChild("Torso") or jobNPC:FindFirstChildWhichIsA("BasePart"))
+                    local actualNpcPos = npcRoot and npcRoot.Position or jobNpcPos
+
+                    -- แสดง ESP สีฟ้าสดใสที่ตัว NPC ที่นั่งอยู่
+                    SetTargetESP(jobNPC or (Workspace:FindFirstChild("Job") and Workspace.Job["งานก่อสร้าง"].NPC) or Workspace, "สมัครงานรับชุด (JobNPC)", Color3.fromRGB(0, 210, 255))
+
+                    local distToNPC = (hrp.Position - actualNpcPos).Magnitude
+                    if distToNPC > 4.2 then
+                        -- วิ่งเดินทางไปยังไซต์ก่อสร้างตรงหน้าโต๊ะ NPC
+                        NavigateTo(actualNpcPos, 3.2, 40, npcPrompt)
+                        continue
                     else
+                        -- ถึงหน้าโต๊ะ NPC แล้ว: หยุดนิ่งสนิท 100%
                         SetSprinting(false)
                         hum:Move(Vector3.zero, false)
                         hum:MoveTo(hrp.Position)
-                        task.wait(0.15)
-                        if npcPrompt then
-                            pcall(function() fireproximityprompt(npcPrompt) end)
+                        task.wait(0.25)
+
+                        -- กด ProximityPrompt ที่โต๊ะ/ตัว NPC (เร็วและปลอดภัย ไม่โดนเตะ 267)
+                        if npcPrompt and npcPrompt.Enabled then
+                            local holdTime = npcPrompt.HoldDuration or 0
+                            if holdTime > 0 then
+                                pcall(function() npcPrompt:InputHoldBegin() end)
+                                local startH = os.clock()
+                                while (os.clock() - startH) < holdTime and State.AutoFarm and State.Running do
+                                    task.wait(0.03)
+                                end
+                                pcall(function() fireproximityprompt(npcPrompt) end)
+                                pcall(function() npcPrompt:InputHoldEnd() end)
+                            else
+                                pcall(function() fireproximityprompt(npcPrompt) end)
+                            end
                         end
-                        task.wait(0.2)
+                        task.wait(0.3)
+
+                        -- รอ UI ขึ้นมา แล้วกดปุ่มรับงาน (Hire)
                         pcall(function()
                             local pgui = LocalPlayer:FindFirstChild("PlayerGui")
                             local cUI = pgui and pgui:FindFirstChild("ConstructionUI")
@@ -1351,30 +1835,45 @@ task.spawn(function()
                             end
                             if cUI then cUI.Enabled = false end
                         end)
+
+                        -- รอให้ระบบส่งเสื้อและใส่สำเร็จ
+                        local waitUniformStart = tick()
+                        while (tick() - waitUniformStart) < 3.0 and State.AutoFarm and State.Running do
+                            local s = char:FindFirstChildOfClass("Shirt")
+                            if s and s.ShirtTemplate:find("105971357123934") then
+                                break
+                            end
+                            task.wait(0.2)
+                        end
+
                         hasCompletedNpcHiring = true
                         ClearTargetESP()
-                        Notify("งานก่อสร้าง", "สมัครงานรับชุดเรียบร้อย! เริ่มวิ่งฟาร์มทันที...", "", 2.5)
+                        Notify("งานก่อสร้าง", "สมัครงานรับชุดเรียบร้อย! เริ่มวิ่งฟาร์มจุดงาน...", "", 2.5)
+                        task.wait(0.3)
+                        continue
                     end
-                    continue
                 else
                     hasCompletedNpcHiring = true
                 end
             end
 
             -- ค้นหาจุดว่างสำหรับงานที่เลือก
-            local spot, prompt, dist, spotName, spotPos = GetNearestOpenSpot(curJob)
+            local spot, prompt, dist, spotName, spotPos, spotCategory = GetNearestOpenSpot(curJob)
             if spot and prompt then
-                spotPos = spotPos or spot.Position
-                SetTargetESP(spot, spotName or "จุดทำงาน", Color3.fromRGB(120, 255, 40))
+                local promptPart = prompt.Parent:IsA("BasePart") and prompt.Parent
+                                or (prompt.Parent:IsA("Attachment") and prompt.Parent.Parent:IsA("BasePart") and prompt.Parent.Parent)
+                                or spot
+                local actualPromptPos = promptPart and promptPart.Position or spotPos
 
                 local promptMaxD = (prompt and prompt.MaxActivationDistance) or 5.0
-                local canTrigger = (hrp.Position - spotPos).Magnitude <= promptMaxD
-                                or ((Vector2.new(hrp.Position.X, hrp.Position.Z) - Vector2.new(spotPos.X, spotPos.Z)).Magnitude <= 4.0 and math.abs(hrp.Position.Y - spotPos.Y) <= 5.5)
+                local current3DDist = (hrp.Position - actualPromptPos).Magnitude
 
-                if not canTrigger then
-                    local navSuccess = NavigateTo(spotPos, math.min(promptMaxD - 0.5, 3.8), 12, prompt)
+                if current3DDist > math.min(promptMaxD - 0.5, 4.3) then
+                    SetTargetESP(spot, spotName or "จุดทำงาน", nil, "🏃 กำลังไป")
+                    local navSuccess = NavigateTo(spotPos, 1.8, 12, prompt)
                     if not navSuccess then
-                        failedSpotCooldowns[spot] = tick() + 8
+                        failedSpotCooldowns[spot] = tick() + 4.0
+                        if promptPart then failedSpotCooldowns[promptPart] = tick() + 4.0 end
                         ClearTargetESP()
                         task.wait(0.08)
                         continue
@@ -1384,30 +1883,29 @@ task.spawn(function()
                 -- เมื่อมาถึงจุดทำงาน (หยุดนิ่งสนิท 100% ก่อนเริ่มงาน ป้องกัน CODE 261 & 264)
                 hrp = GetHRP()
                 hum = GetHuman()
-                local curD = (hrp and spotPos) and (hrp.Position - spotPos).Magnitude or 999
-                local curHD = (hrp and spotPos) and (Vector2.new(hrp.Position.X, hrp.Position.Z) - Vector2.new(spotPos.X, spotPos.Z)).Magnitude or 999
-                local curYD = (hrp and spotPos) and math.abs(hrp.Position.Y - spotPos.Y) or 999
+                local finalDist = (hrp and actualPromptPos) and (hrp.Position - actualPromptPos).Magnitude or 999
 
-                if hrp and hum and prompt and prompt.Enabled and (curD <= promptMaxD or (curHD <= 4.2 and curYD <= 5.5)) then
+                if hrp and hum and prompt and prompt.Enabled and finalDist <= promptMaxD then
+                    SetTargetESP(spot, spotName or "จุดทำงาน", nil, "📍 ถึงจุดงาน")
                     SetSprinting(false)
                     hum:Move(Vector3.zero, false)
                     hum.WalkSpeed = 0
                     hrp.AssemblyLinearVelocity = Vector3.zero
                     hrp.AssemblyAngularVelocity = Vector3.zero
                     hum:MoveTo(hrp.Position)
-                    task.wait(0.18) -- รอเซิร์ฟเวอร์ sync ความเร็วนิ่งสนิท
+                    task.wait(0.05) -- หยุดนิ่งสนิท พร้อมกดทันที
 
-                    -- กดเริ่มงานอย่างปลอดภัยตาม HoldDuration ของ ProximityPrompt
+                    -- กดเริ่มงานอย่างรวดเร็วและปลอดภัย (Fast Hold Duration ไม่โดนเตะ 267)
                     local holdTime = prompt.HoldDuration or 0
                     if holdTime > 0 then
                         pcall(function() prompt:InputHoldBegin() end)
-                        local startHold = tick()
-                        while (tick() - startHold) < (holdTime + 0.2) and State.AutoFarm and State.Running and not IsCurrentlyWorking() do
+                        local startHold = os.clock()
+                        while (os.clock() - startHold) < holdTime and State.AutoFarm and State.Running and not IsCurrentlyWorking() do
                             if hrp then
                                 hrp.AssemblyLinearVelocity = Vector3.zero
                                 hrp.AssemblyAngularVelocity = Vector3.zero
                             end
-                            task.wait(0.08)
+                            task.wait(0.03)
                         end
                         pcall(function() fireproximityprompt(prompt) end)
                         pcall(function() prompt:InputHoldEnd() end)
@@ -1424,9 +1922,10 @@ task.spawn(function()
 
                     -- ยืนทำงานจนเสร็จสมบูรณ์ 100% โดยล็อคตำแหน่งตัวละครนิ่งสนิท ไม่ให้แรงเฉื่อยหรือฟิสิกส์ขยับ
                     if IsCurrentlyWorking() then
+                        SetTargetESP(spot, spotName or "จุดทำงาน", nil, "🔨 กำลังทำงาน")
                         local workStart = tick()
                         local lockCFrame = hrp.CFrame
-                        while IsCurrentlyWorking() and (tick() - workStart) < 25 and State.AutoFarm and State.Running do
+                        while IsCurrentlyWorking() and (tick() - workStart) < 16 and State.AutoFarm and State.Running do
                             if hrp then
                                 hrp.CFrame = lockCFrame
                                 hrp.AssemblyLinearVelocity = Vector3.zero
@@ -1436,45 +1935,67 @@ task.spawn(function()
                             task.wait(0.05)
                         end
                         ReleaseVIM()
-                        task.wait(0.4) -- รอเซิร์ฟเวอร์เคลียร์สถานะเสร็จงาน
-                        failedSpotCooldowns[spot] = tick() + 5
-                        ClearTargetESP()
+                        task.wait(0.3) -- รอเซิร์ฟเวอร์เคลียร์สถานะเสร็จงาน
+
+                        if spotName then
+                            if spotName:find("หิน") then
+                                Hub.LastCompletedCategory = "หิน"
+                            elseif spotName:find("เหล็ก") then
+                                Hub.LastCompletedCategory = "เหล็ก"
+                            elseif spotName:find("กำแพง") then
+                                Hub.LastCompletedCategory = "กำแพง"
+                            end
+                        end
+                        failedSpotCooldowns[spot] = tick() + 4.0
+                        if promptPart then failedSpotCooldowns[promptPart] = tick() + 4.0 end
                         if hum then hum.WalkSpeed = NORMAL_WALK_SPEED end
+
+                        -- ชี้ ESP ไปยังเป้าหมายถัดไปทันที (ไม่ปล่อยให้หน้าจอว่าง)
+                        local nextSpot, nextPrompt, _, nextName, _, nextCat = GetNearestOpenSpot(curJob)
+                        if nextSpot then
+                            SetTargetESP(nextSpot, nextName or ("ก่อสร้าง: " .. (nextCat or "")), nil, "🎯 เป้าหมายถัดไป")
+                        else
+                            ClearTargetESP()
+                        end
                     else
-                        failedSpotCooldowns[spot] = tick() + 3
+                        failedSpotCooldowns[spot] = tick() + 4.0
+                        if promptPart then failedSpotCooldowns[promptPart] = tick() + 4.0 end
                         ClearTargetESP()
                         if hum then hum.WalkSpeed = NORMAL_WALK_SPEED end
                     end
+                else
+                    failedSpotCooldowns[spot] = tick() + 3.5
+                    if promptPart then failedSpotCooldowns[promptPart] = tick() + 3.5 end
+                    ClearTargetESP()
+                    task.wait(0.08)
                 end
             else
                 ClearTargetESP()
                 task.wait(0.25)
             end
 
-            -- เคลมเงินค่าจ้างก่อสร้างอัตโนมัติ (หน่วงเวลาปลอดภัย ไม่สแปม Remote)
-            if curJob == "งานก่อสร้าง" and State.AutoCollectCash then
-                local curHRP = GetHRP()
-                if curHRP and (curHRP.Position - jobNpcPos).Magnitude <= 25 then
-                    if (tick() - lastCollectTime) >= 12 then
-                        lastCollectTime = tick()
-                        pcall(function()
-                            local constJobRS = ReplicatedStorage:FindFirstChild("Job") and ReplicatedStorage.Job:FindFirstChild("Construction")
-                            local collectRemote = constJobRS and constJobRS:FindFirstChild("Collect")
-                            if collectRemote then
-                                local s, amount = collectRemote:InvokeServer()
-                                if s and amount and amount > 0 then
-                                    Notify("รับเงินก่อสร้าง", "+" .. tostring(amount) .. " ฿", "", 2.5)
-                                end
-                            end
-                        end)
-                    end
-                end
-            end
         else
-            ClearTargetESP()
+            -- Preview Mode: แสดง ESP นำทางล่วงหน้า ให้รู้ว่าจะไปเริ่มฟาร์มจุดไหน แม้ยังไม่ได้กดเปิดออโต้ฟาร์ม
+            if State.SelectedJob == "งานก่อสร้าง" then
+                local prevSpot, prevPrompt, prevDist, prevName, prevPos, prevCat = GetNearestOpenSpot("งานก่อสร้าง")
+                if prevSpot then
+                    local color = (prevCat == "เหล็ก" and Color3.fromRGB(255, 145, 0))
+                               or (prevCat == "กำแพง" and Color3.fromRGB(0, 240, 160))
+                               or Color3.fromRGB(190, 110, 255)
+                    local icon = (prevCat == "กำแพง" and "🧱") or (prevCat == "เหล็ก" and "🔩") or "🪨"
+                    SetTargetESP(prevSpot, string.format("จุดเริ่มฟาร์ม: %s %s", icon, (prevCat or "ก่อสร้าง")), color, "[พร้อมเริ่มฟาร์ม]")
+                else
+                    ClearTargetESP()
+                end
+            else
+                ClearTargetESP()
+            end
+            task.wait(0.25)
         end
     end
 end)
+
+
 
 --------------------------------------------------------------
 -- 9. ระบบตัวละคร (CHEATS: SPEED, JUMP, NOCLIP, FLY, INFJUMP, ESP)
@@ -1587,70 +2108,670 @@ task.spawn(function()
     end
 end)
 
+
+
 --------------------------------------------------------------
--- 10. ระบบขายขยะ (TRASH SELL)
+-- 10. ระบบความแม่นยำของปืน & ไร้แรงดีด (GUN ACCURACY / NO SPREAD / NO RECOIL / NO BULLET DROP)
 --------------------------------------------------------------
-local function SellAllTrash()
-    local sellFolder = ReplicatedStorage:WaitForChild("Job"):WaitForChild("ขยะ")
-    local sellConfigModule = sellFolder:FindFirstChild("SellConfig")
-    local sellRemote = sellFolder:FindFirstChild("SellItems")
-    if sellConfigModule and sellRemote then
-        local sellConfig = require(sellConfigModule)
-        local toSell = {}
-        local count = 0
-        local bp = LocalPlayer:FindFirstChild("Backpack")
-        if bp then
-            for _, item in ipairs(bp:GetChildren()) do
-                if sellConfig[item.Name] then
-                    toSell[item.Name] = (toSell[item.Name] or 0) + 1
-                    count = count + 1
+local function EnhanceGun(tool)
+    if not tool or not tool:IsA("Tool") then return end
+    pcall(function()
+        -- 1. ปิด Shake ของปืน (กล้องสั่นไหวเวลาเล็ง/ยิง)
+        local shake = tool:FindFirstChild("Shake")
+        if shake and shake:IsA("LocalScript") then
+            shake.Enabled = not (State.NoRecoil and State.Running)
+        end
+
+        -- 2. ปรับแต่งโมดูล Setting ของ FE Gun Kit
+        local settingMod = tool:FindFirstChild("Setting")
+        if settingMod and settingMod:IsA("ModuleScript") then
+            local s = require(settingMod)
+            if type(s) == "table" then
+                -- 🎯 ยิงตรงจุด 100% (No Spread & Shotgun Spread = 0)
+                if (State.NoSpread or State.SilentAim) and State.Running then
+                    s.Spread = 0
+                    s.MinSpread = 0
+                    s.MaxSpread = 0
+                    s.SpreadRedutionS = 0
+                    s.SpreadRedutionIS = 0
+                    s.BulletBloom = 0
+                    s.CrossExpansion = 0
+                    s.ShotgunPattern = false
+                    if type(s.SpreadPattern) == "table" then
+                        for _, pt in ipairs(s.SpreadPattern) do
+                            if type(pt) == "table" then
+                                pt[1] = 0
+                                pt[2] = 0
+                            end
+                        end
+                    end
+                    if type(s.ChargeAlterTable) == "table" and type(s.ChargeAlterTable.Spread) == "table" then
+                        s.ChargeAlterTable.Spread.Level1 = 0
+                        s.ChargeAlterTable.Spread.Level2 = 0
+                        s.ChargeAlterTable.Spread.Level3 = 0
+                    end
+                end
+
+                -- 🛑 ปืนนิ่งสนิท ไร้แรงถีบ (No Recoil & No Camera Recoiling)
+                if State.NoRecoil and State.Running then
+                    s.Recoil = 0
+                    s.CameraRecoilingEnabled = false
+                    s.ViewmodelRecoilInfluence = 0
+                    s.RecoilDamper = 0
+                    s.RecoilSpeed = 0
+                    s.AngleX_Min = 0
+                    s.AngleX_Max = 0
+                    s.AngleY_Min = 0
+                    s.AngleY_Max = 0
+                    s.AngleZ_Min = 0
+                    s.AngleZ_Max = 0
+                    s.ScopeSwaySpeed = 0
+                    s.ScopeSwayDamper = 0
+                    s.ScopeKnockbackSpeed = 0
+                    s.DropXMin = 0
+                    s.DropYMax = 0
+                    s.XMax = 0
+                    s.YMax = 0
+                end
+
+                -- ⚡ กระสุนพุ่งตรง ไม่ย้อยตามแรงโน้มถ่วง (No Bullet Drop)
+                if (State.FastBullet or State.SilentAim) and State.Running then
+                    s.BulletAcceleration = Vector3.zero
+                    if type(s.ChargeAlterTable) == "table" and type(s.ChargeAlterTable.BulletAcceleration) == "table" then
+                        s.ChargeAlterTable.BulletAcceleration.Level1 = Vector3.zero
+                        s.ChargeAlterTable.BulletAcceleration.Level2 = Vector3.zero
+                        s.ChargeAlterTable.BulletAcceleration.Level3 = Vector3.zero
+                    end
+                    if (s.BulletSpeed or 0) < 4000 then
+                        s.BulletSpeed = 5000
+                    end
                 end
             end
         end
+    end)
+end
+
+local function ApplyGunMods()
+    if not State.Running then return end
+    pcall(function()
         local char = LocalPlayer.Character
         if char then
             for _, item in ipairs(char:GetChildren()) do
-                if item:IsA("Tool") and sellConfig[item.Name] then
-                    toSell[item.Name] = (toSell[item.Name] or 0) + 1
-                    count = count + 1
+                if item:IsA("Tool") then
+                    EnhanceGun(item)
                 end
             end
         end
-        if count > 0 then
-            sellRemote:FireServer(toSell)
-            Notify("ขายขยะ", "ขายขยะสำเร็จ " .. count .. " ชิ้น!", "", 3)
+        local bp = LocalPlayer:FindFirstChild("Backpack")
+        if bp then
+            for _, item in ipairs(bp:GetChildren()) do
+                if item:IsA("Tool") then
+                    EnhanceGun(item)
+                end
+            end
+        end
+    end)
+end
+
+-- ดักจับเมื่อถือปืนใหม่หรือเก็บปืนเข้ากระเป๋า
+local function HookInventoryForGuns()
+    pcall(function()
+        if Connections.CharGunHook then Connections.CharGunHook:Disconnect() end
+        if Connections.BpGunHook then Connections.BpGunHook:Disconnect() end
+
+        local char = LocalPlayer.Character
+        if char then
+            Connections.CharGunHook = char.ChildAdded:Connect(function(child)
+                if child:IsA("Tool") then
+                    task.wait(0.05)
+                    EnhanceGun(child)
+                end
+            end)
+        end
+
+        local bp = LocalPlayer:FindFirstChild("Backpack")
+        if bp then
+            Connections.BpGunHook = bp.ChildAdded:Connect(function(child)
+                if child:IsA("Tool") then
+                    task.wait(0.05)
+                    EnhanceGun(child)
+                end
+            end)
+        end
+    end)
+end
+
+HookInventoryForGuns()
+Connections.CharAddedGunHook = LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(1)
+    HookInventoryForGuns()
+    ApplyGunMods()
+end)
+
+-- เฝ้าดูและปรับแต่งปืนที่ถืออยู่ทุก 1.5 วินาที
+task.spawn(function()
+    while State.Running do
+        pcall(ApplyGunMods)
+        task.wait(1.5)
+    end
+end)
+
+--------------------------------------------------------------
+-- 🎯 ปรับแต่งทิศทางกระสุน & B3 SILENT AIM SYSTEM
+--------------------------------------------------------------
+local fovCircle = nil
+pcall(function()
+    if typeof(Drawing) == "table" and typeof(Drawing.new) == "function" then
+        fovCircle = Drawing.new("Circle")
+        fovCircle.Thickness = 1.5
+        fovCircle.NumSides = 48
+        fovCircle.Radius = State.CombatFOV or 150
+        fovCircle.Filled = false
+        fovCircle.Color = Color3.fromRGB(255, 60, 60)
+        fovCircle.Transparency = 0.8
+        fovCircle.Visible = false
+    end
+end)
+
+local function GetAimCenter()
+    local cam = Workspace.CurrentCamera
+    if not cam then return Vector2.new(0, 0) end
+    local pgui = LocalPlayer:FindFirstChild("PlayerGui")
+    local gunGui = pgui and pgui:FindFirstChild("GunGUI")
+    local crosshair = gunGui and gunGui:FindFirstChild("Crosshair")
+    if crosshair and crosshair.Visible and crosshair.AbsolutePosition.X > 0 then
+        return crosshair.AbsolutePosition + (crosshair.AbsoluteSize / 2)
+    end
+    local uis = UserInputService
+    if uis.MouseBehavior == Enum.MouseBehavior.LockCenter or (cam.Focus.p - cam.CFrame.p).Magnitude <= 1 then
+        return Vector2.new(cam.ViewportSize.X / 2, cam.ViewportSize.Y / 2)
+    end
+    local mouse = LocalPlayer:GetMouse()
+    return Vector2.new(mouse.X, mouse.Y)
+end
+
+Connections.FOVCircleLoop = RunService.RenderStepped:Connect(function()
+    if fovCircle then
+        local cam = Workspace.CurrentCamera
+        local shouldShow = State.Running and State.SilentAim and State.DrawFOV and cam ~= nil
+        fovCircle.Visible = shouldShow
+        if shouldShow then
+            fovCircle.Radius = State.CombatFOV or 150
+            fovCircle.Position = GetAimCenter()
+        end
+    end
+end)
+
+local function IsWallClear(origin, targetPart, targetChar)
+    local diff = (targetPart.Position - origin)
+    local dist = diff.Magnitude
+    if dist <= 0.1 then return true end
+    local dir = diff.Unit
+
+    local rayParams = RaycastParams.new()
+    rayParams.FilterType = Enum.RaycastFilterType.Exclude
+    rayParams.IgnoreWater = true
+    local ignore = {LocalPlayer.Character, Workspace.CurrentCamera}
+    rayParams.FilterDescendantsInstances = ignore
+
+    local curOrigin = origin
+    local remainingDist = dist
+
+    for _ = 1, 8 do
+        local result = Workspace:Raycast(curOrigin, dir * remainingDist, rayParams)
+        if not result then
+            return true
+        end
+
+        local hitPart = result.Instance
+        if hitPart:IsDescendantOf(targetChar) then
+            return true
+        end
+
+        -- ตรวจสอบวัตถุโปร่งแสง เอฟเฟกต์ หรือโซนที่ไม่มี collision
+        if (not hitPart.CanCollide) or hitPart.Transparency > 0.75 or hitPart.Name == "BloodWound" or hitPart.Name == "ExplosionCrater" then
+            table.insert(ignore, hitPart)
+            rayParams.FilterDescendantsInstances = ignore
+            curOrigin = result.Position + (dir * 0.1)
+            remainingDist = (targetPart.Position - curOrigin).Magnitude
+            if remainingDist <= 0.5 then return true end
         else
-            Notify("ขายขยะ", "ไม่มีไอเท็มขยะในตัว", "", 3)
+            return false
+        end
+    end
+
+    return false
+end
+
+local function GetAimTarget(firePos)
+    if not State.SilentAim then return nil end
+
+    -- อัตราความแม่นยำ (Hit Chance %)
+    local hitChance = State.SilentHitChance or 100
+    if hitChance < 100 and math.random(1, 100) > hitChance then
+        return nil
+    end
+
+    local cam = Workspace.CurrentCamera
+    if not cam then return nil end
+
+    local centerPos = GetAimCenter()
+    local maxFOV = State.CombatFOV or 150
+    local partChoice = State.SilentPart or "Head"
+
+    local bestTargetPos = nil
+    local bestScreenDist = maxFOV + 1
+
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and plr.Character then
+            local char = plr.Character
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            if hum and hum.Health > 0 and hrp then
+                local targetPart = (partChoice == "Head" and char:FindFirstChild("Head"))
+                                or (partChoice == "Torso" and (char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso")))
+                                or (partChoice == "HumanoidRootPart" and hrp)
+                                or char:FindFirstChild("Head")
+                                or hrp
+
+                if targetPart then
+                    local sPos, onScreen = cam:WorldToViewportPoint(targetPart.Position)
+                    if onScreen and sPos.Z > 0 then
+                        local sDist = (Vector2.new(sPos.X, sPos.Y) - centerPos).Magnitude
+                        if sDist <= maxFOV and sDist < bestScreenDist then
+                            local clear = true
+                            if State.SilentWallCheck then
+                                clear = IsWallClear(firePos, targetPart, char)
+                            end
+
+                            if clear then
+                                bestScreenDist = sDist
+                                local finalPos = targetPart.Position
+                                if State.SilentVelocity then
+                                    local targetHRP = char:FindFirstChild("HumanoidRootPart")
+                                    if targetHRP and targetHRP.AssemblyLinearVelocity.Magnitude > 0.5 then
+                                        local dist3D = (finalPos - firePos).Magnitude
+                                        local leadTime = math.clamp(dist3D / 6000, 0, 0.12)
+                                        finalPos = finalPos + (targetHRP.AssemblyLinearVelocity * leadTime)
+                                    end
+                                end
+                                bestTargetPos = finalPos
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return bestTargetPos
+end
+
+local originalSimulateProjectile = _G._KrakenOriginalSimulateProjectile
+pcall(function()
+    local phMod = ReplicatedStorage:FindFirstChild("Modules") and ReplicatedStorage.Modules:FindFirstChild("ProjectileHandler")
+    if phMod then
+        local ph = require(phMod)
+        if ph and ph.SimulateProjectile then
+            if not originalSimulateProjectile then
+                originalSimulateProjectile = ph.SimulateProjectile
+                _G._KrakenOriginalSimulateProjectile = originalSimulateProjectile
+            end
+            ph.SimulateProjectile = function(self, p128, p129, p130, p131, p132, p133, p134, p135, p136, p137, p138, p139, p140, p141)
+                -- 🛑 กรองความปลอดภัย: แก้ไขเฉพาะกระสุนที่ยิงจากปืนของตัวเรา (LocalPlayer) เท่านั้น
+                -- ป้องกันไม่ให้วิถีกระสุนของคนอื่นในเซิร์ฟเวอร์ถูกดึงหรือเลี้ยวมาหาเราโดยเด็ดขาด 100%
+                local char = LocalPlayer.Character
+                local isLocalShooter = false
+                if char then
+                    for _, obj in ipairs({p129, p130, p131, p134}) do
+                        if obj and typeof(obj) == "Instance" and obj:IsDescendantOf(char) then
+                            isLocalShooter = true
+                            break
+                        end
+                    end
+                    if not isLocalShooter then
+                        local currentTool = char:FindFirstChildOfClass("Tool")
+                        if currentTool and (
+                            (p129 and typeof(p129) == "Instance" and (p129 == currentTool or p129:IsDescendantOf(currentTool))) or
+                            (p131 and typeof(p131) == "Instance" and (p131 == currentTool or p131:IsDescendantOf(currentTool))) or
+                            (p134 and typeof(p134) == "Instance" and (p134 == currentTool or p134:IsDescendantOf(currentTool)))
+                        ) then
+                            isLocalShooter = true
+                        end
+                    end
+                end
+
+                if State.Running and isLocalShooter and p134 then
+                    local firePos = (p131 and p131:FindFirstChild("GunFirePoint") and p131:FindFirstChild("GunFirePoint").WorldPosition)
+                                 or (p134 and p134.WorldPosition)
+                                 or (char and char:FindFirstChild("Head") and char.Head.Position)
+
+                    if firePos then
+                        local targetPos = nil
+                        if State.SilentAim then
+                            targetPos = GetAimTarget(firePos)
+                        end
+
+                        if targetPos then
+                            local trueDir = (targetPos - firePos).Unit
+                            if type(p132) == "table" then
+                                for i = 1, #p132 do p132[i] = trueDir end
+                            end
+                            if type(p133) == "table" then
+                                for i = 1, #p133 do p133[i] = trueDir end
+                            end
+                            -- กำจัดแรงโน้มถ่วงกระสุนย้อย & เร่งความเร็วสูง เพื่อให้พุ่งเข้าเป้าหมายแบบเลเซอร์บีม 100%
+                            if type(p139) == "table" then
+                                p139[2] = Vector3.zero
+                                if (p139[1] or 0) < 5000 then p139[1] = 6000 end
+                            end
+                        elseif State.NoSpread then
+                            local cam = Workspace.CurrentCamera
+                            local center = GetAimCenter()
+                            local screenRay = cam:ViewportPointToRay(center.X, center.Y)
+                            local rayParams = RaycastParams.new()
+                            rayParams.FilterDescendantsInstances = {char, cam}
+                            rayParams.FilterType = Enum.RaycastFilterType.Exclude
+                            local hit = Workspace:Raycast(screenRay.Origin, screenRay.Direction * 3000, rayParams)
+                            local hitPos = hit and hit.Position or (screenRay.Origin + screenRay.Direction * 2000)
+                            local straightDir = (hitPos - firePos).Unit
+                            if type(p132) == "table" then
+                                for i = 1, #p132 do p132[i] = straightDir end
+                            end
+                            if type(p133) == "table" then
+                                for i = 1, #p133 do p133[i] = straightDir end
+                            end
+                        end
+
+                        if State.FastBullet and type(p139) == "table" then
+                            p139[2] = Vector3.zero
+                            if (p139[1] or 0) < 5000 then p139[1] = 6000 end
+                        end
+                    end
+                end
+                return originalSimulateProjectile(self, p128, p129, p130, p131, p132, p133, p134, p135, p136, p137, p138, p139, p140, p141)
+            end
+        end
+    end
+end)
+
+
+
+--------------------------------------------------------------
+-- 🛒 11. ระบบติดตาม & จัดการพ่อค้าพเนจร (WANDERING MERCHANT TRACKER & ESP)
+--------------------------------------------------------------
+local MerchantData = {
+    IsOpen = false,
+    RemainingTime = 0,
+    ShopName = "พ่อค้าพเนจร",
+    LocationName = "จุดลับ",
+    Model = nil,
+    RootPart = nil,
+    Distance = 0,
+    NextSpawnTime = 0,
+}
+local MerchantESPObjects = {}
+
+local function FindMerchantNPC()
+    -- 1. ค้นหาโมเดลที่มีชื่อ SecretShopNPC ใน Workspace
+    for _, obj in ipairs(Workspace:GetChildren()) do
+        if obj:IsA("Model") and string.find(obj.Name, "SecretShopNPC") then
+            local hrp = obj:FindFirstChild("HumanoidRootPart") or obj:FindFirstChildWhichIsA("BasePart")
+            if hrp then
+                return obj, hrp
+            end
+        end
+    end
+
+    -- 2. ค้นหาจาก ProximityPrompt ที่มีข้อความ "พ่อค้าพเนจร"
+    for _, desc in ipairs(Workspace:GetDescendants()) do
+        if desc:IsA("ProximityPrompt") and desc.ObjectText == "พ่อค้าพเนจร" then
+            local part = desc.Parent:IsA("BasePart") and desc.Parent
+                      or (desc.Parent:IsA("Attachment") and desc.Parent.Parent:IsA("BasePart") and desc.Parent.Parent)
+                      or (desc.Parent and desc.Parent:FindFirstChild("HumanoidRootPart"))
+            if part then
+                local model = part:FindFirstAncestorOfClass("Model") or part
+                return model, part
+            end
+        end
+    end
+
+    return nil, nil
+end
+
+local function ClearMerchantESP()
+    for _, obj in ipairs(MerchantESPObjects) do
+        pcall(function() obj:Destroy() end)
+    end
+    table.clear(MerchantESPObjects)
+end
+
+local function UpdateMerchantESP()
+    if not State.MerchantESP or not State.Running then
+        ClearMerchantESP()
+        return
+    end
+
+    local model, hrp = FindMerchantNPC()
+    if not model or not hrp then
+        ClearMerchantESP()
+        return
+    end
+
+    local existingBB = hrp:FindFirstChild("MerchantBillboard")
+    local existingHL = model:FindFirstChild("MerchantHighlight")
+
+    if not existingHL then
+        local hl = Instance.new("Highlight")
+        hl.Name = "MerchantHighlight"
+        hl.FillColor = Color3.fromRGB(255, 215, 0)
+        hl.OutlineColor = Color3.fromRGB(255, 255, 255)
+        hl.FillTransparency = 0.35
+        hl.OutlineTransparency = 0
+        hl.Adornee = model
+        hl.Parent = model
+        table.insert(MerchantESPObjects, hl)
+    end
+
+    if not existingBB then
+        local bb = Instance.new("BillboardGui")
+        bb.Name = "MerchantBillboard"
+        bb.Adornee = hrp
+        bb.Size = UDim2.new(0, 210, 0, 54)
+        bb.StudsOffset = Vector3.new(0, 3.8, 0)
+        bb.AlwaysOnTop = true
+
+        local frame = Instance.new("Frame", bb)
+        frame.Size = UDim2.new(1, 0, 1, 0)
+        frame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+        frame.BackgroundTransparency = 0.25
+        local stroke = Instance.new("UIStroke", frame)
+        stroke.Color = Color3.fromRGB(255, 215, 0)
+        stroke.Thickness = 1.5
+        local corner = Instance.new("UICorner", frame)
+        corner.CornerRadius = UDim.new(0, 6)
+
+        local titleLbl = Instance.new("TextLabel", frame)
+        titleLbl.Size = UDim2.new(1, 0, 0, 24)
+        titleLbl.Position = UDim2.new(0, 0, 0, 2)
+        titleLbl.BackgroundTransparency = 1
+        titleLbl.Font = Enum.Font.GothamBold
+        titleLbl.TextSize = 12
+        titleLbl.TextColor3 = Color3.fromRGB(255, 215, 0)
+        titleLbl.Text = "🛒 พ่อค้าพเนจร (Secret Shop)"
+
+        local subLbl = Instance.new("TextLabel", frame)
+        subLbl.Name = "SubInfo"
+        subLbl.Size = UDim2.new(1, 0, 0, 22)
+        subLbl.Position = UDim2.new(0, 0, 0, 26)
+        subLbl.BackgroundTransparency = 1
+        subLbl.Font = Enum.Font.GothamMedium
+        subLbl.TextSize = 11
+        subLbl.TextColor3 = Color3.fromRGB(240, 240, 240)
+        subLbl.Text = "กำลังคำนวณระยะห่าง..."
+
+        bb.Parent = hrp
+        table.insert(MerchantESPObjects, bb)
+        existingBB = bb
+    end
+
+    if existingBB then
+        local subLbl = existingBB:FindFirstChild("Frame") and existingBB.Frame:FindFirstChild("SubInfo")
+        if subLbl then
+            local myHRP = GetHRP()
+            local dist = myHRP and math.floor((myHRP.Position - hrp.Position).Magnitude) or 0
+            local timeStr = ""
+            if MerchantData.RemainingTime > 0 then
+                timeStr = string.format(" | ⏱️ %d:%02d", math.floor(MerchantData.RemainingTime / 60), math.floor(MerchantData.RemainingTime % 60))
+            end
+            subLbl.Text = string.format("📍 %d studs%s", dist, timeStr)
         end
     end
 end
 
---------------------------------------------------------------
--- 11. ระบบวาร์ป (TELEPORTS)
---------------------------------------------------------------
-local KnownLocations = {
-    ["🛡️ เซฟโซน (Safe Zone)"] = Vector3.new(2614, 4, 690),
-    ["🏗️ ไซต์งานก่อสร้าง (Construction)"] = Vector3.new(2476, 7, -414),
-    ["🗑️ จุดเก็บขยะ (Trash Zone)"] = Vector3.new(2190, 4, 420),
-    ["🏪 ร้านรับซื้อขยะ (NPC Sell)"] = Vector3.new(2466.5, 6, -1171.0),
-    ["👮 สถานีตำรวจ (สน.)"] = Vector3.new(2640, 4, -150),
-    ["🏢 คอนโด / อพาร์ทเม้นท์"] = Vector3.new(2510, 4, -1020),
-    ["🏁 จุดเกิด (Spawn)"] = Vector3.new(2580, 4, 650)
-}
-
-local function TeleportTo(pos, name)
-    local hrp = GetHRP()
-    if hrp then
-        hrp.CFrame = CFrame.new(pos + Vector3.new(0, 3, 0))
-        Notify("วาร์ป", "วาร์ปมายัง: " .. (name or "จุดหมาย"), "", 3)
+local function TeleportToMerchant()
+    local model, hrp = FindMerchantNPC()
+    if not model or not hrp then
+        Notify("พ่อค้าพเนจร", "ไม่พบพ่อค้าพเนจรในเซิร์ฟเวอร์ (ร้านอาจยังไม่เปิด)", "", 3)
+        return false
     end
+
+    local myHRP = GetHRP()
+    local myHum = GetHuman()
+    if not myHRP or not myHum then
+        Notify("ข้อผิดพลาด", "ไม่พบตัวละครของคุณ", "", 3)
+        return false
+    end
+
+    local targetPos = hrp.Position + (hrp.CFrame.LookVector * 3.5)
+    myHRP.AssemblyLinearVelocity = Vector3.zero
+    myHRP.AssemblyAngularVelocity = Vector3.zero
+    myHRP.CFrame = CFrame.lookAt(targetPos, hrp.Position)
+    task.wait(0.05)
+    myHRP.AssemblyLinearVelocity = Vector3.zero
+    myHRP.AssemblyAngularVelocity = Vector3.zero
+
+    Notify("พ่อค้าพเนจร", "วาร์ปมาถึงพ่อค้าพเนจรเรียบร้อย!", "", 3)
+    return true
 end
+
+
+
+-- เชื่อมต่อระบบ Event ของพ่อค้าพเนจร
+pcall(function()
+    local Black = ReplicatedStorage:WaitForChild("Shop", 5):WaitForChild("Black", 5)
+    if Black then
+        local SecretShopTimer = Black:FindFirstChild("SecretShopTimer")
+        if SecretShopTimer then
+            Connections.SecretShopTimer = SecretShopTimer.OnClientEvent:Connect(function(remainingSec, shopName)
+                MerchantData.IsOpen = true
+                MerchantData.RemainingTime = remainingSec
+                MerchantData.ShopName = shopName or "พ่อค้าพเนจร"
+                if State.AutoNotifyMerchant then
+                    Notify("🛒 พ่อค้าพเนจรเปิดร้าน!", string.format("เหลือเวลาอีก %d นาที %02d วินาที", math.floor(remainingSec / 60), math.floor(remainingSec % 60)), "เปิดเมนูเพื่อวาร์ปหรือเปิดร้าน", 5)
+                end
+            end)
+        end
+
+        local SecretShopAnnounce = Black:FindFirstChild("SecretShopAnnounce")
+        if SecretShopAnnounce then
+            Connections.SecretShopAnnounce = SecretShopAnnounce.OnClientEvent:Connect(function(state, locName, duration)
+                if state == "open" then
+                    MerchantData.IsOpen = true
+                    MerchantData.LocationName = locName or "จุดลับ"
+                    MerchantData.RemainingTime = duration or 600
+                    if State.AutoNotifyMerchant then
+                        Notify("🛒 พ่อค้าพเนจรมาถึงแล้ว!", "อยู่ที่: " .. tostring(locName), "เปิดเมนูเพื่อตรวจสอบตำแหน่ง", 5)
+                    end
+                elseif state == "close" then
+                    MerchantData.IsOpen = false
+                    MerchantData.RemainingTime = 0
+                    MerchantData.NextSpawnTime = os.clock() + (duration or 1200)
+                    ClearMerchantESP()
+                    if State.AutoNotifyMerchant then
+                        Notify("🛒 พ่อค้าพเนจรปิดร้านแล้ว", string.format("จะกลับมาใหม่ในอีกประมาณ %d นาที", math.floor((duration or 1200) / 60)), "", 4)
+                    end
+                end
+            end)
+        end
+    end
+end)
+
+local MerchantStatusParagraph = nil
+task.spawn(function()
+    while State.Running do
+        task.wait(1.0)
+        pcall(function()
+            local model, hrp = FindMerchantNPC()
+            MerchantData.Model = model
+            MerchantData.RootPart = hrp
+
+            local pgui = LocalPlayer:FindFirstChild("PlayerGui")
+            local gunShop = pgui and pgui:FindFirstChild("GunShopGui")
+            local tf = gunShop and gunShop:FindFirstChild("TimerFrame")
+            if tf and tf.Visible then
+                MerchantData.IsOpen = true
+                local tl = tf:FindFirstChild("TimerLabel")
+                if tl and tl.Text ~= "" then
+                    local m, s = string.match(tl.Text, "(%d+):(%d+)")
+                    if m and s then
+                        MerchantData.RemainingTime = tonumber(m) * 60 + tonumber(s)
+                    end
+                end
+            elseif model then
+                MerchantData.IsOpen = true
+            else
+                MerchantData.IsOpen = false
+                if MerchantData.RemainingTime > 0 then
+                    MerchantData.RemainingTime = math.max(0, MerchantData.RemainingTime - 1)
+                end
+            end
+
+            local myHRP = GetHRP()
+            if myHRP and hrp then
+                MerchantData.Distance = math.floor((myHRP.Position - hrp.Position).Magnitude)
+            else
+                MerchantData.Distance = 0
+            end
+
+            UpdateMerchantESP()
+
+            if MerchantStatusParagraph and type(MerchantStatusParagraph.SetTitle) == "function" then
+                local title = MerchantData.IsOpen and "🛒 พ่อค้าพเนจร: เปิดร้านอยู่ (OPEN)" or "⏳ พ่อค้าพเนจร: ปิดร้านแล้ว (CLOSED)"
+                local timeDesc = ""
+                if MerchantData.IsOpen then
+                    local m = math.floor(MerchantData.RemainingTime / 60)
+                    local s = math.floor(MerchantData.RemainingTime % 60)
+                    timeDesc = string.format("• ⏱️ เวลาที่เหลือ: %d นาที %02d วินาที", m, s)
+                else
+                    if MerchantData.NextSpawnTime > os.clock() then
+                        local diff = math.floor(MerchantData.NextSpawnTime - os.clock())
+                        timeDesc = string.format("• ⏱️ รอรอบถัดไปในอีกประมาณ: %d นาที %02d วินาที", math.floor(diff / 60), math.floor(diff % 60))
+                    else
+                        timeDesc = "• ⏱️ รอรอบถัดไป: กำลังรอการสุ่มเกิดจากเซิร์ฟเวอร์"
+                    end
+                end
+
+                local locDesc = ""
+                if hrp then
+                    local p = hrp.Position
+                    locDesc = string.format("• 📍 ตำแหน่ง: (%.0f, %.0f, %.0f)\n• 📏 ระยะห่าง: %d studs", p.X, p.Y, p.Z, MerchantData.Distance)
+                else
+                    locDesc = "• 📍 ตำแหน่ง: ยังไม่เกิดในเซิร์ฟเวอร์ (รอรอบใหม่)\n• 📏 ระยะห่าง: --"
+                end
+
+                MerchantStatusParagraph:SetTitle(title)
+                MerchantStatusParagraph:SetDesc(timeDesc .. "\n" .. locDesc)
+            end
+        end)
+    end
+end)
 
 --------------------------------------------------------------
 -- 🎨 สร้างเมนูใน FLUENT TABS
 --------------------------------------------------------------
 Tabs.Farm:AddParagraph({
-    Title = "🛡️ KrakenHub v6.0 (100% Anti-Kick Bypass Pro)",
+    Title = "🛡️ KrakenHub v1.0 (100% Anti-Kick Bypass Pro)",
     Content = "• HookMetamethod บล็อกรีโมทแบน & ตรวจจับทุกประเภท\n• ล็อกสปีด 20 studs/s แท้จริง วิ่งไวกว่าคนทั่วไป แต่ต่ำกว่าเกณฑ์เตะ 261\n• ป้องกันหลุดระยะ ProximityPrompt และ Remote Rate-Limit ถาวร"
 })
 
@@ -1674,76 +2795,115 @@ JobSelector:OnChanged(function()
     Notify("เลือกงาน", "เปลี่ยนเป้าหมายเป็น: " .. State.SelectedJob, "", 2.5)
 end)
 
+local ConstFilterDropdown = Tabs.Farm:AddDropdown("ConstructionFilterSelect", {
+    Title = "🧱 ตัวกรองจุดก่อสร้าง (Wall / Steel Filter)",
+    Values = {"🧱+🔩 กำแพง & เหล็ก (ยอดนิยม)", "🧱 เฉพาะกำแพง (Wall)", "🔩 เฉพาะเหล็ก (Steel)", "🌐 ทั้งหมด (กำแพง + เหล็ก + หิน)"},
+    Default = "🧱+🔩 กำแพง & เหล็ก (ยอดนิยม)"
+})
+ConstFilterDropdown:OnChanged(function()
+    local val = Options.ConstructionFilterSelect.Value
+    if val:find("เฉพาะกำแพง") then
+        State.ConstructionFilter = "เฉพาะกำแพง"
+    elseif val:find("เฉพาะเหล็ก") then
+        State.ConstructionFilter = "เฉพาะเหล็ก"
+    elseif val:find("ทั้งหมด") then
+        State.ConstructionFilter = "ทั้งหมด"
+    else
+        State.ConstructionFilter = "กำแพง & เหล็ก"
+    end
+    ScannedConstructionSpots = {}
+    ClearTargetESP()
+    Notify("ตัวกรองก่อสร้าง", "ตั้งค่าเป้าหมาย: " .. State.ConstructionFilter, "", 2.5)
+end)
+
 local MainFarmToggle = Tabs.Farm:AddToggle("MasterAutoFarm", {
     Title = "🚀 เริ่มฟาร์มอัตโนมัติ (Auto Farm Selected Job)",
-    Description = "เปิดปุ่มนี้ ระบบจะวิ่งหาจุดว่าง หลบสิ่งกีดขวาง พร้อมไฮไลต์สีเขียวขอบเหลืองนีออนทันที",
+    Description = "วิ่ง Shift แท้ 18 studs/s + หลบสิ่งกีดขวาง + ไฮไลต์ชัดเจน + เริ่มงานไว ปลอดภัย 100%",
     Default = false
 })
 MainFarmToggle:OnChanged(function()
     State.AutoFarm = Options.MasterAutoFarm.Value
     if State.AutoFarm then
         hasCompletedNpcHiring = false
-        Notify("ระบบฟาร์ม", "เริ่มฟาร์มงาน: " .. tostring(State.SelectedJob) .. " (100% Anti-Kick Safe)", "", 3)
+        table.clear(failedSpotCooldowns)
+        StopWorkAnimations()
+        ReleaseVIM()
+        local hum = GetHuman()
+        if hum then
+            hum:Move(Vector3.zero, false)
+        end
+        Notify("ระบบฟาร์ม", "เริ่มฟาร์มงาน: " .. tostring(State.SelectedJob) .. " (" .. tostring(State.ConstructionFilter) .. ")", "", 3)
     else
         Notify("ระบบฟาร์ม", "หยุดระบบฟาร์มเรียบร้อย", "", 3)
         SetSprinting(false)
         ClearTargetESP()
+        table.clear(failedSpotCooldowns)
+        StopWorkAnimations()
+        ReleaseVIM()
         local hum = GetHuman()
         if hum then hum.WalkSpeed = NORMAL_WALK_SPEED end
     end
 end)
 
-Tabs.Farm:AddSection("⚙️ การตั้งค่าระบบฟาร์ม & ESP")
-
-local FarmSpeedSlider = Tabs.Farm:AddSlider("FarmSpeedVal", {
-    Title = "🏃 ความเร็ววิ่งฟาร์ม (Farm Sprint Speed)",
-    Description = "ปรับความเร็ววิ่งขณะฟาร์ม (แนะนำ 20 - 22 studs/s วิ่งไว ลื่นไหล ไม่โดนเตะ 261)",
-    Default = 21,
-    Min = 16,
-    Max = 24,
-    Rounding = 0
-})
-FarmSpeedSlider:OnChanged(function()
-    State.FarmSpeed = Options.FarmSpeedVal.Value
-end)
-
-local MinigameToggle = Tabs.Farm:AddToggle("AutoMinigame", {
-    Title = "🔨 แก้โจทย์มินิเกมอัตโนมัติ 100%",
-    Description = "เชื่อมเหล็ก / เจาะพื้น / ตอกตะปู / ถูพื้น / ซ่อมล้อ / ขุดขยะ (Safe VIM ไม่โดนเตะ)",
-    Default = true
-})
-MinigameToggle:OnChanged(function()
-    State.AutoSolveMinigame = Options.AutoMinigame.Value
-end)
-
-local AutoCashToggle = Tabs.Farm:AddToggle("AutoCollectCash", {
-    Title = "💰 เคลมเงินค่าจ้างอัตโนมัติ (งานก่อสร้าง)",
-    Description = "รับเงินจากโต๊ะผู้จัดการไซต์งานทันทีเมื่ออยู่ใกล้",
-    Default = true
-})
-AutoCashToggle:OnChanged(function()
-    State.AutoCollectCash = Options.AutoCollectCash.Value
-end)
-
-local AllSpotsESPToggle = Tabs.Farm:AddToggle("AllSpotsESP", {
-    Title = "👁️ แสดง ESP ทุกจุดในแมพ (All Work Spots ESP)",
-    Description = "แสดงกรอบเรืองแสงระบุตำแหน่งงานทั้งหมดรอบตัว",
+local MinigameToggle = Tabs.Farm:AddToggle("AutoSolveMinigameOn", {
+    Title = "🔨 แก้โจทย์มินิเกมอัตโนมัติ (Auto Solve Minigames)",
+    Description = "ตอกตะปู, ซ่อมเครื่องยนต์, ขันน็อตล้อ, ถูพื้น อัตโนมัติ",
     Default = false
 })
-AllSpotsESPToggle:OnChanged(function()
-    State.ShowAllSpotsESP = Options.AllSpotsESP.Value
-    if State.ShowAllSpotsESP then
-        UpdateAllJobESP()
-    else
+MinigameToggle:OnChanged(function()
+    State.AutoSolveMinigame = Options.AutoSolveMinigameOn.Value
+end)
+
+local AllSpotsToggle = Tabs.Farm:AddToggle("ShowAllJobSpotsToggle", {
+    Title = "👁️ แสดงจุดทำงานทั้งหมดในแมพ (Show All Spots ESP)",
+    Description = "แสดงไฮไลต์จุดงานทั้งหมดรอบตัวแยกสีชัดเจน (กำแพง/เหล็ก/หิน)",
+    Default = false
+})
+AllSpotsToggle:OnChanged(function()
+    State.ShowAllSpotsESP = Options.ShowAllJobSpotsToggle.Value
+    if not State.ShowAllSpotsESP then
         ClearAllJobESP()
+    else
+        UpdateAllJobESP()
     end
 end)
 
-Tabs.Farm:AddButton({
-    Title = "🗑️ ขายขยะทั้งหมดในตัว (Sell All Trash)",
-    Description = "ส่งไอเท็มขยะทั้งหมดไปขายให้ NPC รับเงินสด",
+--------------------------------------------------------------
+-- 🛒 สร้างเมนูใน TABS.MERCHANT (พ่อค้าพเนจร)
+--------------------------------------------------------------
+MerchantStatusParagraph = Tabs.Merchant:AddParagraph({
+    Title = "🛒 พ่อค้าพเนจร: กำลังตรวจสอบ...",
+    Content = "• ⏱️ เวลาที่เหลือ: กำลังตรวจสอบ...\n• 📍 ตำแหน่ง: กำลังสแกนแมพ...\n• 📏 ระยะห่าง: --"
+})
+
+local MerchantESPToggle = Tabs.Merchant:AddToggle("MerchantESPOn", {
+    Title = "👁️ เปิด ESP พ่อค้าพเนจร (Merchant ESP)",
+    Description = "แสดงกล่องข้อความสีทอง + ข้อมูลระยะห่าง + เวลาที่เหลือทะลุกำแพง",
+    Default = true
+})
+MerchantESPToggle:OnChanged(function()
+    State.MerchantESP = Options.MerchantESPOn.Value
+    if not State.MerchantESP then
+        ClearMerchantESP()
+    else
+        UpdateMerchantESP()
+    end
+end)
+
+local MerchantNotifyToggle = Tabs.Merchant:AddToggle("MerchantNotifyOn", {
+    Title = "🔔 แจ้งเตือนเมื่อพ่อค้ามาถึง (Auto Notification)",
+    Description = "เด้งหน้าต่างแจ้งเตือนทันทีเมื่อพ่อค้าพเนจรเปิดร้านในเซิร์ฟเวอร์",
+    Default = true
+})
+MerchantNotifyToggle:OnChanged(function()
+    State.AutoNotifyMerchant = Options.MerchantNotifyOn.Value
+end)
+
+Tabs.Merchant:AddButton({
+    Title = "⚡ วาร์ปไปหาพ่อค้าพเนจร (Teleport to Merchant)",
+    Description = "วาร์ปตัวละครไปยืนอยู่ตรงหน้าพ่อค้าทันที",
     Callback = function()
-        SellAllTrash()
+        TeleportToMerchant()
     end
 })
 
@@ -1763,10 +2923,10 @@ SpeedToggle:OnChanged(function()
 end)
 
 local SpeedSlider = Tabs.Player:AddSlider("SpeedVal", {
-    Title = "ความเร็วเดิน (WalkSpeed)",
-    Default = 20,
-    Min = 16,
-    Max = 60,
+    Title = "ความเร็วเดิน (WalkSpeed) [ปลอดภัย: <= 17.5 studs/s]",
+    Default = 17,
+    Min = 8,
+    Max = 18,
     Rounding = 0
 })
 SpeedSlider:OnChanged(function()
@@ -1811,31 +2971,116 @@ ESPToggle:OnChanged(function()
     UpdateESP()
 end)
 
--- [แท็บ 3: วาร์ป]
-local locNames = {}
-for name, _ in pairs(KnownLocations) do table.insert(locNames, name) end
-table.sort(locNames)
-
-local WorldDrop = Tabs.World:AddDropdown("WorldDropdown", {
-    Title = "เลือกจุดหมายปลายทาง",
-    Values = locNames,
-    Default = locNames[1]
+--------------------------------------------------------------
+-- 🎯 แท็บ: ระบบต่อสู้ (COMBAT & SILENT AIM)
+--------------------------------------------------------------
+Tabs.Combat:AddParagraph({
+    Title = "🎯 B3 Silent Aim & Gun System",
+    Content = "ระบบล็อคกระสุนอัตโนมัติ คำนวณวิถีกระสุนเข้าเป้าหมาย พร้อมระบบชดเชยความเร็วเป้าหมาย และตรวจสอบสิ่งกีดขวาง"
 })
 
-Tabs.World:AddButton({
-    Title = "🚀 วาร์ปไปยังจุดที่เลือก",
-    Callback = function()
-        local sel = Options.WorldDropdown.Value
-        if sel and KnownLocations[sel] then
-            TeleportTo(KnownLocations[sel], sel)
-        end
-    end
+local SilentAimToggle = Tabs.Combat:AddToggle("SilentAimOn", {
+    Title = "🎯 เปิดใช้งาน Silent Aim",
+    Description = "วิถีกระสุนจะเล็งเข้าหาเป้าหมายในวงกลม FOV โดยไม่ต้องหันหน้าจอ",
+    Default = false
 })
+SilentAimToggle:OnChanged(function()
+    State.SilentAim = Options.SilentAimOn.Value
+    ApplyGunMods()
+end)
+
+local PartDropdown = Tabs.Combat:AddDropdown("SilentPartChoice", {
+    Title = "🎯 ส่วนของร่างกายที่ล็อค (Target Part)",
+    Values = {"Head", "HumanoidRootPart", "Torso"},
+    Default = "Head"
+})
+PartDropdown:OnChanged(function()
+    State.SilentPart = Options.SilentPartChoice.Value
+end)
+
+local HitChanceSlider = Tabs.Combat:AddSlider("HitChanceVal", {
+    Title = "🎲 อัตราความแม่นยำ (Hit Chance %)",
+    Description = "โอกาสที่กระสุนจะเข้าเป้า (แนะนำ 100% หรือปรับเพื่อความแนบเนียน)",
+    Default = 100,
+    Min = 10,
+    Max = 100,
+    Rounding = 0
+})
+HitChanceSlider:OnChanged(function()
+    State.SilentHitChance = Options.HitChanceVal.Value
+end)
+
+local WallCheckToggle = Tabs.Combat:AddToggle("WallCheckOn", {
+    Title = "🧱 ตรวจสอบกำแพง (Wall Check)",
+    Description = "ไม่ยิงล็อคเป้าหมายที่อยู่หลังกำแพงหรือสิ่งกีดขวาง",
+    Default = false
+})
+WallCheckToggle:OnChanged(function()
+    State.SilentWallCheck = Options.WallCheckOn.Value
+end)
+
+local VelocityToggle = Tabs.Combat:AddToggle("VelocityPredictOn", {
+    Title = "⚡ คำนวณนำวิถีความเร็วเป้าหมาย (Velocity Prediction)",
+    Description = "ดักหน้าทิศทางการเคลื่อนที่ของศัตรู ยิงโดนแม้ศัตรูกำลังวิ่ง",
+    Default = false
+})
+VelocityToggle:OnChanged(function()
+    State.SilentVelocity = Options.VelocityPredictOn.Value
+end)
+
+local FOVSlider = Tabs.Combat:AddSlider("CombatFOVVal", {
+    Title = "⭕ รัศมี FOV (FOV Radius)",
+    Description = "ขนาดวงกลมระยะการล็อคเป้าหมาย (Pixels)",
+    Default = 150,
+    Min = 40,
+    Max = 400,
+    Rounding = 0
+})
+FOVSlider:OnChanged(function()
+    State.CombatFOV = Options.CombatFOVVal.Value
+end)
+
+local DrawFOVToggle = Tabs.Combat:AddToggle("DrawFOVOn", {
+    Title = "👁️ แสดงวงกลม FOV บนหน้าจอ (Draw FOV Circle)",
+    Default = false
+})
+DrawFOVToggle:OnChanged(function()
+    State.DrawFOV = Options.DrawFOVOn.Value
+end)
+
+Tabs.Combat:AddSection("🔧 ปรับแต่งปืน & ความเสถียร (Gun Modifiers)")
+
+local NoSpreadToggle = Tabs.Combat:AddToggle("NoSpreadOn", {
+    Title = "🎯 ยิงตรงจุด ไร้แรงกระจาย (No Spread)",
+    Default = false
+})
+NoSpreadToggle:OnChanged(function()
+    State.NoSpread = Options.NoSpreadOn.Value
+    ApplyGunMods()
+end)
+
+local NoRecoilToggle = Tabs.Combat:AddToggle("NoRecoilOn", {
+    Title = "🛑 ปืนนิ่งสนิท ไร้แรงถีบ (No Recoil & No Shake)",
+    Default = false
+})
+NoRecoilToggle:OnChanged(function()
+    State.NoRecoil = Options.NoRecoilOn.Value
+    ApplyGunMods()
+end)
+
+local FastBulletToggle = Tabs.Combat:AddToggle("FastBulletOn", {
+    Title = "⚡ กระสุนความเร็วสูง ไม่ย้อย (No Bullet Drop)",
+    Default = false
+})
+FastBulletToggle:OnChanged(function()
+    State.FastBullet = Options.FastBulletOn.Value
+    ApplyGunMods()
+end)
 
 -- [แท็บ 4: ตั้งค่า]
 Tabs.Settings:AddParagraph({
-    Title = "⚙️ KrakenHub v6.0",
-    Content = "Fluent Edition (100% Anti-Kick Bypass Pro)\nกดปุ่ม Right Control เพื่อเปิด/ปิดหน้าต่าง"
+    Title = "⚙️ KrakenHub v1.0",
+    Content = "Fluent Edition (100% Anti-Kick Bypass Pro)\nกดปุ่ม K หรือ Right Control เพื่อเปิด/ปิดหน้าต่าง"
 })
 
 Tabs.Settings:AddSection("💡 การแสดงผล & แสงสว่าง (Visuals & Lighting)")
@@ -1858,6 +3103,55 @@ end)
 
 Tabs.Settings:AddSection("⚠️ ควบคุมสคริปต์")
 
+function Hub.Unload()
+    if Hub.Unloaded then return end
+    Hub.Unloaded = true
+    State.Running = false
+    State.AutoFarm = false
+    State.AutoSolveMinigame = false
+    State.Noclip = false
+    State.Fly = false
+    State.ESP = false
+    State.NoSpread = false
+    State.NoRecoil = false
+    State.FastBullet = false
+    State.SilentAim = false
+    pcall(function()
+        if originalSimulateProjectile then
+            local phMod = ReplicatedStorage:FindFirstChild("Modules") and ReplicatedStorage.Modules:FindFirstChild("ProjectileHandler")
+            if phMod then
+                local ph = require(phMod)
+                ph.SimulateProjectile = originalSimulateProjectile
+            end
+        end
+    end)
+    SetSprinting(false)
+    ClearTargetESP()
+    ClearAllJobESP()
+    ReleaseVIM()
+    StopFly()
+    if fovCircle then
+        pcall(function() fovCircle:Remove() end)
+    end
+    pcall(function()
+        local pgui = LocalPlayer:FindFirstChild("PlayerGui")
+        local runSys = pgui and pgui:FindFirstChild("RunSystem")
+        if runSys then runSys:SetAttribute("BlockStamina", false) end
+    end)
+    for _, c in pairs(Connections) do pcall(function() c:Disconnect() end) end
+    for _, obj in pairs(Hub.ESPObjects) do pcall(function() obj:Destroy() end) end
+    ClearMerchantESP()
+    if State.FullBright then
+        RestoreLighting()
+    end
+    local hum = GetHuman()
+    if hum then hum.WalkSpeed = NORMAL_WALK_SPEED; hum.JumpPower = 35 end
+    if Hub.ToggleButtonGui then
+        pcall(function() Hub.ToggleButtonGui:Destroy() end)
+    end
+    pcall(function() Fluent:Destroy() end)
+end
+
 Tabs.Settings:AddButton({
     Title = "⚠️ ปิด Hub (Unload)",
     Description = "หยุดการทำงานของสคริปต์ ลูปทั้งหมด และคืนค่าตัวละคร",
@@ -1869,31 +3163,7 @@ Tabs.Settings:AddButton({
                 {
                     Title = "ยืนยัน (Unload)",
                     Callback = function()
-                        Hub.Unloaded = true
-                        State.Running = false
-                        State.AutoFarm = false
-                        State.AutoSolveMinigame = false
-                        State.Noclip = false
-                        State.Fly = false
-                        State.ESP = false
-                        SetSprinting(false)
-                        ClearTargetESP()
-                        ClearAllJobESP()
-                        ReleaseVIM()
-                        StopFly()
-                        pcall(function()
-                            local pgui = LocalPlayer:FindFirstChild("PlayerGui")
-                            local runSys = pgui and pgui:FindFirstChild("RunSystem")
-                            if runSys then runSys:SetAttribute("BlockStamina", false) end
-                        end)
-                        for _, c in pairs(Connections) do pcall(function() c:Disconnect() end) end
-                        for _, obj in pairs(Hub.ESPObjects) do pcall(function() obj:Destroy() end) end
-                        if State.FullBright then
-                            RestoreLighting()
-                        end
-                        local hum = GetHuman()
-                        if hum then hum.WalkSpeed = NORMAL_WALK_SPEED; hum.JumpPower = 35 end
-                        Fluent:Destroy()
+                        Hub.Unload()
                     end
                 },
                 { Title = "ยกเลิก", Callback = function() end }
@@ -1910,14 +3180,24 @@ InterfaceManager:SetFolder("KrakenHub")
 SaveManager:SetFolder("KrakenHub/Sailueat")
 pcall(function()
     if writefile then
-        writefile("KrakenHub/options.json", '{"MenuKeybind":"RightControl","Transparency":true,"Theme":"Dark","Acrylic":false}')
+        writefile("KrakenHub/options.json", '{"MenuKeybind":"RightControl","Transparency":true,"Theme":"Darker","Acrylic":false}')
+    end
+    if isfile and delfile then
+        for _, p in ipairs({
+            "KrakenHub/Sailueat/settings/autoload.txt",
+            "KrakenHub/autoload.txt",
+            "Fluent/autoload.txt",
+            "Fluent/settings/autoload.txt"
+        }) do
+            if isfile(p) then pcall(delfile, p) end
+        end
     end
 end)
 InterfaceManager:BuildInterfaceSection(Tabs.Settings)
 SaveManager:BuildConfigSection(Tabs.Settings)
 
 Window:SelectTab(1)
-SaveManager:LoadAutoloadConfig()
+-- SaveManager:LoadAutoloadConfig() -- ปิดการโหลดอัตโนมัติ เพื่อให้เริ่มใหม่ต้องติ๊กเองทุกครั้ง นอกจากจะกด Load Config เองในแท็บตั้งค่า
 pcall(function()
     if Window.Root then
         Window.Root.Visible = true
@@ -1925,5 +3205,5 @@ pcall(function()
     end
 end)
 
-Notify("🐙 KrakenHub v6.1", "โหลดสำเร็จ! 100% Anti-Kick Bypass Pro", "กด Right Ctrl เพื่อ ซ่อน/แสดง UI", 4)
-print("[KrakenHub] สายเลือดอาชีวะ v6.1 Loaded (Multi-Layer Bypass — No hookmetamethod)!")
+Notify("KrakenHub v1.0", "โหลดสำเร็จ! 100% Anti-Kick Bypass Pro", "กดปุ่ม K หรือ Right Ctrl เพื่อเปิด/ปิดหน้าต่าง", 4)
+print("[KrakenHub] สายเลือดอาชีวะ v1.0 Loaded (Multi-Layer Bypass — No hookmetamethod)!")
