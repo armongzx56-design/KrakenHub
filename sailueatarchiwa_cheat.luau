@@ -23,6 +23,7 @@ local Lighting = game:GetService("Lighting")
 local CollectionService = game:GetService("CollectionService")
 local CS = CollectionService
 local ProximityPromptService = game:GetService("ProximityPromptService")
+local GuiService = game:GetService("GuiService")
 
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
@@ -2673,19 +2674,52 @@ end)
 local function GetAimCenter()
     local cam = Workspace.CurrentCamera
     if not cam then return Vector2.new(0, 0) end
+    local inset = GuiService:GetGuiInset()
     local pgui = LocalPlayer:FindFirstChild("PlayerGui")
+
+    -- 1. ตรวจสอบเป้าปืน (GunGUI Crosshair)
     local gunGui = pgui and pgui:FindFirstChild("GunGUI")
-    local crosshair = gunGui and gunGui:FindFirstChild("Crosshair")
-    if crosshair and crosshair.Visible and crosshair.AbsolutePosition.X > 0 then
-        return crosshair.AbsolutePosition + (crosshair.AbsoluteSize / 2)
+    if gunGui and gunGui:IsA("ScreenGui") and gunGui.Enabled then
+        local crosshair = gunGui:FindFirstChild("Crosshair")
+        if crosshair and crosshair.AbsolutePosition.X > 0 then
+            local addInset = gunGui.IgnoreGuiInset and Vector2.zero or inset
+            return crosshair.AbsolutePosition + (crosshair.AbsoluteSize / 2) + addInset
+        end
     end
+
+    -- 2. ตรวจสอบเป้ามือเปล่า/หมัด (fistgui crosshair)
+    local fistgui = pgui and pgui:FindFirstChild("fistgui")
+    if fistgui and fistgui:IsA("ScreenGui") and fistgui.Enabled then
+        local crosshair = fistgui:FindFirstChild("crosshair")
+        if crosshair and crosshair.Visible and crosshair.AbsolutePosition.X > 0 then
+            local addInset = fistgui.IgnoreGuiInset and Vector2.zero or inset
+            return crosshair.AbsolutePosition + (crosshair.AbsoluteSize / 2) + addInset
+        end
+    end
+
+    -- 3. ตรวจสอบ Crosshair อื่นๆ ใน PlayerGui (กรณีอาวุธชนิดอื่นๆ)
+    if pgui then
+        for _, gui in ipairs(pgui:GetChildren()) do
+            if gui:IsA("ScreenGui") and gui.Enabled then
+                local ch = gui:FindFirstChild("Crosshair", true) or gui:FindFirstChild("crosshair", true)
+                if ch and ch:IsA("GuiObject") and ch.Visible and ch.AbsolutePosition.X > 0 then
+                    local addInset = gui.IgnoreGuiInset and Vector2.zero or inset
+                    return ch.AbsolutePosition + (ch.AbsoluteSize / 2) + addInset
+                end
+            end
+        end
+    end
+
+    -- 4. กรณีล็อกเป้ากึ่งกลางจอ (LockCenter / ShiftLock / First-Person)
     local uis = UserInputService
     if uis.MouseBehavior == Enum.MouseBehavior.LockCenter or (cam.Focus.p - cam.CFrame.p).Magnitude <= 1 then
-        return Vector2.new(cam.ViewportSize.X / 2, cam.ViewportSize.Y / 2)
+        return Vector2.new(cam.ViewportSize.X / 2, (cam.ViewportSize.Y / 2) + inset.Y)
     end
-    local mouse = LocalPlayer:GetMouse()
-    return Vector2.new(mouse.X, mouse.Y)
+
+    -- 5. กรณีเมาส์อิสระ (Free Mouse): UserInputService:GetMouseLocation() ตรงกับ Drawing Space 1:1
+    return uis:GetMouseLocation()
 end
+
 
 Connections.FOVCircleLoop = RunService.RenderStepped:Connect(function()
     if fovCircle then
@@ -2772,7 +2806,7 @@ local function GetAimTarget(firePos)
                                 or hrp
 
                 if targetPart then
-                    local sPos, onScreen = cam:WorldToViewportPoint(targetPart.Position)
+                    local sPos, onScreen = cam:WorldToScreenPoint(targetPart.Position)
                     if onScreen and sPos.Z > 0 then
                         local sDist = (Vector2.new(sPos.X, sPos.Y) - centerPos).Magnitude
                         if sDist <= maxFOV and sDist < bestScreenDist then
@@ -2865,7 +2899,7 @@ pcall(function()
                         elseif State.NoSpread then
                             local cam = Workspace.CurrentCamera
                             local center = GetAimCenter()
-                            local screenRay = cam:ViewportPointToRay(center.X, center.Y)
+                            local screenRay = cam:ScreenPointToRay(center.X, center.Y)
                             local rayParams = RaycastParams.new()
                             rayParams.FilterDescendantsInstances = {char, cam}
                             rayParams.FilterType = Enum.RaycastFilterType.Exclude
