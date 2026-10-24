@@ -10,7 +10,7 @@
 -- • ระบบ Target ESP สีเขียวสดใส ขอบเหลืองนีออนตรงเป้าหมาย (กรองแผ่นพื้นยักษ์ออก 100%)
 -- • รองรับทุกสายงาน: งานก่อสร้าง (สมัครงานรับชุดอัตโนมัติ) / ทำความสะอาด / ขยะ / ซ่อมรถ
 -- ==============================================================
-
+do
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -137,7 +137,7 @@ local Hub = {
         SelectedJob = "งานก่อสร้าง",
         AutoFarm = false,
         FarmSpeed = 17.5,
-        AutoSolveMinigame = false,
+        AutoSolveMinigame = true,
         AutoHire = true,
         AutoClaimConstruction = false, -- เคลมเงินค่าจ้างงานก่อสร้างอัตโนมัติ
         ConstructionFilter = "กำแพง & เหล็ก", -- "ทั้งหมด", "กำแพง & เหล็ก", "เฉพาะกำแพง", "เฉพาะเหล็ก"
@@ -151,6 +151,7 @@ local Hub = {
         Fly = false,
         FlySpeed = 50,
         InfJump = false,
+        InfStamina = true,
         ESP = false,
         ESPMaxDistance = 500,
         ESPShowBox = true,
@@ -166,12 +167,31 @@ local Hub = {
         NoRecoil = false,
         FastBullet = false,
         SilentAim = false,
+        SilentTeamCheck = true,
         SilentPart = "Head",
         SilentHitChance = 100,
         SilentWallCheck = false,
         SilentVelocity = false,
         CombatFOV = 150,
         DrawFOV = false,
+        -- 🎃 ฮาโลวีน (Halloween Event)
+        AutoTrickOrTreat = false,
+        AutoDigGraves = false,
+        AutoGraveQTE = true,
+        AutoVacuumLoot = true,
+        AutoJoinEvent2h = false,
+        AutoGetBucket = false,
+        AutoDepositCandy = false,
+        AutoClaimQuests = false,
+        AutoCollectP320 = false,
+        HalloweenMonstersESP = false,
+        HalloweenGravesESP = false,
+        HalloweenHousesESP = false,
+        HalloweenP320ESP = false,
+        SilentAimHalloween = true,
+        -- ระบบ & เมนู
+        MenuKeybind = Enum.KeyCode.RightControl,
+        ShowFloatingButton = true,
         -- พ่อค้าพเนจร (Wandering Merchant)
         MerchantESP = true,
         AutoNotifyMerchant = true,
@@ -181,22 +201,49 @@ _G.KrakenHub_Sailueat = Hub
 local State = Hub.State
 local Connections = Hub.Connections
 
+local localChar = LocalPlayer.Character
+local localHRP = localChar and localChar:FindFirstChild("HumanoidRootPart")
+local localHumanoid = localChar and localChar:FindFirstChildOfClass("Humanoid")
+local cachedIsWorking = false
+
+local function UpdateLocalCharRefs(newChar)
+    localChar = newChar or LocalPlayer.Character
+    localHumanoid = localChar and localChar:FindFirstChildOfClass("Humanoid")
+    localHRP = localChar and localChar:FindFirstChild("HumanoidRootPart")
+end
+
 local function GetChar(plr)
-    plr = plr or LocalPlayer
-    return plr and plr.Character
+    if not plr or plr == LocalPlayer then
+        if localChar and localChar.Parent then return localChar end
+        UpdateLocalCharRefs()
+        return localChar
+    end
+    return plr.Character
 end
 
 local function GetHRP(plr)
-    local char = GetChar(plr)
+    if not plr or plr == LocalPlayer then
+        if localHRP and localHRP.Parent == localChar then return localHRP end
+        UpdateLocalCharRefs()
+        return localHRP
+    end
+    local char = plr.Character
     return char and char:FindFirstChild("HumanoidRootPart")
 end
 
 local function GetHuman(plr)
-    local char = GetChar(plr)
+    if not plr or plr == LocalPlayer then
+        if localHumanoid and localHumanoid.Parent == localChar then return localHumanoid end
+        UpdateLocalCharRefs()
+        return localHumanoid
+    end
+    local char = plr.Character
     return char and char:FindFirstChildOfClass("Humanoid")
 end
 
-local IsCurrentlyWorking
+local IsCurrentlyWorking = function()
+    return cachedIsWorking
+end
 
 
 --------------------------------------------------------------
@@ -209,6 +256,7 @@ local IsCurrentlyWorking
 local NORMAL_WALK_SPEED = 8
 local runAnimTrack = nil
 local isCurrentlySprinting = false
+local lastSprintChangeTime = 0
 
 local function GetRunButton()
     local pgui = LocalPlayer:FindFirstChild("PlayerGui")
@@ -220,8 +268,17 @@ local function SetSprinting(enabled)
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     if not hum or hum.Health <= 0 then return end
 
+    if isCurrentlySprinting == enabled and (os.clock() - lastSprintChangeTime < 0.5) then
+        if enabled and hum.WalkSpeed < 17 then
+            hum.WalkSpeed = 17.5
+        end
+        return
+    end
+
+    lastSprintChangeTime = os.clock()
+    isCurrentlySprinting = enabled
+
     local fn = GetRunSystemRenderFn()
-    local runBtn = GetRunButton()
     local pgui = LocalPlayer:FindFirstChild("PlayerGui")
     local rs = pgui and pgui:FindFirstChild("RunSystem")
     local isBlocked = rs and rs:GetAttribute("BlockStamina") == true
@@ -229,62 +286,38 @@ local function SetSprinting(enabled)
     if enabled then
         if (IsCurrentlyWorking and IsCurrentlyWorking()) or isBlocked then
             if fn and debug.getupvalue(fn, 3) == true then
-                if runBtn and typeof(firesignal) == "function" then
-                    firesignal(runBtn.MouseButton1Click)
-                else
-                    pcall(debug.setupvalue, fn, 3, false)
-                end
+                pcall(debug.setupvalue, fn, 3, false)
             end
             hum.WalkSpeed = 0
             return
         end
 
-        isCurrentlySprinting = true
         if fn then
             local isRunning = debug.getupvalue(fn, 3)
             local isExhausted = debug.getupvalue(fn, 5)
             local stamina = debug.getupvalue(fn, 10)
 
-            -- ถ้ายังไม่เหนื่อยหอบ และสเตมิน่ายังเหลือ
             if not isExhausted and (stamina == nil or stamina > 2) then
                 if not isRunning then
-                    -- 🏃 กดปุ่ม Shift แท้ของเกมผ่าน RunButton (100% Native Game Sprint)
-                    if runBtn and typeof(firesignal) == "function" then
-                        firesignal(runBtn.MouseButton1Click)
-                    else
-                        pcall(debug.setupvalue, fn, 3, true)
-                        hum.WalkSpeed = 18
-                    end
+                    pcall(debug.setupvalue, fn, 3, true)
                 end
-                hum.WalkSpeed = 18
+                hum.WalkSpeed = 17.5
                 hum.JumpPower = 35
             else
-                -- สเตมิน่าหมด ปิดวิ่งให้เดินฟื้นตามธรรมชาติ (เหมือนปล่อย Shift)
                 if isRunning then
-                    if runBtn and typeof(firesignal) == "function" then
-                        firesignal(runBtn.MouseButton1Click)
-                    else
-                        pcall(debug.setupvalue, fn, 3, false)
-                        hum.WalkSpeed = 8
-                    end
-                end
-            end
-        else
-            hum.WalkSpeed = 18
-            hum.JumpPower = 35
-        end
-    else
-        isCurrentlySprinting = false
-        if fn then
-            local isRunning = debug.getupvalue(fn, 3)
-            if isRunning then
-                -- 🛑 ปล่อยปุ่ม Shift แท้ คืนความเร็วเดิน 8 studs/s
-                if runBtn and typeof(firesignal) == "function" then
-                    firesignal(runBtn.MouseButton1Click)
-                else
                     pcall(debug.setupvalue, fn, 3, false)
                     hum.WalkSpeed = 8
                 end
+            end
+        else
+            hum.WalkSpeed = 17.5
+            hum.JumpPower = 35
+        end
+    else
+        if fn then
+            local isRunning = debug.getupvalue(fn, 3)
+            if isRunning then
+                pcall(debug.setupvalue, fn, 3, false)
             end
         end
         if not (IsCurrentlyWorking and IsCurrentlyWorking()) and not isBlocked then
@@ -298,15 +331,93 @@ end
 
 -- ควบคุมความเร็วใน RenderStepped: ล็อคตัว 0 ขณะทำงาน, คืนการควบคุมให้ RunSystem ขณะเดินทาง, และรักษามุมกล้องให้นิ่งสนิท
 local lastCameraShakeClear = 0
+
+local function SetInfiniteStaminaState(enabled)
+    local fn = GetRunSystemRenderFn()
+    if fn then
+        if enabled then
+            pcall(debug.setupvalue, fn, 10, 100)  -- Stamina 100 เต็มถาวร
+            pcall(debug.setupvalue, fn, 5, false)  -- isExhausted false (ไม่เหนื่อยหอบ)
+            pcall(debug.setupvalue, fn, 11, 100)  -- Recovery Rate = 100/s (ฟื้นฟูทันที)
+            pcall(debug.setupvalue, fn, 12, 0)    -- Drain Rate = 0 (วิ่งไม่ลดสเตมิน่าเด็ดขาด)
+            pcall(debug.setupvalue, fn, 15, 0)
+            pcall(debug.setupvalue, fn, 18, 0)
+            pcall(debug.setupvalue, fn, 20, 0)
+            local s2 = debug.getupvalue(fn, 13)
+            if s2 and typeof(s2) == "Instance" and s2:IsA("Sound") then
+                s2:Stop()
+            end
+            local s1 = debug.getupvalue(fn, 14)
+            if s1 and typeof(s1) == "Instance" and s1:IsA("Sound") then
+                s1:Stop()
+            end
+            local blur = debug.getupvalue(fn, 21)
+            if blur and typeof(blur) == "Instance" and blur:IsA("BlurEffect") then
+                blur.Size = 0
+            end
+            local cc = debug.getupvalue(fn, 22)
+            if cc and typeof(cc) == "Instance" and cc:IsA("ColorCorrectionEffect") then
+                cc.Contrast = 0
+                cc.Saturation = 0
+            end
+        else
+            local isVip = debug.getupvalue(fn, 27) == true
+            pcall(debug.setupvalue, fn, 11, isVip and 3.5 or 2.5)
+            pcall(debug.setupvalue, fn, 12, isVip and 0.9 or 1.5)
+        end
+    end
+
+    local hum = GetHuman()
+    if hum then
+        if typeof(getconnections) == "function" then
+            for _, c in ipairs(getconnections(hum.StateChanged)) do
+                local f = c.Function
+                if f then
+                    local s, src = pcall(debug.info, f, "s")
+                    if s and tostring(src):find("RunSystem") then
+                        pcall(debug.setupvalue, f, 5, enabled and 0 or 2.5) -- Jump stamina cost = 0
+                        if enabled then
+                            pcall(debug.setupvalue, f, 4, 100) -- Current stamina = 100
+                        end
+                    end
+                end
+            end
+        end
+        if hum.WalkSpeed < 8 and not (IsCurrentlyWorking and IsCurrentlyWorking()) then
+            hum.WalkSpeed = NORMAL_WALK_SPEED
+        end
+    end
+end
+
+local function RestoreFatigue()
+    SetInfiniteStaminaState(State.InfStamina)
+end
+
+local lastInfStaminaCheck = 0
 Connections.SpeedEnforcer = RunService.RenderStepped:Connect(function()
     if not State.Running then return end
     local hum = GetHuman()
     local hrp = GetHRP()
     if not hum or hum.Health <= 0 or not hrp then return end
 
-    -- 🛑 ล้างค่าสั่นมุมกล้อง math.noise ของ RunSystem ให้เป็น 0 (หน่วงเวลาเพื่อลดภาระ CPU)
     local now = os.clock()
-    if now - lastCameraShakeClear >= 0.25 then
+
+    -- 🏃 ระบบวิ่งไม่เหนื่อย (Infinite Stamina) - ล็อค Stamina 100 และ Drain = 0
+    if State.InfStamina and (now - lastInfStaminaCheck >= 0.2) then
+        lastInfStaminaCheck = now
+        local fn = GetRunSystemRenderFn()
+        if fn then
+            local stam = debug.getupvalue(fn, 10)
+            local drain = debug.getupvalue(fn, 12)
+            local isExhausted = debug.getupvalue(fn, 5)
+            if (stam and stam < 100) or drain ~= 0 or isExhausted == true then
+                SetInfiniteStaminaState(true)
+            end
+        end
+    end
+
+    -- 🛑 ล้างค่าสั่นมุมกล้อง math.noise ของ RunSystem ให้เป็น 0 (หน่วงเวลาเพื่อลดภาระ CPU)
+    if now - lastCameraShakeClear >= 0.35 then
         lastCameraShakeClear = now
         local fn = GetRunSystemRenderFn()
         if fn then
@@ -316,8 +427,8 @@ Connections.SpeedEnforcer = RunService.RenderStepped:Connect(function()
         end
     end
 
-    -- ล็อคความเร็ว 0 เฉพาะตอนที่เปิด AutoFarm และกำลังทำงานก่อสร้าง / มินิเกม เท่านั้น
-    if State.AutoFarm and IsCurrentlyWorking and IsCurrentlyWorking() then
+    -- ล็อคความเร็ว 0 เฉพาะตอนที่เปิด AutoFarm และกำลังทำงานก่อสร้าง / มินิเกม เท่านั้น (อ่านจากแคชทันที 0ms)
+    if State.AutoFarm and (cachedIsWorking or (IsCurrentlyWorking and IsCurrentlyWorking())) then
         hum.WalkSpeed = 0
         hrp.AssemblyLinearVelocity = Vector3.zero
         hrp.AssemblyAngularVelocity = Vector3.zero
@@ -564,9 +675,11 @@ local function SetTargetESP(targetInstance, titleText, customColor, statusText)
 end
 
 local lastTargetESPUpdate = 0
+local lastTargetDistFloor = -1
+local lastTargetSt = ""
 Connections.TargetESPUpdate = RunService.Heartbeat:Connect(function()
     local now = os.clock()
-    if now - lastTargetESPUpdate < 0.08 then return end
+    if now - lastTargetESPUpdate < 0.1 then return end
     lastTargetESPUpdate = now
 
     if currentTargetBillboard and currentTargetInstance then
@@ -576,11 +689,16 @@ Connections.TargetESPUpdate = RunService.Heartbeat:Connect(function()
         local hrp = GetHRP()
         if attachPart and hrp then
             local dist = (hrp.Position - attachPart.Position).Magnitude
-            local frame = currentTargetBillboard:FindFirstChildOfClass("Frame")
-            local dLabel = frame and frame:FindFirstChild("DistLabel")
-            if dLabel then
-                local st = currentTargetStatus or "เป้าหมาย"
-                dLabel.Text = string.format("%s • %.1f ม. (%d studs)", st, dist / 3.57, math.floor(dist))
+            local distFloor = math.floor(dist)
+            local st = currentTargetStatus or "เป้าหมาย"
+            if distFloor ~= lastTargetDistFloor or st ~= lastTargetSt then
+                lastTargetDistFloor = distFloor
+                lastTargetSt = st
+                local frame = currentTargetBillboard:FindFirstChildOfClass("Frame")
+                local dLabel = frame and frame:FindFirstChild("DistLabel")
+                if dLabel then
+                    dLabel.Text = string.format("%s • %.1f ม. (%d studs)", st, dist / 3.57, distFloor)
+                end
             end
         end
     end
@@ -674,19 +792,22 @@ end)
 --------------------------------------------------------------
 -- 🧭 5. ระบบเดินทางอัจฉริยะ หลบสิ่งกีดขวาง (SMART NAVIGATION 2.0)
 --------------------------------------------------------------
+local sharedNavRayParams = RaycastParams.new()
+sharedNavRayParams.FilterType = Enum.RaycastFilterType.Exclude
+sharedNavRayParams.IgnoreWater = true
+
 local function RaycastCollidable(origin, dir, maxPierces)
-    maxPierces = maxPierces or 5
-    local rayParams = RaycastParams.new()
-    rayParams.FilterType = Enum.RaycastFilterType.Exclude
-    local filter = { LocalPlayer.Character }
+    maxPierces = maxPierces or 4
+    local char = GetChar()
+    local filter = { char }
     if Workspace:FindFirstChild("Terrain") then table.insert(filter, Workspace.Terrain) end
-    rayParams.FilterDescendantsInstances = filter
+    sharedNavRayParams.FilterDescendantsInstances = filter
 
     local curOrigin = origin
     local remainingDir = dir
 
     for _ = 1, maxPierces do
-        local hit = Workspace:Raycast(curOrigin, remainingDir, rayParams)
+        local hit = Workspace:Raycast(curOrigin, remainingDir, sharedNavRayParams)
         if not hit then
             return nil
         end
@@ -695,7 +816,7 @@ local function RaycastCollidable(origin, dir, maxPierces)
         else
             -- ชิ้นส่วนไร้ Collision (Zone trigger, หมอก, แสง): บันทึกลง Filter แล้วยิงต่อทะลุผ่าน
             table.insert(filter, hit.Instance)
-            rayParams.FilterDescendantsInstances = filter
+            sharedNavRayParams.FilterDescendantsInstances = filter
             local hitDist = (hit.Position - curOrigin).Magnitude
             if hitDist >= remainingDir.Magnitude - 0.1 then
                 return nil
@@ -846,15 +967,23 @@ local function NavigateTo(targetPos, stopDist, maxTime, targetPrompt)
         local yDiff = math.abs(hrp.Position.Y - targetPos.Y)
 
         if targetPrompt then
-            local pPart = (targetPrompt.Parent:IsA("BasePart") and targetPrompt.Parent)
-                       or (targetPrompt.Parent:IsA("Attachment") and targetPrompt.Parent.Parent:IsA("BasePart") and targetPrompt.Parent.Parent)
-            local pDist3D = pPart and (hrp.Position - pPart.Position).Magnitude or dist3D
+            local pPos = nil
+            if targetPrompt.Parent then
+                if targetPrompt.Parent:IsA("Attachment") then
+                    pPos = targetPrompt.Parent.WorldPosition
+                elseif targetPrompt.Parent:IsA("BasePart") then
+                    pPos = targetPrompt.Parent.Position
+                end
+            end
+            pPos = pPos or targetPos
+            local pDist3D = (hrp.Position - pPos).Magnitude
 
             -- เมื่อเข้าใกล้จุดยืนนำทาง (standPos) หรืออยู่ในระยะกด ProximityPrompt ได้ 100%
-            if (dist3D <= stopDist or (hDist <= stopDist and yDiff <= 3.5)) and pDist3D <= math.min(promptMaxD - 0.5, 4.3) then
+            local promptLimit = math.min(promptMaxD - 0.8, 6.5)
+            if (dist3D <= stopDist or (hDist <= stopDist and yDiff <= 4.0)) and pDist3D <= promptLimit then
                 return true
             end
-            if pDist3D <= math.min(promptMaxD - 0.7, 4.0) then
+            if pDist3D <= promptLimit then
                 return true
             end
         else
@@ -905,7 +1034,7 @@ local function NavigateTo(targetPos, stopDist, maxTime, targetPrompt)
     local totalStuckEvents = 0
     local lastProgressTime = tick()
 
-    while (tick() - startTime) < maxTime and State.Running and State.AutoFarm do
+    while (tick() - startTime) < maxTime and State.Running and (State.AutoFarm or State.AutoTrickOrTreat or State.AutoDigGraves) do
         hrp = GetHRP()
         hum = GetHuman()
         if not hrp or not hum or hum.Health <= 0 then return false end
@@ -3184,7 +3313,8 @@ function MacLib:Window(Settings)
 						focused = false
 					end)
 
-					UserInputService.InputBegan:Connect(function(inp)
+					UserInputService.InputBegan:Connect(function(inp, gpe)
+						if gpe and not focused then return end
 						if focused and not isBinding then
 							isBinding = true
 
@@ -4565,15 +4695,41 @@ function MacLib:Window(Settings)
 	end
 
 	local MenuKeybind = Settings.Keybind or Enum.KeyCode.RightControl
+	local AltMenuKeybind = Enum.KeyCode.K
 
 	local function ToggleMenu()
 		local state = not WindowFunctions:GetState()
 		WindowFunctions:SetState(state)
 	end
 
+	function WindowFunctions:SetKeybind(key)
+		MenuKeybind = key
+	end
+
+	function WindowFunctions:GetKeybind()
+		return MenuKeybind
+	end
+
+	function WindowFunctions:Toggle()
+		ToggleMenu()
+	end
+
 	UserInputService.InputEnded:Connect(function(inp, gpe)
 		if gpe then return end
-		if inp.KeyCode == MenuKeybind then
+		local match = false
+		if MenuKeybind then
+			if typeof(MenuKeybind) == "EnumItem" then
+				if MenuKeybind.EnumType == Enum.KeyCode and inp.KeyCode == MenuKeybind then
+					match = true
+				elseif MenuKeybind.EnumType == Enum.UserInputType and inp.UserInputType == MenuKeybind then
+					match = true
+				end
+			end
+		end
+		if not match and AltMenuKeybind and inp.KeyCode == AltMenuKeybind and MenuKeybind ~= Enum.KeyCode.K then
+			match = true
+		end
+		if match then
 			ToggleMenu()
 		end
 	end)
@@ -4896,12 +5052,42 @@ local function CreateTabAdapter(rawTab, tabName)
             })
         end,
         AddKeybind = function(self, flag, cfg)
+            local changedFn = cfg.ChangedCallback or cfg.OnChanged
+            local keybindObj = nil
+            local defaultKey = cfg.Default
+            if typeof(defaultKey) == "string" and Enum.KeyCode[defaultKey] then
+                defaultKey = Enum.KeyCode[defaultKey]
+            end
+
             local macKeybind = currentSection:Keybind({
                 Name = cfg.Title or flag,
-                Default = cfg.Default,
-                Callback = cfg.Callback
+                Default = defaultKey,
+                Callback = cfg.Callback,
+                onBinded = function(newKey)
+                    if keybindObj then
+                        keybindObj.Value = newKey
+                        if keybindObj._onChanged then
+                            pcall(keybindObj._onChanged, newKey)
+                        end
+                    end
+                    if changedFn then
+                        pcall(changedFn, newKey)
+                    end
+                end
             }, flag)
-            macKeybind.Value = cfg.Default
+            macKeybind.Value = defaultKey
+            macKeybind.OnChanged = function(self, cb)
+                self._onChanged = cb
+                return cb
+            end
+            macKeybind.SetValue = function(self, key)
+                if typeof(key) == "string" and Enum.KeyCode[key] then key = Enum.KeyCode[key] end
+                macKeybind:Bind(key)
+                macKeybind.Value = key
+                if self._onChanged then pcall(self._onChanged, key) end
+                if changedFn then pcall(changedFn, key) end
+            end
+            keybindObj = macKeybind
             Options[flag] = macKeybind
             return macKeybind
         end,
@@ -4923,6 +5109,7 @@ end
 
 local Tabs = {
     Farm      = CreateTabAdapter(tabGroup:Tab({ Name = "งาน & ฟาร์ม", Image = "rbxassetid://18821914323" }), "Farm"),
+    Halloween = CreateTabAdapter(tabGroup:Tab({ Name = "🎃 อีเวนต์",  Image = "rbxassetid://74630801235788" }), "Halloween"),
     Merchant  = CreateTabAdapter(tabGroup:Tab({ Name = "พ่อค้าพเนจร", Image = "rbxassetid://10709791437" }), "Merchant"),
     Combat    = CreateTabAdapter(tabGroup:Tab({ Name = "ระบบต่อสู้",   Image = "rbxassetid://10734950309" }), "Combat"),
     Player    = CreateTabAdapter(tabGroup:Tab({ Name = "ตัวละคร",     Image = "rbxassetid://10747373176" }), "Player"),
@@ -4931,10 +5118,11 @@ local Tabs = {
 
 function Window:SelectTab(idx)
     if idx == 1 and Tabs.Farm then Tabs.Farm:Select()
-    elseif idx == 2 and Tabs.Merchant then Tabs.Merchant:Select()
-    elseif idx == 3 and Tabs.Combat then Tabs.Combat:Select()
-    elseif idx == 4 and Tabs.Player then Tabs.Player:Select()
-    elseif idx == 5 and Tabs.Settings then Tabs.Settings:Select()
+    elseif idx == 2 and Tabs.Halloween then Tabs.Halloween:Select()
+    elseif idx == 3 and Tabs.Merchant then Tabs.Merchant:Select()
+    elseif idx == 4 and Tabs.Combat then Tabs.Combat:Select()
+    elseif idx == 5 and Tabs.Player then Tabs.Player:Select()
+    elseif idx == 6 and Tabs.Settings then Tabs.Settings:Select()
     end
 end
 
@@ -5086,11 +5274,17 @@ pcall(function()
 end)
 
 -- ควบคุมเมาส์จำลอง VIM & UI Visuals ให้เป็นธรรมชาติ 100%
+local lastMinigameHoldTick = 0
 Connections.MinigameHoldLoop = RunService.Heartbeat:Connect(function()
     if not State.AutoSolveMinigame or not State.Running then
-        ReleaseVIM()
+        if isVIMHolding then ReleaseVIM() end
         return
     end
+
+    local now = os.clock()
+    -- หน่วงเวลา 30 Hz ประหยัด CPU สูงสุด ไม่หน่วงเฟรมเรต
+    if now - lastMinigameHoldTick < 0.033 then return end
+    lastMinigameHoldTick = now
 
     local pgui = LocalPlayer:FindFirstChild("PlayerGui")
     local mg = pgui and pgui:FindFirstChild("MiniGameUI")
@@ -5138,10 +5332,10 @@ Connections.MinigameHoldLoop = RunService.Heartbeat:Connect(function()
                 end
             end
         else
-            ReleaseVIM()
+            if isVIMHolding then ReleaseVIM() end
         end
     else
-        ReleaseVIM()
+        if isVIMHolding then ReleaseVIM() end
     end
 end)
 
@@ -5245,6 +5439,82 @@ task.spawn(function()
                     end
                 end
             end
+
+            -- ⚰️ มินิเกมขุด/ทุบหลุมศพฮาโลวีน (DragUI รางลูกกลม & QTE ผี)
+            local graveUI = pgui and pgui:FindFirstChild("GraveUI")
+            if graveUI and graveUI.Enabled then
+                local dragUI = graveUI:FindFirstChild("DragUI")
+                if dragUI and dragUI.Visible then
+                    local knob = dragUI:FindFirstChild("DragKnob") or dragUI:FindFirstChildWhichIsA("TextButton")
+                    local holder = nil
+                    for _, c in ipairs(dragUI:GetChildren()) do
+                        if c:IsA("Frame") and c.Visible then
+                            holder = c
+                            break
+                        end
+                    end
+
+                    if knob and holder then
+                        local startPos = knob.AbsolutePosition + knob.AbsoluteSize / 2
+                        local targetPos = nil
+                        local maxDist = 0
+
+                        for _, ch in ipairs(holder:GetChildren()) do
+                            if ch:IsA("Frame") then
+                                local cp = ch.AbsolutePosition + ch.AbsoluteSize / 2
+                                local dist = (cp - startPos).Magnitude
+                                if dist > maxDist then
+                                    maxDist = dist
+                                    targetPos = cp
+                                end
+                            end
+                        end
+
+                        if not targetPos or maxDist < 10 then
+                            local rad = math.rad(holder.Rotation or 0)
+                            local dir = Vector2.new(math.cos(rad), math.sin(rad))
+                            targetPos = startPos + dir * (holder.AbsoluteSize.X * 0.8)
+                        end
+
+                        if targetPos then
+                            pcall(function()
+                                VirtualInputManager:SendMouseButtonEvent(startPos.X, startPos.Y, 0, true, game, 0)
+                                local steps = 6
+                                for s = 1, steps do
+                                    local cur = startPos:Lerp(targetPos, s / steps)
+                                    VirtualInputManager:SendMouseMoveEvent(cur.X, cur.Y, game)
+                                    task.wait(0.025)
+                                end
+                                VirtualInputManager:SendMouseMoveEvent(targetPos.X, targetPos.Y, game)
+                                task.wait(0.02)
+                                VirtualInputManager:SendMouseButtonEvent(targetPos.X, targetPos.Y, 0, false, game, 0)
+                            end)
+                        end
+                    end
+                    task.wait(0.16) -- สปีดพอดีๆ (~0.5s ต่อราง) นุ่มนวล ไม่ช้าไม่เร็วเกินไปจนบั๊ก
+                end
+
+                local qte = graveUI:FindFirstChild("QTE")
+                if qte and qte.Visible then
+                    pcall(function()
+                        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
+                        task.wait(0.02)
+                        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
+                    end)
+                    for _, btn in ipairs(qte:GetDescendants()) do
+                        if btn:IsA("TextButton") or btn:IsA("ImageButton") then
+                            pcall(function()
+                                local bx = btn.AbsolutePosition.X + btn.AbsoluteSize.X / 2
+                                local by = btn.AbsolutePosition.Y + btn.AbsoluteSize.Y / 2
+                                VirtualInputManager:SendMouseButtonEvent(bx, by, 0, true, game, 0)
+                                task.wait(0.02)
+                                VirtualInputManager:SendMouseButtonEvent(bx, by, 0, false, game, 0)
+                            end)
+                        end
+                    end
+                    task.wait(0.12)
+                end
+            end
         end
     end
 end)
@@ -5262,6 +5532,7 @@ LocalPlayer.CharacterAdded:Connect(function(newChar)
     runAnimTrack = nil
     isCurrentlySprinting = false
     cachedRunSystemFn = nil
+    UpdateLocalCharRefs(newChar)
     task.wait(0.3)
     pcall(function()
         local char = newChar or LocalPlayer.Character
@@ -5278,11 +5549,16 @@ LocalPlayer.CharacterAdded:Connect(function(newChar)
         end
     end)
     SetSprinting(false)
+    if State.InfStamina then
+        task.delay(0.6, function()
+            SetInfiniteStaminaState(true)
+        end)
+    end
 end)
 
 local function StopWorkAnimations()
     pcall(function()
-        local char = LocalPlayer.Character
+        local char = GetChar()
         local hum = char and char:FindFirstChildOfClass("Humanoid")
         local animator = hum and hum:FindFirstChildOfClass("Animator")
         if animator then
@@ -5295,29 +5571,93 @@ local function StopWorkAnimations()
     end)
 end
 
+local function IsGraveMinigameActive()
+    local pgui = LocalPlayer:FindFirstChild("PlayerGui")
+    local graveUI = pgui and pgui:FindFirstChild("GraveUI")
+    if not graveUI or not graveUI.Enabled then return false end
+
+    local function isVisible(guiObj)
+        local cur = guiObj
+        while cur and cur ~= graveUI do
+            if cur:IsA("GuiObject") and not cur.Visible then
+                return false
+            end
+            cur = cur.Parent
+        end
+        return true
+    end
+
+    local dragUI = graveUI:FindFirstChild("DragUI")
+    if dragUI and isVisible(dragUI) then
+        return true
+    end
+
+    local qte = graveUI:FindFirstChild("QTE")
+    if qte and isVisible(qte) then
+        return true
+    end
+
+    local hasProgress = false
+    local isCompleted = false
+    for _, d in ipairs(graveUI:GetDescendants()) do
+        if d:IsA("TextLabel") and isVisible(d) then
+            local txt = d.Text
+            if string.find(txt, "100%%") then
+                isCompleted = true
+            elseif string.find(txt, "กำลัง") or string.find(txt, "ราง") or string.find(txt, "%%") then
+                hasProgress = true
+            end
+        end
+    end
+
+    if isCompleted then
+        return false -- ถ้าครบ 100% แล้ว ถือว่าจบมินิเกม
+    end
+
+    return hasProgress
+end
+
 IsCurrentlyWorking = function()
     local pgui = LocalPlayer:FindFirstChild("PlayerGui")
     if pgui then
         local mg = pgui:FindFirstChild("MiniGameUI")
-        if mg and mg.Enabled then return true end
+        if mg and mg.Enabled then cachedIsWorking = true return true end
 
         local jlb = pgui:FindFirstChild("JobLoadBar")
-        if jlb and jlb.Enabled then return true end
+        if jlb and jlb.Enabled then cachedIsWorking = true return true end
 
         local clb = pgui:FindFirstChild("CleanLoadBar")
-        if clb and clb.Enabled then return true end
+        if clb and clb.Enabled then cachedIsWorking = true return true end
 
         local notif = pgui:FindFirstChild("ConstructNotif")
         local lbl = notif and notif:FindFirstChildOfClass("TextLabel")
-        if lbl and lbl.Text:find("กำลังทำงาน") then return true end
+        if lbl and lbl.Text:find("กำลังทำงาน") then cachedIsWorking = true return true end
+
+        if IsGraveMinigameActive() then cachedIsWorking = true return true end
     end
 
+    cachedIsWorking = false
     return false
 end
 Hub.IsCurrentlyWorking = IsCurrentlyWorking
 Hub.StopWorkAnimations = StopWorkAnimations
 
+-- อัปเดตสถานะการทำงานใน Background (12 Hz) เพื่อให้ RenderStepped ตรวจจับได้ทันที 0ms
+task.spawn(function()
+    while State.Running and _G._KrakenScriptId == MY_SCRIPT_ID do
+        pcall(IsCurrentlyWorking)
+        task.wait(0.08)
+    end
+end)
+
+local lastOtherPlayerPositions = {}
+local lastOtherPositionsUpdate = 0
 local function GetOtherPlayerPositions()
+    local now = os.clock()
+    if now - lastOtherPositionsUpdate < 0.25 then
+        return lastOtherPlayerPositions
+    end
+    lastOtherPositionsUpdate = now
     local list = {}
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LocalPlayer and p.Character then
@@ -5327,6 +5667,7 @@ local function GetOtherPlayerPositions()
             end
         end
     end
+    lastOtherPlayerPositions = list
     return list
 end
 
@@ -5899,12 +6240,37 @@ if Connections.Noclip then
     pcall(function() Connections.Noclip:Disconnect() end)
     Connections.Noclip = nil
 end
+local wasFarmingLastFrame = false
 Connections.Noclip = RunService.Stepped:Connect(function()
-    if State.Running and State.Noclip then
-        local char = LocalPlayer.Character
-        if char then
-            for _, part in ipairs(char:GetChildren()) do
-                if part:IsA("BasePart") and part.CanCollide then
+    if not State.Running then return end
+    local isFarming = (
+        State.AutoFarm or
+        State.AutoTrickOrTreat or
+        State.AutoDigGraves or
+        State.AutoGetBucket or
+        State.AutoDepositCandy or
+        State.AutoCollectP320 or
+        State.IsGettingBucket or
+        State.IsDepositing
+    )
+    local char = GetChar()
+    if not char then return end
+
+    if isFarming then
+        wasFarmingLastFrame = true
+        for _, part in ipairs(char:GetChildren()) do
+            if part:IsA("BasePart") and part.CanCollide then
+                part.CanCollide = false
+            end
+        end
+    elseif wasFarmingLastFrame then
+        wasFarmingLastFrame = false
+        -- คืนค่า CanCollide ปกติทันทีเมื่อไม่ได้เปิดระบบฟาร์ม
+        for _, part in ipairs(char:GetChildren()) do
+            if part:IsA("BasePart") then
+                if part.Name == "Torso" or part.Name == "Head" then
+                    part.CanCollide = true
+                else
                     part.CanCollide = false
                 end
             end
@@ -5920,43 +6286,114 @@ Connections.InfJump = UserInputService.JumpRequest:Connect(function()
 end)
 
 local flyBV, flyBG = nil, nil
-local function StartFly()
+
+local function StopFly()
+    if Connections.FlyLoop then
+        pcall(function() Connections.FlyLoop:Disconnect() end)
+        Connections.FlyLoop = nil
+    end
+    if flyBV then
+        pcall(function() flyBV:Destroy() end)
+        flyBV = nil
+    end
+    if flyBG then
+        pcall(function() flyBG:Destroy() end)
+        flyBG = nil
+    end
+    local hum = GetHuman()
     local hrp = GetHRP()
-    if not hrp then return end
+    if hum then
+        hum.PlatformStand = false
+        pcall(function()
+            hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+        end)
+    end
+    if hrp then
+        hrp.AssemblyLinearVelocity = Vector3.zero
+        hrp.AssemblyAngularVelocity = Vector3.zero
+    end
+end
+
+local function StartFly()
+    StopFly()
+    local hrp = GetHRP()
+    local hum = GetHuman()
+    if not hrp or not hum then return end
+
     flyBV = Instance.new("BodyVelocity")
-    flyBV.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+    flyBV.Name = "StableFlyBV"
+    flyBV.MaxForce = Vector3.new(9e9, 9e9, 9e9)
     flyBV.Velocity = Vector3.zero
+    flyBV.P = 1250
     flyBV.Parent = hrp
 
     flyBG = Instance.new("BodyGyro")
-    flyBG.MaxTorque = Vector3.new(1e5, 1e5, 1e5)
+    flyBG.Name = "StableFlyBG"
+    flyBG.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+    flyBG.P = 9000
+    flyBG.D = 500
     flyBG.CFrame = hrp.CFrame
     flyBG.Parent = hrp
 
-    task.spawn(function()
-        while State.Fly and State.Running and hrp and flyBV and flyBG do
-            local camCF = Camera.CFrame
-            local moveDir = Vector3.zero
-            if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDir = moveDir + camCF.LookVector end
-            if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDir = moveDir - camCF.LookVector end
-            if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDir = moveDir - camCF.RightVector end
-            if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDir = moveDir + camCF.RightVector end
-            if UserInputService:IsKeyDown(Enum.KeyCode.Space) then moveDir = moveDir + Vector3.new(0, 1, 0) end
-            if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then moveDir = moveDir - Vector3.new(0, 1, 0) end
+    hum.PlatformStand = true
 
-            flyBV.Velocity = moveDir.Magnitude > 0 and (moveDir.Unit * (State.FlySpeed or 50)) or Vector3.zero
-            flyBG.CFrame = camCF
-            task.wait(0.03)
+    Connections.FlyLoop = RunService.RenderStepped:Connect(function()
+        if not State.Fly or not State.Running then
+            StopFly()
+            return
         end
-        if flyBV then flyBV:Destroy(); flyBV = nil end
-        if flyBG then flyBG:Destroy(); flyBG = nil end
+
+        local currentHRP = GetHRP()
+        local currentHum = GetHuman()
+        if not currentHRP or not currentHum or not flyBV or not flyBG or flyBV.Parent ~= currentHRP then
+            return
+        end
+
+        currentHum.PlatformStand = true
+
+        local camCF = Camera.CFrame
+        local moveDir = Vector3.zero
+
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDir = moveDir + camCF.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDir = moveDir - camCF.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDir = moveDir - camCF.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDir = moveDir + camCF.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space) or UserInputService:IsKeyDown(Enum.KeyCode.E) then
+            moveDir = moveDir + Vector3.new(0, 1, 0)
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.Q) then
+            moveDir = moveDir - Vector3.new(0, 1, 0)
+        end
+
+        if moveDir.Magnitude == 0 and currentHum.MoveDirection.Magnitude > 0 then
+            local md = currentHum.MoveDirection
+            moveDir = moveDir + (camCF.LookVector * md.Z * -1) + (camCF.RightVector * md.X)
+        end
+
+        local speed = tonumber(State.FlySpeed) or 50
+        if moveDir.Magnitude > 0 then
+            flyBV.Velocity = moveDir.Unit * speed
+        else
+            flyBV.Velocity = Vector3.zero
+            currentHRP.AssemblyLinearVelocity = Vector3.zero
+            currentHRP.AssemblyAngularVelocity = Vector3.zero
+        end
+
+        flyBG.CFrame = camCF
     end)
 end
 
-local function StopFly()
-    if flyBV then flyBV:Destroy(); flyBV = nil end
-    if flyBG then flyBG:Destroy(); flyBG = nil end
+if Connections.FlyCharAdded then
+    pcall(function() Connections.FlyCharAdded:Disconnect() end)
 end
+Connections.FlyCharAdded = LocalPlayer.CharacterAdded:Connect(function()
+    if State.Fly and State.Running then
+        task.wait(0.5)
+        if State.Fly and State.Running then
+            StartFly()
+        end
+    end
+end)
 
 --------------------------------------------------------------
 -- 👁️ ระบบมองทะลุผู้เล่น & แยกสีสถาบัน (FLICKER-FREE PLAYER ESP)
@@ -6224,7 +6661,7 @@ local function UnifiedPlayerESPUpdate()
                     entry.NativeTag = nativeTag
                 end
 
-                -- 3. ตรวจจับข้อมูลสถาบันและสีประจำสถาบันตามที่แมพแบ่งไว้
+                -- 3. ตรวจจับข้อมูลสถาบันและสีประจำสถาบันตามที่แมพแบ่งไว้ (แคชถาวรต่อตัวละคร ไม่สแกนซ้ำทุก 40ms)
                 local rawTeamName = p.Team and tostring(p.Team.Name) or ""
                 local teamColorObj = p.Team and p.Team.TeamColor and p.Team.TeamColor.Color or nil
 
@@ -6244,14 +6681,8 @@ local function UnifiedPlayerESPUpdate()
                 if not matchedConfig and rawTeamName == "" then
                     if entry.CachedSchool then
                         rawTeamName = entry.CachedSchool
-                        for _, sc in ipairs(SchoolConfigs) do
-                            if string.find(rawTeamName, sc.Key, 1, true) then
-                                schoolCol = sc.Color
-                                schoolShort = sc.Short
-                                matchedConfig = true
-                                break
-                            end
-                        end
+                        schoolCol = entry.CachedColor or schoolCol
+                        schoolShort = entry.CachedShort or schoolShort
                     else
                         local ovTag = head:FindFirstChild("OverheadNameBill") or head:FindFirstChildWhichIsA("BillboardGui")
                         if ovTag then
@@ -6290,9 +6721,9 @@ local function UnifiedPlayerESPUpdate()
                                 if matchedConfig then break end
                             end
                         end
-                    end
-                    if rawTeamName ~= "" then
-                        entry.CachedSchool = rawTeamName
+                        entry.CachedSchool = rawTeamName ~= "" and rawTeamName or "ประชาชน"
+                        entry.CachedColor = schoolCol
+                        entry.CachedShort = schoolShort
                     end
                 end
 
@@ -6313,74 +6744,101 @@ local function UnifiedPlayerESPUpdate()
                 local hpRatio = math.clamp(curHp / maxHp, 0, 1)
                 local hpCol = hpRatio > 0.7 and Color3.fromRGB(46, 204, 113) or (hpRatio > 0.35 and Color3.fromRGB(243, 156, 18) or Color3.fromRGB(231, 76, 60))
 
-                -- 6. อัปเดตข้อมูลบน GUI เดิมแบบ In-Place (ไม่กระพริบ 100%)
+                -- 6. อัปเดตข้อมูลบน GUI เดิมแบบ In-Place (Dirty Check: อัปเดตเฉพาะเมื่อค่าเปลี่ยนเท่านั้น ไม่สั่ง Render ใหม่ซ้ำๆ)
                 local forceRed = State.ESPTacticalStyle == true
                 local themeColor = forceRed and Color3.fromRGB(240, 40, 40) or schoolCol
 
                 -- อัปเดต Highlight (Chams ตัวตามสีสถาบัน + ขอบขาวคมชัด)
                 if State.ESPShowChams ~= false then
-                    entry.Highlight.Enabled = true
-                    entry.Highlight.FillColor = themeColor
-                    entry.Highlight.FillTransparency = 0.5
-                    entry.Highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-                    entry.Highlight.OutlineTransparency = 0
+                    if not entry.Highlight.Enabled then entry.Highlight.Enabled = true end
+                    if entry.LastFillColor ~= themeColor then
+                        entry.LastFillColor = themeColor
+                        entry.Highlight.FillColor = themeColor
+                    end
                 else
-                    entry.Highlight.Enabled = false
+                    if entry.Highlight.Enabled then entry.Highlight.Enabled = false end
                 end
 
                 -- อัปเดต Corner Box ตามสีสถาบัน
                 if State.ESPShowBox ~= false then
-                    entry.BoxBB.Enabled = true
-                    entry.BoxBB.MaxDistance = State.ESPMaxDistance or 500
-                    for _, line in ipairs(entry.BoxLines) do
-                        line.BackgroundColor3 = themeColor
+                    if not entry.BoxBB.Enabled then entry.BoxBB.Enabled = true end
+                    if entry.LastBoxColor ~= themeColor then
+                        entry.LastBoxColor = themeColor
+                        for _, line in ipairs(entry.BoxLines) do
+                            line.BackgroundColor3 = themeColor
+                        end
                     end
                 else
-                    entry.BoxBB.Enabled = false
+                    if entry.BoxBB.Enabled then entry.BoxBB.Enabled = false end
                 end
 
                 -- อัปเดต Head Dot ตามสีสถาบัน
                 if State.ESPShowHeadDot ~= false then
-                    entry.HeadDotBB.Enabled = true
-                    entry.HeadDotBB.MaxDistance = State.ESPMaxDistance or 500
-                    entry.HeadDotFrame.BackgroundColor3 = themeColor
+                    if not entry.HeadDotBB.Enabled then entry.HeadDotBB.Enabled = true end
+                    if entry.LastDotColor ~= themeColor then
+                        entry.LastDotColor = themeColor
+                        entry.HeadDotFrame.BackgroundColor3 = themeColor
+                    end
                 else
-                    entry.HeadDotBB.Enabled = false
+                    if entry.HeadDotBB.Enabled then entry.HeadDotBB.Enabled = false end
                 end
 
                 -- อัปเดต Billboard ข้อมูล
-                entry.Billboard.Enabled = true
-                entry.Billboard.MaxDistance = State.ESPMaxDistance or 500
+                if not entry.Billboard.Enabled then entry.Billboard.Enabled = true end
 
                 -- ชื่อผู้เล่น (สีตามสถาบันที่แมพแบ่งไว้)
-                entry.NameLabel.TextColor3 = themeColor
-                entry.NameLabel.Text = (schoolShort ~= "" and schoolShort ~= "ประชาชน") and string.format("[%s] %s", schoolShort, p.DisplayName) or p.DisplayName
+                if entry.LastNameColor ~= themeColor then
+                    entry.LastNameColor = themeColor
+                    entry.NameLabel.TextColor3 = themeColor
+                end
+                local newNameText = (schoolShort ~= "" and schoolShort ~= "ประชาชน") and string.format("[%s] %s", schoolShort, p.DisplayName) or p.DisplayName
+                if entry.LastNameText ~= newNameText then
+                    entry.LastNameText = newNameText
+                    entry.NameLabel.Text = newNameText
+                end
 
                 -- ตัวเลขเลือด + หลอดเลือดแนวนอน
                 if State.ESPShowHealthBar ~= false then
-                    entry.HpValueLabel.Visible = true
-                    entry.HpValueLabel.Text = string.format("%d", math.floor(curHp))
-                    entry.HpBarBg.Visible = true
-                    entry.HpBarFill.Size = UDim2.new(hpRatio, 0, 1, 0)
-                    entry.HpBarFill.BackgroundColor3 = hpCol
+                    if not entry.HpBarBg.Visible then
+                        entry.HpValueLabel.Visible = true
+                        entry.HpBarBg.Visible = true
+                    end
+                    local hpInt = math.floor(curHp)
+                    if entry.LastHpInt ~= hpInt then
+                        entry.LastHpInt = hpInt
+                        entry.HpValueLabel.Text = tostring(hpInt)
+                        entry.HpBarFill.Size = UDim2.new(hpRatio, 0, 1, 0)
+                        entry.HpBarFill.BackgroundColor3 = hpCol
+                    end
                 else
-                    entry.HpValueLabel.Visible = false
-                    entry.HpBarBg.Visible = false
+                    if entry.HpBarBg.Visible then
+                        entry.HpValueLabel.Visible = false
+                        entry.HpBarBg.Visible = false
+                    end
                 end
 
-                -- ข้อมูลระยะทาง & อาวุธ
-                local parts = {}
-                if State.ESPShowDistance then
-                    table.insert(parts, string.format("%.0fm", dist * 0.28))
-                end
-                if State.ESPShowWeapon and wepText ~= "" and wepText ~= "มือเปล่า" then
-                    table.insert(parts, wepText)
-                end
-                if #parts > 0 then
-                    entry.InfoLabel.Text = table.concat(parts, " • ")
-                    entry.InfoLabel.Visible = true
+                -- ข้อมูลระยะทาง & อาวุธ (ลดภาระการสร้าง table ชั่วคราว)
+                local distInt = math.floor(dist * 0.28)
+                local wepClean = (State.ESPShowWeapon and wepText ~= "" and wepText ~= "มือเปล่า") and wepText or nil
+                if State.ESPShowDistance or wepClean then
+                    local newInfo = ""
+                    if State.ESPShowDistance and wepClean then
+                        newInfo = string.format("%dm • %s", distInt, wepClean)
+                    elseif State.ESPShowDistance then
+                        newInfo = string.format("%dm", distInt)
+                    else
+                        newInfo = wepClean
+                    end
+                    if entry.LastInfoText ~= newInfo then
+                        entry.LastInfoText = newInfo
+                        entry.InfoLabel.Text = newInfo
+                        entry.InfoLabel.Visible = true
+                    end
                 else
-                    entry.InfoLabel.Visible = false
+                    if entry.InfoLabel.Visible then
+                        entry.InfoLabel.Visible = false
+                        entry.LastInfoText = nil
+                    end
                 end
             end
         end
@@ -6398,7 +6856,7 @@ task.spawn(function()
     while State.Running and _G._KrakenScriptId == MY_SCRIPT_ID do
         if State.ESP then
             pcall(UnifiedPlayerESPUpdate)
-            task.wait(0.04)
+            task.wait(0.06)
         else
             if next(Hub.PlayerESPRegistry) then
                 ClearAllPlayerESP()
@@ -6573,52 +7031,55 @@ pcall(function()
     end
 end)
 
+local cachedCrosshairObj = nil
+local lastCrosshairCheck = 0
+
 local function GetAimCenter()
     local cam = Workspace.CurrentCamera
     if not cam then return Vector2.new(0, 0) end
     local inset = GuiService:GetGuiInset()
-    local pgui = LocalPlayer:FindFirstChild("PlayerGui")
+    local uis = UserInputService
 
-    -- 1. ตรวจสอบเป้าปืน (GunGUI Crosshair)
-    local gunGui = pgui and pgui:FindFirstChild("GunGUI")
-    if gunGui and gunGui:IsA("ScreenGui") and gunGui.Enabled then
-        local crosshair = gunGui:FindFirstChild("Crosshair")
-        if crosshair and crosshair.AbsolutePosition.X > 0 then
-            local addInset = gunGui.IgnoreGuiInset and Vector2.zero or inset
-            return crosshair.AbsolutePosition + (crosshair.AbsoluteSize / 2) + addInset
-        end
+    -- 1. ถ้าล็อกเป้ากึ่งกลางจอ (LockCenter / ShiftLock / First-Person) คืนค่าตรงกลางทันที ไม่ต้องค้นหา GUI
+    if uis.MouseBehavior == Enum.MouseBehavior.LockCenter or (cam.Focus.p - cam.CFrame.p).Magnitude <= 1 then
+        return Vector2.new(cam.ViewportSize.X / 2, (cam.ViewportSize.Y / 2) + inset.Y)
     end
 
-    -- 2. ตรวจสอบเป้ามือเปล่า/หมัด (fistgui crosshair)
-    local fistgui = pgui and pgui:FindFirstChild("fistgui")
-    if fistgui and fistgui:IsA("ScreenGui") and fistgui.Enabled then
-        local crosshair = fistgui:FindFirstChild("crosshair")
-        if crosshair and crosshair.Visible and crosshair.AbsolutePosition.X > 0 then
-            local addInset = fistgui.IgnoreGuiInset and Vector2.zero or inset
-            return crosshair.AbsolutePosition + (crosshair.AbsoluteSize / 2) + addInset
-        end
+    local now = os.clock()
+    -- 2. ตรวจสอบเป้าปืนที่แคชไว้แล้ว
+    if cachedCrosshairObj and cachedCrosshairObj.Parent and cachedCrosshairObj.Visible and cachedCrosshairObj.AbsolutePosition.X > 0 then
+        local pg = cachedCrosshairObj:FindFirstAncestorOfClass("ScreenGui")
+        local addInset = (pg and pg.IgnoreGuiInset) and Vector2.zero or inset
+        return cachedCrosshairObj.AbsolutePosition + (cachedCrosshairObj.AbsoluteSize / 2) + addInset
     end
 
-    -- 3. ตรวจสอบ Crosshair อื่นๆ ใน PlayerGui (กรณีอาวุธชนิดอื่นๆ)
-    if pgui then
-        for _, gui in ipairs(pgui:GetChildren()) do
-            if gui:IsA("ScreenGui") and gui.Enabled then
-                local ch = gui:FindFirstChild("Crosshair", true) or gui:FindFirstChild("crosshair", true)
-                if ch and ch:IsA("GuiObject") and ch.Visible and ch.AbsolutePosition.X > 0 then
-                    local addInset = gui.IgnoreGuiInset and Vector2.zero or inset
-                    return ch.AbsolutePosition + (ch.AbsoluteSize / 2) + addInset
+    -- 3. ค้นหาเป้า Crosshair แบบประหยัด CPU (หน่วงเวลาค้นหา ไม่สแกน GUI ลึกทุกเฟรม)
+    if now - lastCrosshairCheck >= 1.0 then
+        lastCrosshairCheck = now
+        cachedCrosshairObj = nil
+        local pgui = LocalPlayer:FindFirstChild("PlayerGui")
+        if pgui then
+            local gunGui = pgui:FindFirstChild("GunGUI")
+            local crosshair = gunGui and gunGui:IsA("ScreenGui") and gunGui.Enabled and gunGui:FindFirstChild("Crosshair")
+            if crosshair and crosshair.Visible and crosshair.AbsolutePosition.X > 0 then
+                cachedCrosshairObj = crosshair
+            else
+                local fistgui = pgui:FindFirstChild("fistgui")
+                local fcross = fistgui and fistgui:IsA("ScreenGui") and fistgui.Enabled and fistgui:FindFirstChild("crosshair")
+                if fcross and fcross.Visible and fcross.AbsolutePosition.X > 0 then
+                    cachedCrosshairObj = fcross
                 end
             end
         end
     end
 
-    -- 4. กรณีล็อกเป้ากึ่งกลางจอ (LockCenter / ShiftLock / First-Person)
-    local uis = UserInputService
-    if uis.MouseBehavior == Enum.MouseBehavior.LockCenter or (cam.Focus.p - cam.CFrame.p).Magnitude <= 1 then
-        return Vector2.new(cam.ViewportSize.X / 2, (cam.ViewportSize.Y / 2) + inset.Y)
+    if cachedCrosshairObj and cachedCrosshairObj.AbsolutePosition.X > 0 then
+        local pg = cachedCrosshairObj:FindFirstAncestorOfClass("ScreenGui")
+        local addInset = (pg and pg.IgnoreGuiInset) and Vector2.zero or inset
+        return cachedCrosshairObj.AbsolutePosition + (cachedCrosshairObj.AbsoluteSize / 2) + addInset
     end
 
-    -- 5. กรณีเมาส์อิสระ (Free Mouse): UserInputService:GetMouseLocation() ตรงกับ Drawing Space 1:1
+    -- 4. กรณีเมาส์อิสระ (Free Mouse): UserInputService:GetMouseLocation()
     return uis:GetMouseLocation()
 end
 
@@ -6635,17 +7096,20 @@ Connections.FOVCircleLoop = RunService.RenderStepped:Connect(function()
     end
 end)
 
+local sharedWallRayParams = RaycastParams.new()
+sharedWallRayParams.FilterType = Enum.RaycastFilterType.Exclude
+sharedWallRayParams.IgnoreWater = true
+
 local function IsWallClear(origin, targetPart, targetChar)
     local diff = (targetPart.Position - origin)
     local dist = diff.Magnitude
     if dist <= 0.1 then return true end
     local dir = diff.Unit
 
-    local rayParams = RaycastParams.new()
-    rayParams.FilterType = Enum.RaycastFilterType.Exclude
-    rayParams.IgnoreWater = true
-    local ignore = {LocalPlayer.Character, Workspace.CurrentCamera}
-    rayParams.FilterDescendantsInstances = ignore
+    local myChar = GetChar()
+    local ignore = {myChar, Workspace.CurrentCamera}
+    sharedWallRayParams.FilterDescendantsInstances = ignore
+    local rayParams = sharedWallRayParams
 
     local curOrigin = origin
     local remainingDist = dist
@@ -6676,6 +7140,72 @@ local function IsWallClear(origin, targetPart, targetChar)
     return false
 end
 
+local cachedPlayerSchools = {}
+local function GetPlayerSchoolOrTeam(plr)
+    if not plr then return "" end
+    if cachedPlayerSchools[plr] then return cachedPlayerSchools[plr] end
+    if plr.Team and plr.Team.Name ~= "" then
+        cachedPlayerSchools[plr] = plr.Team.Name
+        return plr.Team.Name
+    end
+    local char = plr.Character
+    if not char then return "" end
+    local head = char:FindFirstChild("Head")
+    local ovTag = head and (head:FindFirstChild("OverheadNameBill") or head:FindFirstChildWhichIsA("BillboardGui"))
+    if ovTag then
+        for _, d in ipairs(ovTag:GetChildren()) do
+            if d:IsA("TextLabel") and d.Text and d.Text ~= "" then
+                for _, sc in ipairs(SchoolConfigs) do
+                    if string.find(d.Text, sc.Key, 1, true) then
+                        cachedPlayerSchools[plr] = sc.Key
+                        return sc.Key
+                    end
+                end
+            end
+        end
+    end
+    for _, d in ipairs(char:GetChildren()) do
+        if d:IsA("BillboardGui") then
+            for _, lbl in ipairs(d:GetChildren()) do
+                if lbl:IsA("TextLabel") and lbl.Text and lbl.Text ~= "" then
+                    for _, sc in ipairs(SchoolConfigs) do
+                        if string.find(lbl.Text, sc.Key, 1, true) then
+                            cachedPlayerSchools[plr] = sc.Key
+                            return sc.Key
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return ""
+end
+
+Players.PlayerRemoving:Connect(function(plr)
+    cachedPlayerSchools[plr] = nil
+end)
+
+local function IsTeammateOrFriendly(plr)
+    if not plr or plr == LocalPlayer then return true end
+    -- ตรวจสอบ Team ของ Roblox
+    if LocalPlayer.Team and plr.Team and LocalPlayer.Team == plr.Team then
+        return true
+    end
+    -- ตรวจสอบ TeamColor
+    if LocalPlayer.TeamColor and plr.TeamColor and LocalPlayer.TeamColor == plr.TeamColor then
+        return true
+    end
+    -- ตรวจสอบสถาบัน/โรงเรียนเดียวกัน (School / Institution)
+    local mySchool = GetPlayerSchoolOrTeam(LocalPlayer)
+    if mySchool ~= "" and mySchool ~= "ประชาชน" and mySchool ~= "เด็กบ้าน" and mySchool ~= "Lobby" then
+        local targetSchool = GetPlayerSchoolOrTeam(plr)
+        if targetSchool ~= "" and (targetSchool == mySchool or string.find(targetSchool, mySchool, 1, true) or string.find(mySchool, targetSchool, 1, true)) then
+            return true
+        end
+    end
+    return false
+end
+
 local function GetAimTarget(firePos)
     if not State.SilentAim then return nil end
 
@@ -6697,6 +7227,9 @@ local function GetAimTarget(firePos)
 
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer and plr.Character then
+            if State.SilentTeamCheck and IsTeammateOrFriendly(plr) then
+                continue
+            end
             local char = plr.Character
             local hum = char:FindFirstChildOfClass("Humanoid")
             local hrp = char:FindFirstChild("HumanoidRootPart")
@@ -6729,6 +7262,30 @@ local function GetAimTarget(firePos)
                                     end
                                 end
                                 bestTargetPos = finalPos
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- 🎃 Silent Aim ล็อกเป้ามอนสเตอร์ฮาโลวีน
+    if State.SilentAimHalloween then
+        local hw = Workspace:FindFirstChild("Helloween")
+        local monsters = hw and hw:FindFirstChild("Monsters")
+        if monsters then
+            for _, m in ipairs(monsters:GetChildren()) do
+                if m:IsA("Model") then
+                    local hum = m:FindFirstChildOfClass("Humanoid")
+                    local head = m:FindFirstChild("Head") or m:FindFirstChild("HumanoidRootPart") or m.PrimaryPart or m:FindFirstChildWhichIsA("BasePart")
+                    if hum and hum.Health > 0 and head then
+                        local sPos, onScreen = cam:WorldToScreenPoint(head.Position)
+                        if onScreen and sPos.Z > 0 then
+                            local sDist = (Vector2.new(sPos.X, sPos.Y) - centerPos).Magnitude
+                            if sDist <= maxFOV and sDist < bestScreenDist then
+                                bestScreenDist = sDist
+                                bestTargetPos = head.Position
                             end
                         end
                     end
@@ -7085,6 +7642,7 @@ end
 local function UpdateMerchantESP()
     if not State.MerchantESP or not State.Running then
         ClearMerchantESP()
+    ClearHalloweenESP()
         return
     end
 
@@ -7407,6 +7965,7 @@ end)
 --------------------------------------------------------------
 -- 🎨 สร้างเมนูใน FLUENT TABS
 --------------------------------------------------------------
+do
 Tabs.Farm:AddParagraph({
     Title = "🛡️ KrakenHub v1.0 (100% Anti-Kick Bypass Pro)",
     Content = "• HookMetamethod บล็อกรีโมทแบน & ตรวจจับทุกประเภท\n• ล็อกสปีด 20 studs/s แท้จริง วิ่งไวกว่าคนทั่วไป แต่ต่ำกว่าเกณฑ์เตะ 261\n• ป้องกันหลุดระยะ ProximityPrompt และ Remote Rate-Limit ถาวร"
@@ -7484,8 +8043,8 @@ end)
 
 local MinigameToggle = Tabs.Farm:AddToggle("AutoSolveMinigameOn", {
     Title = "🔨 แก้มินิเกมอัตโนมัติ",
-    Description = "ตอกตะปู, ซ่อมเครื่องยนต์, ขันน็อตล้อ, ถูพื้น อัตโนมัติ",
-    Default = false
+    Description = "ตอกตะปู, ซ่อมเครื่องยนต์, ขันน็อตล้อ, ถูพื้น, ขุด/ทุบหลุมศพฮาโลวีน อัตโนมัติ",
+    Default = true
 })
 MinigameToggle:OnChanged(function()
     State.AutoSolveMinigame = Options.AutoSolveMinigameOn.Value
@@ -7527,11 +8086,1311 @@ Tabs.Farm:AddButton({
         ClaimConstructionWage(false)
     end
 })
+end
 
+
+--------------------------------------------------------------
+-- 🎃 12. ระบบอีเวนต์ฮาโลวีน (HALLOWEEN EVENT SUITE)
+--------------------------------------------------------------
+local HalloweenData = {
+    Bank = 0,
+    Held = 0,
+    Cap = 0,
+    Tier = 0,
+    Quests = {},
+    P320 = {},
+    LastUpdate = 0
+}
+Hub.HalloweenESPObjects = {}
+
+local function ClearHalloweenESP()
+    for _, item in pairs(Hub.HalloweenESPObjects) do
+        if type(item) == "table" then
+            for _, sub in ipairs(item) do
+                pcall(function() sub:Destroy() end)
+            end
+        elseif typeof(item) == "Instance" then
+            pcall(function() item:Destroy() end)
+        end
+    end
+    table.clear(Hub.HalloweenESPObjects)
+end
+
+local function FetchHalloweenState()
+    local hf = ReplicatedStorage:FindFirstChild("Halloween") and ReplicatedStorage.Halloween:FindFirstChild("HalloweenFunc")
+    if not hf then return nil end
+    local s, res = pcall(function() return hf:InvokeServer("State") end)
+    if s and type(res) == "table" and res.state then
+        HalloweenData.Bank = res.state.bank or 0
+        HalloweenData.Held = res.state.held or 0
+        HalloweenData.Cap = res.state.cap or 0
+        HalloweenData.Tier = res.state.tier or 0
+        HalloweenData.Quests = res.state.quests or {}
+        HalloweenData.P320 = res.state.p320 or {}
+        HalloweenData.LastUpdate = os.clock()
+        return res.state
+    end
+    return nil
+end
+
+local function GetHalloweenStatusString()
+    local phase = workspace:GetAttribute("HHPhase") or "ปกติ"
+    local mode = workspace:GetAttribute("HHMode") or "ไม่มี"
+    return string.format(
+        "🍬 แคนดี้ในคลัง: %s | ถืออยู่: %d/%d (ถังระดับ %d)\n🎃 อีเวนต์ 2 ชม.: %s (โหมด: %s)",
+        tostring(HalloweenData.Bank),
+        HalloweenData.Held,
+        HalloweenData.Cap,
+        HalloweenData.Tier,
+        tostring(phase),
+        tostring(mode)
+    )
+end
+
+-- 🧲 ระบบ Auto QTE ชนะผี & Auto Vacuum ของดรอปจากหลุมศพ
+local GraveEvent = ReplicatedStorage:FindFirstChild("Halloween") and ReplicatedStorage.Halloween:FindFirstChild("GraveEvent")
+if GraveEvent then
+    Connections.HalloweenGraveListener = GraveEvent.OnClientEvent:Connect(function(action, data)
+        if not State.Running then return end
+        if State.AutoGraveQTE and type(data) == "table" and data.token then
+            if action == "Start" or action == "Ghost" then
+                task.spawn(function()
+                    task.wait(0.08)
+                    GraveEvent:FireServer("QTE", data.token, true)
+                    task.wait(0.08)
+                    GraveEvent:FireServer("Drag", data.token)
+                end)
+            end
+        end
+        if State.AutoVacuumLoot and action == "Loot" and type(data) == "table" and data.id then
+            task.spawn(function()
+                task.wait(0.05)
+                GraveEvent:FireServer("Collect", data.id)
+            end)
+        end
+    end)
+end
+
+-- ⚔️ ระบบเข้าร่วมอีเวนต์ 2 ชั่วโมงอัตโนมัติ
+local Event2h = ReplicatedStorage:FindFirstChild("Halloween") and ReplicatedStorage.Halloween:FindFirstChild("Event2h")
+Connections.AutoJoinEvent2hLoop = RunService.Heartbeat:Connect(function()
+    if not (State.Running and State.AutoJoinEvent2h and Event2h) then return end
+    local phase = workspace:GetAttribute("HHPhase")
+    if (phase == "lobby" or phase == "countdown") and not Hub.Joined2hEvent then
+        Hub.Joined2hEvent = true
+        Event2h:FireServer("hhJoin")
+        Notify("🎃 อีเวนต์ 2 ชั่วโมง", "เข้าร่วมอีเวนต์ฮาโลวีนเรียบร้อยแล้ว!", "", 3)
+    elseif phase == "idle" or phase == nil then
+        Hub.Joined2hEvent = false
+    end
+end)
+
+State.IsDepositing = false
+State.IsGettingBucket = false
+
+-- 🚪 ถือถังแคนดี้อัตโนมัติ (ตรวจสอบทั้ง Attribute และชื่อ Tool)
+local function EquipCandyContainerTool()
+    local char = GetChar()
+    if char then
+        for _, t in ipairs(char:GetChildren()) do
+            if t:IsA("Tool") and (t:GetAttribute("CandyContainer") or t.Name:find("Candy") or t.Name:find("Bag") or t.Name:find("Pot")) then
+                return true, t
+            end
+        end
+    end
+    local bp = LocalPlayer:FindFirstChild("Backpack")
+    if bp then
+        for _, t in ipairs(bp:GetChildren()) do
+            if t:IsA("Tool") and (t:GetAttribute("CandyContainer") or t.Name:find("Candy") or t.Name:find("Bag") or t.Name:find("Pot")) then
+                local hum = GetHuman()
+                if hum then hum:EquipTool(t) return true, t end
+            end
+        end
+    end
+    return false, nil
+end
+
+-- 🚪 ดึงพิกัด WorldPosition แท้ของ ProximityPrompt (รองรับ Attachment และ BasePart)
+local function GetPromptWorldPosition(prompt, fallback)
+    if not prompt then return nil end
+    local p = prompt.Parent
+    if p then
+        if p:IsA("Attachment") then
+            return p.WorldPosition
+        elseif p:IsA("BasePart") then
+            return p.Position
+        end
+    end
+    if fallback then
+        if fallback:IsA("BasePart") then return fallback.Position end
+        local bp = fallback:FindFirstChildWhichIsA("BasePart", true)
+        if bp then return bp.Position end
+    end
+    return nil
+end
+
+-- 🚪 ค้นหาบ้าน Trick or Treat ที่พร้อมเคาะ (เรียงตามระยะใกล้สุด)
+local function GetNearestReadyHouse(ignoreList)
+    local hw = Workspace:FindFirstChild("Helloween")
+    local housesFolder = hw and hw:FindFirstChild("บ้าน")
+    if not housesFolder then return nil end
+    local nowServer = workspace:GetServerTimeNow()
+    local hrp = GetHRP()
+    local myPos = hrp and hrp.Position or Vector3.zero
+    local bestHouse, bestPrompt, bestDist, bestPos = nil, nil, 999999, nil
+    local nextSoonestHouse, minCooldownRemaining = nil, 999999
+
+    for _, house in ipairs(housesFolder:GetChildren()) do
+        if not (ignoreList and ignoreList[house]) then
+            local prompt = house:FindFirstChildWhichIsA("ProximityPrompt", true)
+            if prompt then
+                local readyAt = prompt:GetAttribute("ReadyAt") or 0
+                local busy = prompt:GetAttribute("Busy") == true
+                local wPos = GetPromptWorldPosition(prompt, house)
+                if wPos then
+                    if nowServer >= readyAt and not busy then
+                        local d = (myPos - wPos).Magnitude
+                        if d < bestDist then
+                            bestDist = d
+                            bestHouse = house
+                            bestPrompt = prompt
+                            bestPos = wPos
+                        end
+                    else
+                        local remaining = readyAt - nowServer
+                        if remaining > 0 and remaining < minCooldownRemaining then
+                            minCooldownRemaining = remaining
+                            nextSoonestHouse = house
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return bestHouse, bestPrompt, bestDist, bestPos, nextSoonestHouse, minCooldownRemaining
+end
+
+-- ⚰️ ค้นหาหลุมศพที่ขุด/ทุบได้
+local function GetNearestHalloweenGrave()
+    local hw = Workspace:FindFirstChild("Helloween")
+    if not hw then return nil end
+    local graveFolder = nil
+    for _, c in ipairs(hw:GetChildren()) do
+        if c.Name:find("หลุมศพ") or c.Name:find("ศพ") then
+            graveFolder = c
+            break
+        end
+    end
+    if not graveFolder then return nil end
+
+    local hrp = GetHRP()
+    local myPos = hrp and hrp.Position or Vector3.zero
+    local bestGrave, bestPrompt, bestDist, bestPos = nil, nil, 999999, nil
+
+    for _, sub in ipairs(graveFolder:GetChildren()) do
+        if sub.Name == "ขุด" or sub.Name == "ทุบ" then
+            for _, spot in ipairs(sub:GetChildren()) do
+                local pr = spot:FindFirstChildWhichIsA("ProximityPrompt", true)
+                local wPos = GetPromptWorldPosition(pr, spot)
+                if pr and pr.Enabled and wPos then
+                    local d = (myPos - wPos).Magnitude
+                    if d < bestDist then
+                        bestDist = d
+                        bestGrave = spot
+                        bestPrompt = pr
+                        bestPos = wPos
+                    end
+                end
+            end
+        end
+    end
+    return bestGrave, bestPrompt, bestDist, bestPos
+end
+
+-- 🏃 วิ่งไปยังเป้าหมายฮาโลวีน (Trick or Treat / หลุมศพ / ผีจอมขนม) แบบลื่นไหล ไม่ติดขัด
+local function RunToHalloweenTarget(targetPos, targetPrompt, stopDist, targetName, customActiveCheck)
+    local effectiveStopDist = stopDist or 6.5
+    if targetPrompt and targetPrompt.MaxActivationDistance and targetPrompt.MaxActivationDistance > 6 then
+        effectiveStopDist = math.clamp(targetPrompt.MaxActivationDistance - 1.8, 6.0, 8.5)
+    end
+
+    local hrp = GetHRP()
+    local hum = GetHuman()
+    if not hrp or not hum or hum.Health <= 0 then return false end
+
+    local totalDist = (hrp.Position - targetPos).Magnitude
+    if totalDist <= effectiveStopDist then
+        hum:Move(Vector3.zero, false)
+        SetSprinting(false)
+        return true
+    end
+
+    -- เปิดระบบวิ่งแท้ (Native Sprint) ความเร็วปลอดภัย 17.5 studs/s
+    SetSprinting(true)
+
+    local path = PathfindingService:CreatePath({
+        AgentRadius = 2.4,
+        AgentHeight = 5.0,
+        AgentCanJump = true,
+        WaypointSpacing = 3.5,
+    })
+
+    local s, _ = pcall(function()
+        path:ComputeAsync(hrp.Position, targetPos)
+    end)
+
+    local waypoints = {}
+    if s and path.Status == Enum.PathStatus.Success then
+        waypoints = path:GetWaypoints()
+    else
+        -- ถ้าเป้าหมายอยู่ติดขอบกำแพง/ประตู ลองคำนวณมายังจุดหน้าประตูกลางลาน
+        local standFront = targetPos + (hrp.Position - targetPos).Unit * 6.0
+        local s2, _ = pcall(function()
+            path:ComputeAsync(hrp.Position, standFront)
+        end)
+        if s2 and path.Status == Enum.PathStatus.Success then
+            waypoints = path:GetWaypoints()
+        else
+            waypoints = {
+                { Position = targetPos, Action = Enum.PathWaypointAction.Move }
+            }
+        end
+    end
+
+    local maxTravelTime = math.clamp(math.ceil(totalDist / 14) + 12, 14, 80)
+    local startTime = os.clock()
+    local wpIdx = 1
+    if #waypoints > 1 and (hrp.Position - waypoints[1].Position).Magnitude < 3.5 then
+        wpIdx = 2
+    end
+
+    local lastPos = hrp.Position
+    local stuckCount = 0
+    local lastMoveTime = os.clock()
+
+    local function isMovementActive()
+        if not State.Running then return false end
+        if customActiveCheck then return customActiveCheck() end
+        return State.AutoTrickOrTreat or State.AutoDigGraves or State.IsDepositing or State.IsGettingBucket
+    end
+
+    while (os.clock() - startTime) < maxTravelTime and isMovementActive() do
+        hrp = GetHRP()
+        hum = GetHuman()
+        if not hrp or not hum or hum.Health <= 0 then return false end
+
+        local distToTarget = (hrp.Position - targetPos).Magnitude
+        local hDistToTarget = (Vector2.new(hrp.Position.X, hrp.Position.Z) - Vector2.new(targetPos.X, targetPos.Z)).Magnitude
+
+        -- ถ้าถึงระยะกด ProximityPrompt แล้ว ให้หยุดทันที ไม่ต้องเดินชนประตู
+        if distToTarget <= effectiveStopDist or (hDistToTarget <= effectiveStopDist and math.abs(hrp.Position.Y - targetPos.Y) <= 5.0) then
+            hum:Move(Vector3.zero, false)
+            SetSprinting(false)
+            return true
+        end
+
+        local currentWpPos = targetPos
+        if wpIdx <= #waypoints then
+            local wp = waypoints[wpIdx]
+            currentWpPos = wp.Position
+            local dToWp = (Vector2.new(hrp.Position.X, hrp.Position.Z) - Vector2.new(wp.Position.X, wp.Position.Z)).Magnitude
+
+            if dToWp <= 3.0 then
+                wpIdx = wpIdx + 1
+            elseif wpIdx + 1 <= #waypoints then
+                local nextWp = waypoints[wpIdx + 1]
+                local dToNext = (Vector2.new(hrp.Position.X, hrp.Position.Z) - Vector2.new(nextWp.Position.X, nextWp.Position.Z)).Magnitude
+                if dToNext <= 5.2 and IsPathClear(hrp.Position, nextWp.Position, 1.8) then
+                    wpIdx = wpIdx + 1
+                end
+            end
+
+            if wp and wp.Action == Enum.PathWaypointAction.Jump then
+                hum.Jump = true
+            end
+        end
+
+        -- Auto-Vault: ตรวจจับสิ่งกีดขวางเตี้ยข้างหน้า (เช่น ฟักทอง, ขอบปูน, บันไดชานบ้าน) แล้วกระโดดข้ามทันที
+        local toWp = (currentWpPos - hrp.Position)
+        local hToWp = Vector3.new(toWp.X, 0, toWp.Z)
+        if hToWp.Magnitude > 0.4 then
+            local fwdUnit = hToWp.Unit
+            local kneeOrigin = hrp.Position + Vector3.new(0, -0.9, 0)
+            local kneeHit = RaycastCollidable(kneeOrigin, fwdUnit * 2.8)
+            if kneeHit and kneeHit.Instance and kneeHit.Instance.CanCollide and not kneeHit.Instance:IsDescendantOf(GetChar()) then
+                local chestOrigin = hrp.Position + Vector3.new(0, 1.2, 0)
+                local chestHit = RaycastCollidable(chestOrigin, fwdUnit * 2.8)
+                if not chestHit then
+                    hum.Jump = true
+                end
+            end
+        end
+
+        hum:MoveTo(currentWpPos)
+        task.wait(0.04)
+
+        local moved = (Vector2.new(hrp.Position.X, hrp.Position.Z) - Vector2.new(lastPos.X, lastPos.Z)).Magnitude
+        lastPos = hrp.Position
+
+        if moved < 0.22 then
+            if (os.clock() - lastMoveTime) >= 0.22 then
+                -- หากติดขัดแต่อยู่ในระยะกดเคาะได้แล้ว ให้ถือว่าถึงจุดหมายทันที
+                if distToTarget <= (effectiveStopDist + 1.8) then
+                    hum:Move(Vector3.zero, false)
+                    SetSprinting(false)
+                    return true
+                end
+
+                stuckCount = stuckCount + 1
+                hum.Jump = true
+                local toTargetH = Vector3.new(targetPos.X - hrp.Position.X, 0, targetPos.Z - hrp.Position.Z)
+                if toTargetH.Magnitude > 0.1 then
+                    hum:Move(toTargetH.Unit, false)
+                end
+                lastMoveTime = os.clock()
+
+                if stuckCount >= 2 then
+                    stuckCount = 0
+                    pcall(function()
+                        path:ComputeAsync(hrp.Position, targetPos)
+                        if path.Status == Enum.PathStatus.Success then
+                            waypoints = path:GetWaypoints()
+                            wpIdx = math.min(2, #waypoints)
+                        else
+                            local standFront = targetPos + (hrp.Position - targetPos).Unit * 6.5
+                            path:ComputeAsync(hrp.Position, standFront)
+                            if path.Status == Enum.PathStatus.Success then
+                                waypoints = path:GetWaypoints()
+                                wpIdx = math.min(2, #waypoints)
+                            end
+                        end
+                    end)
+                end
+            end
+        else
+            lastMoveTime = os.clock()
+            stuckCount = 0
+        end
+    end
+
+    local finalDist = (GetHRP().Position - targetPos).Magnitude
+    SetSprinting(false)
+    if hum then hum:Move(Vector3.zero, false) end
+    return finalDist <= (effectiveStopDist + 1.2)
+end
+
+-- 🎒 วิ่งไปเอาถังแคนดี้อัตโนมัติ (Auto Get Candy Bucket)
+local function AutoGetCandyBucket()
+    local hasTool, tool = EquipCandyContainerTool()
+    if hasTool and tool then
+        Notify("🎃 ถังแคนดี้", "มีถังแคนดี้อยู่ในตัวแล้ว (" .. tool.Name .. ")", "", 3)
+        return true
+    end
+
+    local mainPos = Vector3.new(2121.23, 5.12, -348.75)
+    local hrp = GetHRP()
+    if not hrp then return false end
+
+    local cash = 0
+    pcall(function()
+        local leaderstats = LocalPlayer:FindFirstChild("leaderstats")
+        local c = leaderstats and leaderstats:FindFirstChild("Cash")
+        cash = c and c.Value or 0
+    end)
+
+    local rs = game:GetService("ReplicatedStorage")
+    local func = rs.Halloween:FindFirstChild("HalloweenFunc")
+    local state = nil
+    if func then
+        pcall(function() state = func:InvokeServer("State") end)
+    end
+    local curTier = state and state.state and state.state.tier or 0
+
+    if curTier == 0 and cash < 15000 then
+        Notify("❌ เงินไม่พอ", string.format("ต้องใช้เงิน $15,000 Cash ในการซื้อถุงแคนดี้ (ปัจจุบันมี: $%d)", cash), "", 5)
+        return false
+    end
+
+    Notify("🎃 กำลังไปเอาถังแคนดี้", "กำลังวิ่งไปหาผีจอมขนม (Main)...", "", 4)
+    local hw = Workspace:FindFirstChild("Helloween")
+    local mainNpc = hw and hw:FindFirstChild("NPC") and hw.NPC:FindFirstChild("Main")
+    local talkPrompt = mainNpc and mainNpc:FindFirstChild("TalkPrompt", true)
+    local mainPos = Vector3.new(2122.74, 4.16, -348.75)
+    if talkPrompt and talkPrompt.Parent then
+        if talkPrompt.Parent:IsA("Attachment") then
+            mainPos = talkPrompt.Parent.WorldPosition
+        elseif talkPrompt.Parent:IsA("BasePart") then
+            mainPos = talkPrompt.Parent.Position
+        end
+    elseif mainNpc and mainNpc.PrimaryPart then
+        mainPos = mainNpc.PrimaryPart.Position
+    end
+
+    SetTargetESP(mainNpc or mainPos, "ผีจอมขนม (Main) [ซื้อ/รับถังแคนดี้]", Color3.fromRGB(255, 140, 0), "🏃 กำลังวิ่งไปเอาถัง...")
+
+    State.IsGettingBucket = true
+    local arrived = RunToHalloweenTarget(mainPos, talkPrompt, 6.0, "ผีจอมขนม (Main)", function()
+        return State.Running and (State.AutoGetBucket or State.IsGettingBucket)
+    end)
+    State.IsGettingBucket = false
+
+    hrp = GetHRP()
+    if hrp and (hrp.Position - mainPos).Magnitude <= 18 then
+        SetTargetESP(mainNpc, "ผีจอมขนม (Main)", Color3.fromRGB(255, 140, 0), "🛒 กำลังซื้อ/รับถังแคนดี้...")
+        task.wait(0.2)
+
+        if func then
+            local res = func:InvokeServer("Buy", 1)
+            if res and res.ok then
+                Notify("🎉 สำเร็จ!", "ซื้อถุงแคนดี้เรียบร้อยแล้ว! (ความจุ 50 เม็ด)", "", 4)
+            elseif res and res.msg then
+                Notify("🎃 ผีจอมขนม", tostring(res.msg), "", 3)
+            end
+        end
+
+        task.wait(0.6)
+        local equipped = EquipCandyContainerTool()
+        if equipped then
+            Notify("🎉 พร้อมฟาร์ม!", "ถือถุงแคนดี้ลงมือเรียบร้อย", "", 3)
+        end
+        ClearTargetESP()
+        return true
+    else
+        Notify("⚠️ ข้อผิดพลาด", "ไม่สามารถเข้าถึงจุดผีจอมขนมได้", "", 3)
+        ClearTargetESP()
+        return false
+    end
+end
+
+-- 🔄 ลูป Auto Trick or Treat (วิ่งไปฟาร์มเคาะประตูบ้านตามจุดแบบลื่นไหล)
+task.spawn(function()
+    local recentKnocked = {}
+    while State.Running and _G._KrakenScriptId == MY_SCRIPT_ID do
+        task.wait(0.2)
+        if State.AutoTrickOrTreat then
+            -- ถ้ากำลังไปฝากแคนดี้หรือไปเอาถัง ให้หยุดรอ ไม่แย่งการเดิน
+            if State.IsDepositing or State.IsGettingBucket then
+                task.wait(0.6)
+            else
+                -- ตรวจสอบว่าแคนดี้เต็มถังหรือไม่ ถ้าเปิด AutoDeposit ให้แวะไปฝากทันที
+                local held = tonumber(LocalPlayer:GetAttribute("CandyHeld")) or 0
+                local cap = tonumber(LocalPlayer:GetAttribute("CandyCap")) or 50
+                if held <= 0 and Hub.HalloweenState and Hub.HalloweenState.held then
+                    held = Hub.HalloweenState.held
+                    cap = Hub.HalloweenState.cap or 50
+                end
+
+                if State.AutoDepositCandy and held > 0 and (held >= cap or held >= (cap - 1)) then
+                    Notify("🎃 แคนดี้เต็มถัง!", string.format("แคนดี้เต็มถัง (%d/%d) กำลังแวะไปฝากที่ผีจอมขนมอัตโนมัติ...", held, cap), "", 3.5)
+                    DepositAllCandy(false)
+                    task.wait(1.0)
+                else
+                    EquipCandyContainerTool()
+
+                    local nowClock = os.clock()
+                    for h, t in pairs(recentKnocked) do
+                        if nowClock - t > 115 then
+                            recentKnocked[h] = nil
+                        end
+                    end
+
+                    local house, prompt, dist, pos, nextHouse, nextCooldown = GetNearestReadyHouse(recentKnocked)
+                    if house and prompt and pos then
+                        local houseTitle = "บ้านหลังที่ " .. house.Name
+                        SetTargetESP(house, houseTitle .. " (Trick or Treat)", Color3.fromRGB(255, 130, 0), string.format("🏃 กำลังวิ่งไปเคาะประตู (~%d ม.)", math.floor(dist * 0.28)))
+
+                        -- วิ่งไปยังจุดเคาะประตูบ้าน (หยุดในระยะกดพอดี ไม่ชนสิ่งของบนชานบ้าน)
+                        local arrived = RunToHalloweenTarget(pos, prompt, 7.0, houseTitle, function()
+                            return State.Running and State.AutoTrickOrTreat and not State.IsDepositing and not State.IsGettingBucket
+                        end)
+
+                        local hrp = GetHRP()
+                        local hum = GetHuman()
+                        if hrp and hum and prompt and prompt.Parent then
+                            local curDist = (hrp.Position - pos).Magnitude
+                            if curDist <= 9.2 then
+                                SetTargetESP(house, houseTitle, Color3.fromRGB(255, 130, 0), "🚪 กำลังเคาะประตู...")
+                                
+                                -- 🛑 หยุดสนิท 100% ป้องกัน Code 261 และ Code 264
+                                hum:Move(Vector3.zero, false)
+                                hrp.AssemblyLinearVelocity = Vector3.zero
+                                hrp.AssemblyAngularVelocity = Vector3.zero
+                                SetSprinting(false)
+                                task.wait(0.25)
+
+                                EquipCandyContainerTool()
+                                task.wait(0.2)
+                                pcall(function() fireproximityprompt(prompt) end)
+                                recentKnocked[house] = os.clock()
+                                Notify("🎃 Trick or Treat", "เคาะประตู " .. houseTitle .. " เรียบร้อย!", "", 2.5)
+
+                                local knockWait = 1.8
+                                local st = os.clock()
+                                while (os.clock() - st) < knockWait and State.Running and State.AutoTrickOrTreat and not State.IsDepositing do
+                                    task.wait(0.1)
+                                end
+                            end
+                        end
+                    else
+                        if nextCooldown and nextCooldown > 0 and nextCooldown < 9999 then
+                            local waitSec = math.ceil(nextCooldown)
+                            SetTargetESP(nextHouse, "บ้าน: " .. (nextHouse and nextHouse.Name or ""), Color3.fromRGB(255, 180, 50), string.format("⏳ รอคูลดาวน์อีก %d วินาที...", waitSec))
+                            task.wait(1.0)
+                        else
+                            ClearTargetESP()
+                            task.wait(1.0)
+                        end
+                    end
+                end
+            end
+        else
+            table.clear(recentKnocked)
+        end
+    end
+end)
+
+-- 🔄 ลูป Auto Dig Graves (ขุด/ทุบหลุมศพ)
+task.spawn(function()
+    while State.Running and _G._KrakenScriptId == MY_SCRIPT_ID do
+        task.wait(0.2)
+        if State.AutoDigGraves and not State.AutoTrickOrTreat then
+            local grave, prompt, dist, pos = GetNearestHalloweenGrave()
+            if grave and prompt and pos then
+                SetTargetESP(grave, "หลุมศพ (" .. (prompt.ActionText or "ขุด/ทุบ") .. ")", Color3.fromRGB(180, 80, 255), "🏃 กำลังวิ่งไป")
+                local arrived = RunToHalloweenTarget(pos, prompt, 5.0, "หลุมศพ")
+
+                local hrp = GetHRP()
+                local hum = GetHuman()
+                if hrp and prompt and prompt.Parent and (hrp.Position - pos).Magnitude <= 6.5 then
+                    SetTargetESP(grave, "หลุมศพ", Color3.fromRGB(180, 80, 255), "⛏️ กำลังขุด/ทุบ")
+                    local holdTime = prompt.HoldDuration or 0.5
+                    pcall(function() prompt:InputHoldBegin() end)
+                    local stH = os.clock()
+                    while (os.clock() - stH) < holdTime and State.AutoDigGraves and State.Running do
+                        task.wait(0.04)
+                    end
+                    pcall(function() fireproximityprompt(prompt) end)
+                    pcall(function() prompt:InputHoldEnd() end)
+
+                    -- ⏳ รอมินิเกมหรือแถบความคืบหน้าการขุดปรากฏขึ้น (รอสูงสุด 2.5 วินาที)
+                    local startCheck = os.clock()
+                    while (os.clock() - startCheck) < 2.5 and State.AutoDigGraves and State.Running do
+                        if IsGraveMinigameActive() then break end
+                        task.wait(0.05)
+                    end
+
+                    -- 🛑 ล็อกตำแหน่งตัวละครให้อยู่นิ่งกับที่ 100% จนกว่าจะเล่นมินิเกมเสร็จ และขุดครบ 100%
+                    if IsGraveMinigameActive() or (prompt and prompt.Parent == nil) then
+                        local lockCF = hrp.CFrame
+                        local digStartTime = os.clock()
+                        while State.AutoDigGraves and State.Running and (os.clock() - digStartTime) < 40 do
+                            -- ตรวจสอบว่ามินิเกมหรือการขุดยังดำเนินอยู่หรือไม่
+                            if not IsGraveMinigameActive() then
+                                task.wait(0.3)
+                                if not IsGraveMinigameActive() then
+                                    break -- ขุดเสร็จครบ 100% และปิดตัวลงแล้ว
+                                end
+                            end
+
+                            if hrp then
+                                hrp.CFrame = lockCF
+                                hrp.AssemblyLinearVelocity = Vector3.zero
+                                hrp.AssemblyAngularVelocity = Vector3.zero
+                            end
+                            if hum then
+                                hum.WalkSpeed = 0
+                            end
+                            SetTargetESP(grave, "หลุมศพ", Color3.fromRGB(180, 80, 255), "⛏️ กำลังขุด/เล่นมินิเกม (รอครบ 100%)...")
+                            task.wait(0.05)
+                        end
+
+                        -- รอเก็บของดรอป / ลูกกวาด ให้เรียบร้อย
+                        task.wait(0.8)
+                    else
+                        task.wait(1.0)
+                    end
+                end
+            else
+                ClearTargetESP()
+                task.wait(1.0)
+            end
+        end
+    end
+end)
+
+-- 👁️ Halloween ESP Loop (มอนสเตอร์, หลุมศพ, บ้าน, ชิ้นส่วน P320)
+task.spawn(function()
+    while State.Running and _G._KrakenScriptId == MY_SCRIPT_ID do
+        task.wait(1.0)
+        if State.HalloweenMonstersESP or State.HalloweenP320ESP then
+            pcall(function()
+                local hw = Workspace:FindFirstChild("Helloween")
+                if not hw then return end
+
+                -- มอนสเตอร์ & บอส ESP
+                if State.HalloweenMonstersESP and hw:FindFirstChild("Monsters") then
+                    for _, m in ipairs(hw.Monsters:GetChildren()) do
+                        if m:IsA("Model") and not Hub.HalloweenESPObjects[m] then
+                            local p = m:FindFirstChild("HumanoidRootPart") or m.PrimaryPart or m:FindFirstChildWhichIsA("BasePart")
+                            local hum = m:FindFirstChildOfClass("Humanoid")
+                            if p and hum and hum.Health > 0 then
+                                local isBoss = m.Name:find("Boss") or m.Name:find("Pad") or m.Name:find("กระสือ")
+                                local col = isBoss and Color3.fromRGB(255, 50, 50) or Color3.fromRGB(0, 220, 255)
+                                local hl = Instance.new("Highlight")
+                                hl.Name = "HwMonsterHL"
+                                hl.Adornee = m
+                                hl.FillColor = col
+                                hl.FillTransparency = 0.5
+                                hl.OutlineColor = Color3.fromRGB(255, 255, 255)
+                                hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                                hl.Parent = targetGuiParent
+
+                                local bb = Instance.new("BillboardGui")
+                                bb.Name = "HwMonsterBB"
+                                bb.Adornee = p
+                                bb.Size = UDim2.new(0, 140, 0, 32)
+                                bb.StudsOffset = Vector3.new(0, 3.2, 0)
+                                bb.AlwaysOnTop = true
+                                bb.MaxDistance = 400
+
+                                local lbl = Instance.new("TextLabel", bb)
+                                lbl.Size = UDim2.new(1, 0, 1, 0)
+                                lbl.BackgroundTransparency = 1
+                                lbl.Font = Enum.Font.GothamBold
+                                lbl.TextSize = 11
+                                lbl.TextColor3 = col
+                                lbl.TextStrokeTransparency = 0.2
+                                lbl.Text = string.format("%s [%d HP]", m.Name, math.floor(hum.Health))
+                                bb.Parent = targetGuiParent
+
+                                Hub.HalloweenESPObjects[m] = {hl, bb}
+                            end
+                        end
+                    end
+                end
+
+                -- ชิ้นส่วน P320 ESP
+                if State.HalloweenP320ESP then
+                    local p320Folder = Workspace:FindFirstChild("Quest") and Workspace.Quest:FindFirstChild("Quest Option") and Workspace.Quest["Quest Option"]:FindFirstChild("P320")
+                    if p320Folder then
+                        for _, part in ipairs(p320Folder:GetChildren()) do
+                            if part:IsA("BasePart") and not Hub.HalloweenESPObjects[part] then
+                                local hl = Instance.new("Highlight")
+                                hl.Name = "HwP320HL"
+                                hl.Adornee = part
+                                hl.FillColor = Color3.fromRGB(255, 215, 0)
+                                hl.FillTransparency = 0.3
+                                hl.OutlineColor = Color3.fromRGB(255, 255, 255)
+                                hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                                hl.Parent = targetGuiParent
+
+                                local bb = Instance.new("BillboardGui")
+                                bb.Name = "HwP320BB"
+                                bb.Adornee = part
+                                bb.Size = UDim2.new(0, 120, 0, 28)
+                                bb.StudsOffset = Vector3.new(0, 2, 0)
+                                bb.AlwaysOnTop = true
+                                bb.MaxDistance = 600
+
+                                local lbl = Instance.new("TextLabel", bb)
+                                lbl.Size = UDim2.new(1, 0, 1, 0)
+                                lbl.BackgroundTransparency = 1
+                                lbl.Font = Enum.Font.GothamBold
+                                lbl.TextSize = 11
+                                lbl.TextColor3 = Color3.fromRGB(255, 215, 0)
+                                lbl.TextStrokeTransparency = 0.2
+                                lbl.Text = "🔫 ชิ้นส่วน: " .. part.Name
+                                bb.Parent = targetGuiParent
+
+                                Hub.HalloweenESPObjects[part] = {hl, bb}
+                            end
+                        end
+                    end
+                end
+            end)
+        else
+            ClearHalloweenESP()
+        end
+    end
+end)
+
+-- ฟังก์ชันเก็บชิ้นส่วน P320 อัตโนมัติ
+local function CollectAllP320Parts(silent)
+    local p320Folder = Workspace:FindFirstChild("Quest") and Workspace.Quest:FindFirstChild("Quest Option") and Workspace.Quest["Quest Option"]:FindFirstChild("P320")
+    if not p320Folder then
+        if not silent then Notify("เควส P320", "ไม่พบโฟลเดอร์เควสต์ P320 ใน Workspace", "", 3) end
+        return 0
+    end
+
+    local hrp = GetHRP()
+    if not hrp then return 0 end
+
+    local parts = {"Barrel", "Slide", "Mag", "H"}
+    local collectedCount = 0
+    if not silent then
+        Notify("เควส P320", "เริ่มเทเลพอร์ตเก็บชิ้นส่วน P320 ทั้ง 4 ชิ้น...", "", 3)
+    end
+    for _, partName in ipairs(parts) do
+        local pObj = p320Folder:FindFirstChild(partName)
+        if pObj and pObj:IsA("BasePart") then
+            local prompt = pObj:FindFirstChildWhichIsA("ProximityPrompt", true)
+            if prompt and prompt.Enabled then
+                hrp.AssemblyLinearVelocity = Vector3.zero
+                hrp.AssemblyAngularVelocity = Vector3.zero
+                hrp.CFrame = pObj.CFrame + Vector3.new(0, 2, 0)
+                task.wait(0.2)
+                pcall(function() fireproximityprompt(prompt) end)
+                task.wait(0.3)
+                collectedCount = collectedCount + 1
+            end
+        end
+    end
+    if collectedCount > 0 and not silent then
+        Notify("เควส P320", "เก็บชิ้นส่วน P320 เรียบร้อย! สามารถวาร์ปไปส่งเควสต์กับผีช่างปืนได้เลย", "", 4)
+    end
+    return collectedCount
+end
+
+-- ฟังก์ชันเคลมรางวัลเควสต์ฮาโลวีนทั้งหมด
+local function ClaimAllHalloweenQuests(silent)
+    local hf = ReplicatedStorage:FindFirstChild("Halloween") and ReplicatedStorage.Halloween:FindFirstChild("HalloweenFunc")
+    if not hf then return end
+    local s, res = pcall(function() return hf:InvokeServer("State") end)
+    if s and type(res) == "table" and res.state and res.state.quests then
+        local claimedCount = 0
+        for qId, qData in pairs(res.state.quests) do
+            if qData.claimed == false then
+                local s2, r2 = pcall(function() return hf:InvokeServer("Claim", qId) end)
+                if s2 and r2 and r2.ok then
+                    claimedCount = claimedCount + 1
+                end
+            end
+        end
+        if claimedCount > 0 then
+            Notify("เควสต์ฮาโลวีน", string.format("กดรับรางวัลเควสต์สำเร็จ %d เควสต์!", claimedCount), "", 3.5)
+            FetchHalloweenState()
+        elseif not silent then
+            Notify("เควสต์ฮาโลวีน", "ไม่มีเควสต์ที่พร้อมรับรางวัลในขณะนี้", "", 2.5)
+        end
+    elseif not silent then
+        Notify("เควสต์ฮาโลวีน", "ไม่สามารถดึงข้อมูลเควสต์ได้", "", 3)
+    end
+end
+
+-- ค้นหาจุดและ ProximityPrompt ของหม้อ/บ่อแคนดี้ (Cauldron)
+local function GetCauldronDepositTarget()
+    local hw = Workspace:FindFirstChild("Helloween")
+    local candySpot = hw and hw:FindFirstChild("จุดสำคัญ") and hw["จุดสำคัญ"]:FindFirstChild("จุดใส่แคนดี้")
+    local cauldron = candySpot and candySpot:FindFirstChild("FBX_Cauldron", true)
+    local prompt = cauldron and cauldron:FindFirstChildWhichIsA("ProximityPrompt", true)
+    local promptPos = Vector3.new(2117.26, 5.15, -346.63)
+    if prompt and prompt.Parent then
+        if prompt.Parent:IsA("Attachment") then
+            promptPos = prompt.Parent.WorldPosition
+        elseif prompt.Parent:IsA("BasePart") then
+            promptPos = prompt.Parent.Position
+        end
+    end
+    -- จุดยืนเปิดโล่งหน้าบ่อ/หม้อแคนดี้ (ระยะห่างพอดี ไม่ชนตัวหม้อและฟักทองรอบข้าง)
+    local standPos = Vector3.new(2119.5, 3.5, -342.7)
+    return cauldron, prompt, promptPos, standPos
+end
+
+-- ฟังก์ชันนำแคนดี้ไปวาง/เทลงบ่อแคนดี้ (Cauldron)
+local function DepositAllCandy(silent)
+    if State.IsDepositing then return false end
+    State.IsDepositing = true
+
+    local success = false
+    local errReason = nil
+
+    local function cleanup()
+        State.IsDepositing = false
+        ClearTargetESP()
+        SetSprinting(false)
+        local hum = GetHuman()
+        if hum then hum:Move(Vector3.zero, false) end
+        local h = GetHRP()
+        if h then
+            h.AssemblyLinearVelocity = Vector3.zero
+            h.AssemblyAngularVelocity = Vector3.zero
+        end
+    end
+
+    local hrp = GetHRP()
+    local hum = GetHuman()
+    if not hrp or not hum then
+        cleanup()
+        return false
+    end
+
+    local held = tonumber(LocalPlayer:GetAttribute("CandyHeld")) or 0
+    if held <= 0 and Hub.HalloweenState and Hub.HalloweenState.held then
+        held = Hub.HalloweenState.held
+    end
+
+    local cauldron, prompt, promptPos, standPos = GetCauldronDepositTarget()
+    local curDist = (hrp.Position - standPos).Magnitude
+    if curDist > 6.0 then
+        if not silent then
+            Notify("🥣 ฝากแคนดี้", string.format("กำลังเดินทางไปเทแคนดี้ลงบ่อ... (~%d ม.)", math.floor(curDist * 0.28)), "", 2.5)
+        end
+        SetTargetESP(cauldron or standPos, "หม้อแคนดี้ (บ่อใส่แคนดี้)", Color3.fromRGB(255, 140, 0), "🏃 กำลังเดินทางไปบ่อแคนดี้...")
+        RunToHalloweenTarget(standPos, prompt, 4.0, "บ่อแคนดี้", function()
+            return State.Running and (State.AutoDepositCandy or State.IsDepositing)
+        end)
+        ClearTargetESP()
+    end
+
+    -- หยุดตัวละครและหันหน้าเข้าหาบ่อแคนดี้ตรงๆ
+    hrp = GetHRP()
+    hum = GetHuman()
+    if hum then hum:Move(Vector3.zero, false) end
+    SetSprinting(false)
+    if hrp then
+        hrp.AssemblyLinearVelocity = Vector3.zero
+        hrp.AssemblyAngularVelocity = Vector3.zero
+        hrp.CFrame = CFrame.lookAt(hrp.Position, Vector3.new(promptPos.X, hrp.Position.Y, promptPos.Z))
+    end
+    task.wait(0.2)
+
+    -- ตรวจสอบระยะไปยังหม้อแคนดี้
+    hrp = GetHRP()
+    local distToPrompt = hrp and (hrp.Position - promptPos).Magnitude or 999
+    if distToPrompt > 9.5 and hrp and hum then
+        hum:MoveTo(standPos)
+        task.wait(0.4)
+        hum:Move(Vector3.zero, false)
+        hrp.AssemblyLinearVelocity = Vector3.zero
+        task.wait(0.15)
+        distToPrompt = (hrp.Position - promptPos).Magnitude
+    end
+
+    SetTargetESP(cauldron or promptPos, "หม้อแคนดี้ (บ่อใส่แคนดี้)", Color3.fromRGB(255, 140, 0), "🥣 กำลังเทแคนดี้ลงบ่อ...")
+
+    -- 1) กด ProximityPrompt ที่บ่อแคนดี้ ("เทแคนดี้ลงหม้อ")
+    if prompt and prompt.Parent and prompt.Enabled then
+        pcall(function() prompt:InputHoldBegin() end)
+        local holdTime = prompt.HoldDuration or 0.5
+        local st = os.clock()
+        while (os.clock() - st) < (holdTime + 0.1) and State.Running do
+            task.wait(0.04)
+        end
+        pcall(function() fireproximityprompt(prompt) end)
+        pcall(function() prompt:InputHoldEnd() end)
+        task.wait(0.25)
+    end
+
+    -- 2) ส่งสัญญาณผ่าน Remote HalloweenFunc:Deposit เป็นการยืนยันเข้าเซิร์ฟเวอร์
+    local hf = ReplicatedStorage:FindFirstChild("Halloween") and ReplicatedStorage.Halloween:FindFirstChild("HalloweenFunc")
+    if hf then
+        local s, res = pcall(function() return hf:InvokeServer("Deposit") end)
+        if s and res and res.ok then
+            success = true
+            local bankTotal = res.state and res.state.bank or 0
+            Notify("🎉 สำเร็จ!", string.format("เทแคนดี้ลงบ่อเข้าคลังเรียบร้อย! (ยอดในคลัง: %s เม็ด)", tostring(bankTotal)), "", 3.5)
+            if res.state then
+                Hub.HalloweenState = res.state
+            else
+                FetchHalloweenState()
+            end
+        else
+            task.wait(0.3)
+            local heldNow = tonumber(LocalPlayer:GetAttribute("CandyHeld")) or 0
+            if heldNow == 0 then
+                success = true
+                FetchHalloweenState()
+                Notify("🎉 สำเร็จ!", "เทแคนดี้ลงบ่อเข้าคลังเรียบร้อย!", "", 3.5)
+            else
+                errReason = (res and res.msg) or (not s and tostring(res)) or "ไม่สามารถเทแคนดี้ได้"
+            end
+        end
+    else
+        task.wait(0.3)
+        local heldNow = tonumber(LocalPlayer:GetAttribute("CandyHeld")) or 0
+        if heldNow == 0 then
+            success = true
+            FetchHalloweenState()
+            Notify("🎉 สำเร็จ!", "เทแคนดี้ลงบ่อเข้าคลังเรียบร้อย!", "", 3.5)
+        end
+    end
+
+    if not success and not silent then
+        Notify("⚠️ ฝากแคนดี้ไม่สำเร็จ", tostring(errReason), "", 3)
+    end
+
+    cleanup()
+    return success
+end
+
+-- วาร์ปไปหาบอสฮาโลวีนที่เกิดอยู่
+local function TeleportToActiveHalloweenBoss()
+    local hw = Workspace:FindFirstChild("Helloween")
+    local monsters = hw and hw:FindFirstChild("Monsters")
+    if not monsters then
+        Notify("บอสฮาโลวีน", "ไม่พบโฟลเดอร์มอนสเตอร์ใน Workspace", "", 3)
+        return false
+    end
+
+    local hrp = GetHRP()
+    if not hrp then return false end
+
+    for _, m in ipairs(monsters:GetChildren()) do
+        if m:IsA("Model") and (m.Name:find("Boss") or m.Name:find("Pad") or m.Name:find("กระสือ")) then
+            local part = m:FindFirstChild("HumanoidRootPart") or m.PrimaryPart or m:FindFirstChildWhichIsA("BasePart")
+            local hum = m:FindFirstChildOfClass("Humanoid")
+            if part and hum and hum.Health > 0 then
+                hrp.AssemblyLinearVelocity = Vector3.zero
+                hrp.AssemblyAngularVelocity = Vector3.zero
+                hrp.CFrame = part.CFrame + Vector3.new(0, 4, 6)
+                Notify("บอสฮาโลวีน", "วาร์ปมาหาบอส: " .. m.Name .. " เรียบร้อย!", "", 3)
+                return true
+            end
+        end
+    end
+    Notify("บอสฮาโลวีน", "ขณะนี้ยังไม่มีบอสฮาโลวีนเกิดในเซิร์ฟเวอร์", "", 3)
+    return false
+end
+
+--------------------------------------------------------------
+-- 🎃 สร้างเมนูใน TABS.HALLOWEEN (อีเวนต์ฮาโลวีน)
+--------------------------------------------------------------
+do
+FetchHalloweenState()
+local initHwTitle = "🎃 อีเวนต์ฮาโลวีน (Halloween Event)"
+local initHwDesc = GetHalloweenStatusString()
+
+local HalloweenStatusParagraph = Tabs.Halloween:AddParagraph({
+    Title = initHwTitle,
+    Content = initHwDesc
+})
+
+task.spawn(function()
+    while State.Running and _G._KrakenScriptId == MY_SCRIPT_ID do
+        task.wait(3.0)
+        pcall(function()
+            FetchHalloweenState()
+            if HalloweenStatusParagraph and type(HalloweenStatusParagraph.SetDesc) == "function" then
+                HalloweenStatusParagraph:SetDesc(GetHalloweenStatusString())
+            end
+        end)
+    end
+end)
+
+Tabs.Halloween:AddSection("👻 ฟาร์มฮาโลวีนอัตโนมัติ (Auto Farm)")
+
+local TrickOrTreatToggle = Tabs.Halloween:AddToggle("AutoTrickOrTreatOn", {
+    Title = "🚪 เคาะประตูบ้านอัตโนมัติ (Auto Trick or Treat)",
+    Description = "เดินไปเคาะประตูบ้านที่พร้อมอัตโนมัติ สลับถือถังแคนดี้และรับรางวัล",
+    Default = false
+})
+TrickOrTreatToggle:OnChanged(function()
+    State.AutoTrickOrTreat = Options.AutoTrickOrTreatOn.Value
+    if not State.AutoTrickOrTreat then
+        ClearTargetESP()
+        Notify("ฮาโลวีน", "ปิดระบบเคาะประตูอัตโนมัติแล้ว", "", 2.5)
+    else
+        Notify("ฮาโลวีน", "เริ่มระบบเคาะประตู Trick or Treat อัตโนมัติ!", "", 3)
+    end
+end)
+
+local DigGravesToggle = Tabs.Halloween:AddToggle("AutoDigGravesOn", {
+    Title = "⚰️ ขุด/ทุบหลุมศพอัตโนมัติ (Auto Dig Graveyard)",
+    Description = "เดินไปจุดหลุมศพในสุสานแล้วกดขุดหรือทุบอัตโนมัติ",
+    Default = false
+})
+DigGravesToggle:OnChanged(function()
+    State.AutoDigGraves = Options.AutoDigGravesOn.Value
+    if not State.AutoDigGraves then
+        ClearTargetESP()
+        Notify("ฮาโลวีน", "ปิดระบบขุดหลุมศพอัตโนมัติแล้ว", "", 2.5)
+    else
+        Notify("ฮาโลวีน", "เริ่มระบบขุด/ทุบหลุมศพอัตโนมัติ!", "", 3)
+    end
+end)
+
+local AutoQTEGraveToggle = Tabs.Halloween:AddToggle("AutoGraveQTEOn", {
+    Title = "⚡ ชนะผีหลุมศพทันที (Auto QTE Win & Fast Drag)",
+    Description = "ส่งสัญญาณชนะ QTE ผีทันที และลากหลุมศพอย่างรวดเร็วไม่ต้องกดเอง",
+    Default = true
+})
+AutoQTEGraveToggle:OnChanged(function()
+    State.AutoGraveQTE = Options.AutoGraveQTEOn.Value
+end)
+
+local VacuumLootToggle = Tabs.Halloween:AddToggle("AutoVacuumLootOn", {
+    Title = "🧲 ดูดเก็บของดรอปหลุมศพอัตโนมัติ (Auto Vacuum Loot)",
+    Description = "ส่งคำสั่งเก็บของและแคนดี้ที่หล่นจากหลุมศพเข้าตัวทันที",
+    Default = true
+})
+VacuumLootToggle:OnChanged(function()
+    State.AutoVacuumLoot = Options.AutoVacuumLootOn.Value
+end)
+
+local AutoJoin2hToggle = Tabs.Halloween:AddToggle("AutoJoinEvent2hOn", {
+    Title = "⚔️ เข้าร่วมอีเวนต์ 2 ชม. อัตโนมัติ (Auto Join Event)",
+    Description = "เมื่อมีอีเวนต์ทุกๆ 2 ชั่วโมงเปิดรับสมัคร จะกดเข้าร่วมให้อัตโนมัติ",
+    Default = true
+})
+AutoJoin2hToggle:OnChanged(function()
+    State.AutoJoinEvent2h = Options.AutoJoinEvent2hOn.Value
+end)
+
+Tabs.Halloween:AddSection("🎁 ระบบเควสต์ & คลังแคนดี้")
+
+local AutoGetBucketToggle = Tabs.Halloween:AddToggle("AutoGetBucketOn", {
+    Title = "🎒 วิ่งไปเอาถังแคนดี้อัตโนมัติ (Auto Get Candy Bucket)",
+    Description = "ตรวจสอบถังแคนดี้ในตัว หากยังไม่มีหรือถังหลุดมือ จะวิ่งไปซื้อ/รับที่ผีจอมขนมอัตโนมัติ",
+    Default = false
+})
+AutoGetBucketToggle:OnChanged(function()
+    State.AutoGetBucket = Options.AutoGetBucketOn.Value
+    if State.AutoGetBucket then
+        Notify("🎃 ถังแคนดี้", "เปิดระบบออโต้ไปเอาถังแคนดี้แล้ว", "", 2.5)
+        task.spawn(AutoGetCandyBucket)
+    else
+        Notify("🎃 ถังแคนดี้", "ปิดระบบออโต้ไปเอาถังแคนดี้แล้ว", "", 2.5)
+    end
+end)
+
+local AutoDepositToggle = Tabs.Halloween:AddToggle("AutoDepositCandyOn", {
+    Title = "📥 ฝากแคนดี้ทั้งหมดเข้าคลังอัตโนมัติ (Auto Deposit Candy)",
+    Description = "เมื่อแคนดี้ในถังเต็ม (หรือกดเปิด) จะเดินทางไปฝากเข้าคลังที่ผีจอมขนมอัตโนมัติ",
+    Default = false
+})
+AutoDepositToggle:OnChanged(function()
+    State.AutoDepositCandy = Options.AutoDepositCandyOn.Value
+    if State.AutoDepositCandy then
+        local held = tonumber(LocalPlayer:GetAttribute("CandyHeld")) or 0
+        if held <= 0 and Hub.HalloweenState and Hub.HalloweenState.held then
+            held = Hub.HalloweenState.held
+        end
+        if held > 0 then
+            Notify("🎃 ฝากแคนดี้", string.format("เปิดระบบออโต้แล้ว! (มีแคนดี้ %d เม็ด) กำลังนำไปเทลงบ่อ...", held), "", 3)
+            task.spawn(function()
+                DepositAllCandy(false)
+            end)
+        else
+            Notify("🎃 ฝากแคนดี้", "เปิดระบบออโต้แล้ว! เมื่อแคนดี้เต็มถัง ระบบจะวิ่งไปเทลงบ่อให้อัตโนมัติ", "", 3.5)
+        end
+    else
+        Notify("🎃 ฝากแคนดี้", "ปิดระบบออโต้ฝากแคนดี้แล้ว", "", 2.5)
+    end
+end)
+
+local AutoClaimQuestsToggle = Tabs.Halloween:AddToggle("AutoClaimQuestsOn", {
+    Title = "🎁 กดรับรางวัลเควสต์ทั้งหมดอัตโนมัติ (Auto Claim Quests)",
+    Description = "สแกนเควสต์และกดเคลมของรางวัลเควสต์ฮาโลวีนที่ทำเสร็จแล้วให้อัตโนมัติ",
+    Default = false
+})
+AutoClaimQuestsToggle:OnChanged(function()
+    State.AutoClaimQuests = Options.AutoClaimQuestsOn.Value
+    if State.AutoClaimQuests then
+        Notify("🎃 เควสต์ฮาโลวีน", "เปิดระบบออโต้รับรางวัลเควสต์ฮาโลวีนแล้ว", "", 2.5)
+        task.spawn(function() ClaimAllHalloweenQuests(false) end)
+    else
+        Notify("🎃 เควสต์ฮาโลวีน", "ปิดระบบออโต้รับรางวัลเควสต์ฮาโลวีนแล้ว", "", 2.5)
+    end
+end)
+
+local AutoCollectP320Toggle = Tabs.Halloween:AddToggle("AutoCollectP320On", {
+    Title = "🔫 วาร์ปเก็บชิ้นส่วน P320 ทั้ง 4 ชิ้นอัตโนมัติ (Auto Collect P320)",
+    Description = "วนลูปเก็บชิ้นส่วนปืนอาถรรพ์ P320 (Barrel, Slide, Mag, H) ให้ครบทั้ง 4 ชิ้นอัตโนมัติ",
+    Default = false
+})
+AutoCollectP320Toggle:OnChanged(function()
+    State.AutoCollectP320 = Options.AutoCollectP320On.Value
+    if State.AutoCollectP320 then
+        Notify("🎃 เควสต์ P320", "เปิดระบบออโต้เก็บชิ้นส่วน P320 แล้ว", "", 2.5)
+        task.spawn(function() CollectAllP320Parts(false) end)
+    else
+        Notify("🎃 เควสต์ P320", "ปิดระบบออโต้เก็บชิ้นส่วน P320 แล้ว", "", 2.5)
+    end
+end)
+
+-- 🔄 ลูปออโต้ไปเอาถังแคนดี้
+task.spawn(function()
+    while State.Running and _G._KrakenScriptId == MY_SCRIPT_ID do
+        task.wait(3.0)
+        if State.AutoGetBucket and not State.IsGettingBucket and not State.IsDepositing then
+            local hasTool, tool = EquipCandyContainerTool()
+            if not hasTool then
+                AutoGetCandyBucket()
+                task.wait(2.5)
+            end
+        end
+    end
+end)
+
+-- 🔄 ลูปออโต้ฝากแคนดี้เข้าคลัง
+task.spawn(function()
+    while State.Running and _G._KrakenScriptId == MY_SCRIPT_ID do
+        task.wait(2.5)
+        if State.AutoDepositCandy and not State.IsDepositing and not State.IsGettingBucket then
+            local held = tonumber(LocalPlayer:GetAttribute("CandyHeld")) or 0
+            local cap = tonumber(LocalPlayer:GetAttribute("CandyCap")) or 50
+            if held <= 0 and Hub.HalloweenState and Hub.HalloweenState.held then
+                held = Hub.HalloweenState.held
+                cap = Hub.HalloweenState.cap or 50
+            end
+            if held > 0 and (held >= cap or held >= (cap - 2)) then
+                Notify("🎃 ออโต้ฝากแคนดี้", string.format("แคนดี้เต็มถัง (%d/%d)! กำลังไปฝากที่ผีจอมขนม...", held, cap), "", 3.5)
+                DepositAllCandy(false)
+                task.wait(2.5)
+            end
+        end
+    end
+end)
+
+-- 🔄 ลูปออโต้รับรางวัลเควสต์ฮาโลวีน
+task.spawn(function()
+    while State.Running and _G._KrakenScriptId == MY_SCRIPT_ID do
+        task.wait(4.0)
+        if State.AutoClaimQuests then
+            ClaimAllHalloweenQuests(true)
+        end
+    end
+end)
+
+-- 🔄 ลูปออโต้เก็บชิ้นส่วน P320
+task.spawn(function()
+    while State.Running and _G._KrakenScriptId == MY_SCRIPT_ID do
+        task.wait(3.5)
+        if State.AutoCollectP320 then
+            local pCount = CollectAllP320Parts(true)
+            if pCount == 0 then
+                local p320Folder = Workspace:FindFirstChild("Quest") and Workspace.Quest:FindFirstChild("Quest Option") and Workspace.Quest["Quest Option"]:FindFirstChild("P320")
+                local hasUncollected = false
+                if p320Folder then
+                    for _, pName in ipairs({"Barrel", "Slide", "Mag", "H"}) do
+                        local obj = p320Folder:FindFirstChild(pName)
+                        local pr = obj and obj:FindFirstChildWhichIsA("ProximityPrompt", true)
+                        if pr and pr.Enabled then hasUncollected = true break end
+                    end
+                end
+                if not hasUncollected then
+                    State.AutoCollectP320 = false
+                    if Options.AutoCollectP320On then Options.AutoCollectP320On:SetValue(false) end
+                    Notify("🔫 เควสต์ P320", "เก็บชิ้นส่วน P320 ครบแล้ว! ปิดระบบออโต้", "", 4)
+                end
+            end
+            task.wait(4.0)
+        end
+    end
+end)
+
+Tabs.Halloween:AddSection("👁️ มองทะลุฮาโลวีน (Halloween ESP)")
+
+local HwMonstersESPToggle = Tabs.Halloween:AddToggle("HalloweenMonstersESPOn", {
+    Title = "👾 ESP มอนสเตอร์ & บอสฮาโลวีน",
+    Description = "แสดงชื่อ, หลอดเลือด และตำแหน่งมอนสเตอร์ฮาโลวีนทะลุกำแพง",
+    Default = false
+})
+HwMonstersESPToggle:OnChanged(function()
+    State.HalloweenMonstersESP = Options.HalloweenMonstersESPOn.Value
+    if not State.HalloweenMonstersESP then
+        ClearHalloweenESP()
+    end
+end)
+
+local HwP320ESPToggle = Tabs.Halloween:AddToggle("HalloweenP320ESPOn", {
+    Title = "🔫 ESP ชิ้นส่วนปืนอาถรรพ์ P320",
+    Description = "แสดงกล่องสีทองทะลุกำแพงตรงจุดซ่อนชิ้นส่วน P320 ทั้ง 4 ชิ้น",
+    Default = false
+})
+HwP320ESPToggle:OnChanged(function()
+    State.HalloweenP320ESP = Options.HalloweenP320ESPOn.Value
+    if not State.HalloweenP320ESP then
+        ClearHalloweenESP()
+    end
+end)
+
+Tabs.Halloween:AddSection("⚡ เทเลพอร์ตฮาโลวีน (Halloween Teleports)")
+
+Tabs.Halloween:AddButton({
+    Title = "🍬 วาร์ปไป ผีจอมขนม (Main / ฝากแคนดี้)",
+    Callback = function()
+        local hrp = GetHRP()
+        if hrp then
+            hrp.AssemblyLinearVelocity = Vector3.zero
+            hrp.CFrame = CFrame.new(2122, 5, -345)
+            Notify("วาร์ป", "มาถึงผีจอมขนมแล้ว!", "", 2.5)
+        end
+    end
+})
+
+Tabs.Halloween:AddButton({
+    Title = "🔫 วาร์ปไป ผีช่างปืน (GhostTopHat / เควสต์ P320)",
+    Callback = function()
+        local hrp = GetHRP()
+        if hrp then
+            hrp.AssemblyLinearVelocity = Vector3.zero
+            hrp.CFrame = CFrame.new(2451, 8, 35)
+            Notify("วาร์ป", "มาถึงผีช่างปืนแล้ว!", "", 2.5)
+        end
+    end
+})
+
+Tabs.Halloween:AddButton({
+    Title = "👹 วาร์ปไป ผีล่าอสูร (Ghost2 / เควสต์ล่ามอน)",
+    Callback = function()
+        local hrp = GetHRP()
+        if hrp then
+            hrp.AssemblyLinearVelocity = Vector3.zero
+            hrp.CFrame = CFrame.new(2226, 6, -225)
+            Notify("วาร์ป", "มาถึงผีล่าอสูรแล้ว!", "", 2.5)
+        end
+    end
+})
+
+Tabs.Halloween:AddButton({
+    Title = "📜 วาร์ปไป ผีเฝ้ายันต์ (Ghost1 / เควสต์ผ้ายันต์)",
+    Callback = function()
+        local hrp = GetHRP()
+        if hrp then
+            hrp.AssemblyLinearVelocity = Vector3.zero
+            hrp.CFrame = CFrame.new(2493, 9, -1372)
+            Notify("วาร์ป", "มาถึงผีเฝ้ายันต์แล้ว!", "", 2.5)
+        end
+    end
+})
+
+Tabs.Halloween:AddButton({
+    Title = "⚰️ วาร์ปไป โซนหลุมศพ (Graveyard)",
+    Callback = function()
+        local hrp = GetHRP()
+        if hrp then
+            hrp.AssemblyLinearVelocity = Vector3.zero
+            hrp.CFrame = CFrame.new(2145, 4, -425)
+            Notify("วาร์ป", "มาถึงโซนสุสานหลุมศพแล้ว!", "", 2.5)
+        end
+    end
+})
+
+Tabs.Halloween:AddButton({
+    Title = "👹 วาร์ปไป หาบอสฮาโลวีนที่เกิดอยู่",
+    Description = "ค้นหาบอสฮาโลวีน (ผีเปรต/กระสือ/หุ่นไล่กา) บนแมพและวาร์ปไปหาทันที",
+    Callback = function()
+        TeleportToActiveHalloweenBoss()
+    end
+})
+
+Tabs.Halloween:AddSection("🎯 ระบบต่อสู้ฮาโลวีน")
+
+local SilentAimHwToggle = Tabs.Halloween:AddToggle("SilentAimHalloweenOn", {
+    Title = "🎯 Silent Aim ล็อกเป้ามอนสเตอร์ฮาโลวีน",
+    Description = "วิถีกระสุนปืนจะเลี้ยวไปล็อกหัวมอนสเตอร์และบอสฮาโลวีนอัตโนมัติ",
+    Default = true
+})
+SilentAimHwToggle:OnChanged(function()
+    State.SilentAimHalloween = Options.SilentAimHalloweenOn.Value
+end)
+end
 
 --------------------------------------------------------------
 -- 🛒 สร้างเมนูใน TABS.MERCHANT (พ่อค้าพเนจร)
 --------------------------------------------------------------
+do
 local initMerchantTitle, initMerchantDesc = GetMerchantStatusDisplay()
 MerchantStatusParagraph = Tabs.Merchant:AddParagraph({
     Title = initMerchantTitle,
@@ -7591,12 +9450,30 @@ Tabs.Merchant:AddButton({
         Notify("พ่อค้าพเนจร", "ซิงค์เวลาเซิร์ฟเวอร์สำเร็จ!", "", 2.5)
     end
 })
+end
 
 -- [แท็บ 2: ตัวละคร]
+do
 Tabs.Player:AddParagraph({
     Title = "🏃 ระบบปรับแต่งตัวละคร & Visuals",
-    Content = "Speed, Jump, Noclip, Fly, InfJump และมองทะลุ (ESP)"
+    Content = "Speed, InfStamina, Jump, Fly, InfJump และมองทะลุ (ESP)"
 })
+
+local InfStaminaToggle = Tabs.Player:AddToggle("InfStaminaOn", {
+    Title = "🫁 วิ่งไม่เหนื่อย (Infinite Stamina)",
+    Description = "สเตมิน่าเต็ม 100 ตลอดเวลา วิ่งและกระโดดได้ต่อเนื่องไม่เหนื่อยหอบ (Drain Rate = 0)",
+    Default = true
+})
+InfStaminaToggle:OnChanged(function()
+    State.InfStamina = Options.InfStaminaOn.Value
+    SetInfiniteStaminaState(State.InfStamina)
+end)
+if State.InfStamina then
+    task.spawn(function()
+        task.wait(0.5)
+        SetInfiniteStaminaState(true)
+    end)
+end
 
 local SpeedToggle = Tabs.Player:AddToggle("SpeedOn", { Title = "⚡ วิ่งไว (Speed Hack)", Default = false })
 SpeedToggle:OnChanged(function()
@@ -7618,31 +9495,22 @@ SpeedSlider:OnChanged(function()
     State.SpeedValue = Options.SpeedVal.Value
 end)
 
-local NoclipToggle = Tabs.Player:AddToggle("NoclipOn", { Title = "👻 เดินทะลุกำแพง (Noclip)", Default = false })
-NoclipToggle:OnChanged(function()
-    State.Noclip = Options.NoclipOn.Value
-    if not State.Noclip then
-        pcall(function()
-            local char = LocalPlayer.Character
-            if char then
-                for _, part in ipairs(char:GetChildren()) do
-                    if part:IsA("BasePart") then
-                        if part.Name == "Torso" or part.Name == "Head" then
-                            part.CanCollide = true
-                        else
-                            part.CanCollide = false
-                        end
-                    end
-                end
-            end
-        end)
-    end
-end)
-
 local FlyToggle = Tabs.Player:AddToggle("FlyOn", { Title = "🚀 บินอิสระ (Fly Hack)", Default = false })
 FlyToggle:OnChanged(function()
     State.Fly = Options.FlyOn.Value
     if State.Fly then StartFly() else StopFly() end
+end)
+
+local FlySpeedSlider = Tabs.Player:AddSlider("FlySpeedVal", {
+    Title = "🚀 ความเร็วการบิน (Fly Speed)",
+    Description = "ปรับระดับความเร็วขณะบินให้ลื่นไหลและเสถียร (ค่าเริ่มต้น: 50)",
+    Default = State.FlySpeed or 50,
+    Min = 10,
+    Max = 250,
+    Rounding = 0
+})
+FlySpeedSlider:OnChanged(function()
+    State.FlySpeed = Options.FlySpeedVal.Value
 end)
 
 local InfJumpToggle = Tabs.Player:AddToggle("InfJumpOn", { Title = "♾️ กระโดดไม่จำกัด", Default = false })
@@ -7781,6 +9649,15 @@ HitChanceSlider:OnChanged(function()
     State.SilentHitChance = Options.HitChanceVal.Value
 end)
 
+local TeamCheckToggle = Tabs.Combat:AddToggle("SilentTeamCheckOn", {
+    Title = "🛡️ ไม่ยิงฝั่งตัวเอง (Team / School Check)",
+    Description = "ป้องกันกระสุนดูดเข้าเพื่อนร่วมทีมหรือคนในสถาบันเดียวกัน 100%",
+    Default = true
+})
+TeamCheckToggle:OnChanged(function()
+    State.SilentTeamCheck = Options.SilentTeamCheckOn.Value
+end)
+
 local WallCheckToggle = Tabs.Combat:AddToggle("WallCheckOn", {
     Title = "🧱 เช็คกำแพง (Wall Check)",
     Description = "ไม่ยิงล็อคเป้าหมายที่อยู่หลังกำแพงหรือสิ่งกีดขวาง",
@@ -7851,8 +9728,34 @@ end)
 -- [แท็บ 4: ตั้งค่า]
 Tabs.Settings:AddParagraph({
     Title = "⚙️ KrakenHub v1.0",
-    Content = "Fluent Edition (100% Anti-Kick Bypass Pro)\nกดปุ่ม K หรือ Right Control เพื่อเปิด/ปิดหน้าต่าง"
+    Content = "Fluent Edition (100% Anti-Kick Bypass Pro)\nกดปุ่มคีย์ลัด หรือคลิกปุ่มลอยสีแดง เพื่อเปิด/ปิดหน้าต่าง"
 })
+
+Tabs.Settings:AddSection("⌨️ ระบบคีย์ลัดเปิด/ปิด (Keybind Settings)")
+
+local MenuKeybindElement = Tabs.Settings:AddKeybind("MenuToggleKey", {
+    Title = "🎛️ คีย์ลัดเปิด/ปิดหน้าต่างเมนู",
+    Description = "คลิกที่ช่องเพื่อกดปุ่มคีย์ลัดใหม่บนคีย์บอร์ดที่ต้องการใช้ (ค่าเริ่มต้น: Right Control หรือ K)",
+    Default = Enum.KeyCode.RightControl,
+    ChangedCallback = function(newKey)
+        Window:SetKeybind(newKey)
+        State.MenuKeybind = newKey
+        local kName = (typeof(newKey) == "EnumItem" and newKey.Name) or tostring(newKey)
+        Notify("ตั้งค่าคีย์ลัด", "เปลี่ยนปุ่มเปิด/ปิดเมนูเป็น: [" .. kName .. "]", "", 3)
+    end
+})
+
+local FloatingBtnToggle = Tabs.Settings:AddToggle("ShowFloatingButtonOn", {
+    Title = "🔘 แสดงปุ่มลอยหน้าจอ (Floating Button)",
+    Description = "เปิด/ปิด การแสดงผลปุ่มลอยสีแดงสำหรับเปิด/ปิดเมนูบนหน้าจอ",
+    Default = true
+})
+FloatingBtnToggle:OnChanged(function()
+    State.ShowFloatingButton = Options.ShowFloatingButtonOn.Value
+    if Hub.ToggleButtonGui then
+        Hub.ToggleButtonGui.Enabled = State.ShowFloatingButton
+    end
+end)
 
 Tabs.Settings:AddSection("💡 การแสดงผล & แสงสว่าง (Visuals & Lighting)")
 
@@ -7871,6 +9774,7 @@ FullBrightToggle:OnChanged(function()
         Notify("การแสดงผล", "คืนค่าแสงสว่างเริ่มต้นของเกมแล้ว", "", 2.5)
     end
 end)
+end
 
 Tabs.Settings:AddSection("⚠️ ควบคุมสคริปต์")
 
@@ -7913,11 +9817,26 @@ function Hub.Unload()
     for _, obj in pairs(Hub.ESPObjects) do pcall(function() obj:Destroy() end) end
     ClearAllPlayerESP()
     ClearMerchantESP()
+    SetInfiniteStaminaState(false)
     if State.FullBright then
         RestoreLighting()
     end
     local hum = GetHuman()
     if hum then hum.WalkSpeed = NORMAL_WALK_SPEED; hum.JumpPower = 35 end
+    pcall(function()
+        local char = LocalPlayer.Character
+        if char then
+            for _, part in ipairs(char:GetChildren()) do
+                if part:IsA("BasePart") then
+                    if part.Name == "Torso" or part.Name == "Head" then
+                        part.CanCollide = true
+                    else
+                        part.CanCollide = false
+                    end
+                end
+            end
+        end
+    end)
     if Hub.ToggleButtonGui then
         pcall(function() Hub.ToggleButtonGui:Destroy() end)
     end
@@ -7953,3 +9872,4 @@ end)
 Window:SelectTab(1)
 
 Notify("KrakenHub v1.0", "โหลดสำเร็จ! สไตล์ MacLib UI", "กดปุ่ม K หรือ Right Ctrl เพื่อเปิด/ปิดหน้าต่าง", 4)
+end
