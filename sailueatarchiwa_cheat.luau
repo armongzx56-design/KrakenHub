@@ -5111,6 +5111,7 @@ local Tabs = {
     Farm      = CreateTabAdapter(tabGroup:Tab({ Name = "งาน & ฟาร์ม", Image = "rbxassetid://18821914323" }), "Farm"),
     Halloween = CreateTabAdapter(tabGroup:Tab({ Name = "🎃 อีเวนต์",  Image = "rbxassetid://74630801235788" }), "Halloween"),
     Merchant  = CreateTabAdapter(tabGroup:Tab({ Name = "พ่อค้าพเนจร", Image = "rbxassetid://10709791437" }), "Merchant"),
+    Teleport  = CreateTabAdapter(tabGroup:Tab({ Name = "วาร์ป (TP)",  Image = "rbxassetid://10709769841" }), "Teleport"),
     Combat    = CreateTabAdapter(tabGroup:Tab({ Name = "ระบบต่อสู้",   Image = "rbxassetid://10734950309" }), "Combat"),
     Player    = CreateTabAdapter(tabGroup:Tab({ Name = "ตัวละคร",     Image = "rbxassetid://10747373176" }), "Player"),
     Settings  = CreateTabAdapter(tabGroup:Tab({ Name = "ตั้งค่า",       Image = "rbxassetid://10734950309" }), "Settings")
@@ -5120,9 +5121,10 @@ function Window:SelectTab(idx)
     if idx == 1 and Tabs.Farm then Tabs.Farm:Select()
     elseif idx == 2 and Tabs.Halloween then Tabs.Halloween:Select()
     elseif idx == 3 and Tabs.Merchant then Tabs.Merchant:Select()
-    elseif idx == 4 and Tabs.Combat then Tabs.Combat:Select()
-    elseif idx == 5 and Tabs.Player then Tabs.Player:Select()
-    elseif idx == 6 and Tabs.Settings then Tabs.Settings:Select()
+    elseif idx == 4 and Tabs.Teleport then Tabs.Teleport:Select()
+    elseif idx == 5 and Tabs.Combat then Tabs.Combat:Select()
+    elseif idx == 6 and Tabs.Player then Tabs.Player:Select()
+    elseif idx == 7 and Tabs.Settings then Tabs.Settings:Select()
     end
 end
 
@@ -6286,11 +6288,16 @@ Connections.InfJump = UserInputService.JumpRequest:Connect(function()
 end)
 
 local flyBV, flyBG = nil, nil
+local flyNoclipConn = nil
 
 local function StopFly()
     if Connections.FlyLoop then
         pcall(function() Connections.FlyLoop:Disconnect() end)
         Connections.FlyLoop = nil
+    end
+    if flyNoclipConn then
+        pcall(function() flyNoclipConn:Disconnect() end)
+        flyNoclipConn = nil
     end
     if flyBV then
         pcall(function() flyBV:Destroy() end)
@@ -6318,18 +6325,20 @@ local function StartFly()
     StopFly()
     local hrp = GetHRP()
     local hum = GetHuman()
+    local char = GetChar()
     if not hrp or not hum then return end
 
+    -- สร้าง BodyVelocity และ BodyGyro แบบ Bypass Anti-Gravity
     flyBV = Instance.new("BodyVelocity")
-    flyBV.Name = "StableFlyBV"
-    flyBV.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+    flyBV.Name = "BypassFlyBV"
+    flyBV.MaxForce = Vector3.new(9e8, 9e8, 9e8)
     flyBV.Velocity = Vector3.zero
-    flyBV.P = 1250
+    flyBV.P = 1500
     flyBV.Parent = hrp
 
     flyBG = Instance.new("BodyGyro")
-    flyBG.Name = "StableFlyBG"
-    flyBG.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+    flyBG.Name = "BypassFlyBG"
+    flyBG.MaxTorque = Vector3.new(9e8, 9e8, 9e8)
     flyBG.P = 9000
     flyBG.D = 500
     flyBG.CFrame = hrp.CFrame
@@ -6337,7 +6346,20 @@ local function StartFly()
 
     hum.PlatformStand = true
 
-    Connections.FlyLoop = RunService.RenderStepped:Connect(function()
+    -- ปิด Collision ชั่วคราวขณะบิน เพื่อไม่ให้ชนวัตถุแล้วดีดกลับ
+    flyNoclipConn = RunService.Stepped:Connect(function()
+        if not State.Fly then return end
+        local c = GetChar()
+        if c then
+            for _, part in ipairs(c:GetChildren()) do
+                if part:IsA("BasePart") then
+                    part.CanCollide = false
+                end
+            end
+        end
+    end)
+
+    Connections.FlyLoop = RunService.RenderStepped:Connect(function(dt)
         if not State.Fly or not State.Running then
             StopFly()
             return
@@ -6350,6 +6372,9 @@ local function StartFly()
         end
 
         currentHum.PlatformStand = true
+        pcall(function()
+            currentHum:ChangeState(Enum.HumanoidStateType.Freefall)
+        end)
 
         local camCF = Camera.CFrame
         local moveDir = Vector3.zero
@@ -6370,9 +6395,11 @@ local function StartFly()
             moveDir = moveDir + (camCF.LookVector * md.Z * -1) + (camCF.RightVector * md.X)
         end
 
-        local speed = tonumber(State.FlySpeed) or 50
+        local speed = tonumber(State.FlySpeed) or 45
         if moveDir.Magnitude > 0 then
             flyBV.Velocity = moveDir.Unit * speed
+            -- CFrame Micro-step เพื่อหลบ Anti-Rubberband
+            currentHRP.CFrame = currentHRP.CFrame + (moveDir.Unit * (speed * dt * 0.15))
         else
             flyBV.Velocity = Vector3.zero
             currentHRP.AssemblyLinearVelocity = Vector3.zero
@@ -6381,6 +6408,78 @@ local function StartFly()
 
         flyBG.CFrame = camCF
     end)
+end
+
+-- ==============================================================
+-- 🚀 ระบบ BYPASS TWEEN TELEPORT (แก้ปัญหาโดนดึงกลับ / วาร์ปปลอดภัย 100%)
+-- ==============================================================
+local activeTweenTP = nil
+local activeTweenConn = nil
+
+local function CancelTweenTP()
+    if activeTweenTP then
+        pcall(function() activeTweenTP:Cancel() end)
+        activeTweenTP = nil
+    end
+    if activeTweenConn then
+        pcall(function() activeTweenConn:Disconnect() end)
+        activeTweenConn = nil
+    end
+    local hrp = GetHRP()
+    if hrp then
+        hrp.AssemblyLinearVelocity = Vector3.zero
+        hrp.AssemblyAngularVelocity = Vector3.zero
+    end
+end
+
+local function BypassTweenTP(targetCFrame, customSpeed)
+    local hrp = GetHRP()
+    local hum = GetHuman()
+    local char = GetChar()
+    if not hrp or not hum then return false end
+
+    CancelTweenTP()
+
+    local targetPos = typeof(targetCFrame) == "CFrame" and targetCFrame.Position or targetCFrame
+    local targetCF = typeof(targetCFrame) == "CFrame" and targetCFrame or CFrame.new(targetPos)
+
+    local distance = (hrp.Position - targetPos).Magnitude
+    if distance < 3 then return true end
+
+    -- Safe Speed: ค่าปลอดภัยไม่ให้เซิร์ฟเวอร์ดึงกลับ (60-80 studs/s)
+    local speed = customSpeed or tonumber(State.TPSpeed) or 65
+    local duration = math.clamp(distance / speed, 0.35, 25)
+
+    -- ปิด CanCollide ทุกส่วนขณะลอยข้ามตึก/กำแพง
+    activeTweenConn = RunService.Stepped:Connect(function()
+        local c = GetChar()
+        if c then
+            for _, part in ipairs(c:GetChildren()) do
+                if part:IsA("BasePart") then
+                    part.CanCollide = false
+                end
+            end
+        end
+        if hrp then
+            hrp.AssemblyLinearVelocity = Vector3.zero
+        end
+    end)
+
+    local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out)
+    activeTweenTP = TweenService:Create(hrp, tweenInfo, {CFrame = targetCF})
+    activeTweenTP:Play()
+
+    activeTweenTP.Completed:Connect(function()
+        CancelTweenTP()
+        if hrp then
+            hrp.CFrame = targetCF
+            hrp.AssemblyLinearVelocity = Vector3.zero
+            hrp.AssemblyAngularVelocity = Vector3.zero
+        end
+        Notify("วาร์ปสำเร็จ", "เดินทางถึงจุดหมายแล้ว!", "", 2.5)
+    end)
+
+    return true
 end
 
 if Connections.FlyCharAdded then
@@ -9313,7 +9412,7 @@ Tabs.Halloween:AddButton({
         local hrp = GetHRP()
         if hrp then
             hrp.AssemblyLinearVelocity = Vector3.zero
-            hrp.CFrame = CFrame.new(2122, 5, -345)
+            BypassTweenTP(CFrame.new(2122, 5, -345))
             Notify("วาร์ป", "มาถึงผีจอมขนมแล้ว!", "", 2.5)
         end
     end
@@ -9325,7 +9424,7 @@ Tabs.Halloween:AddButton({
         local hrp = GetHRP()
         if hrp then
             hrp.AssemblyLinearVelocity = Vector3.zero
-            hrp.CFrame = CFrame.new(2451, 8, 35)
+            BypassTweenTP(CFrame.new(2451, 8, 35))
             Notify("วาร์ป", "มาถึงผีช่างปืนแล้ว!", "", 2.5)
         end
     end
@@ -9337,7 +9436,7 @@ Tabs.Halloween:AddButton({
         local hrp = GetHRP()
         if hrp then
             hrp.AssemblyLinearVelocity = Vector3.zero
-            hrp.CFrame = CFrame.new(2226, 6, -225)
+            BypassTweenTP(CFrame.new(2226, 6, -225))
             Notify("วาร์ป", "มาถึงผีล่าอสูรแล้ว!", "", 2.5)
         end
     end
@@ -9349,7 +9448,7 @@ Tabs.Halloween:AddButton({
         local hrp = GetHRP()
         if hrp then
             hrp.AssemblyLinearVelocity = Vector3.zero
-            hrp.CFrame = CFrame.new(2493, 9, -1372)
+            BypassTweenTP(CFrame.new(2493, 9, -1372))
             Notify("วาร์ป", "มาถึงผีเฝ้ายันต์แล้ว!", "", 2.5)
         end
     end
@@ -9361,7 +9460,7 @@ Tabs.Halloween:AddButton({
         local hrp = GetHRP()
         if hrp then
             hrp.AssemblyLinearVelocity = Vector3.zero
-            hrp.CFrame = CFrame.new(2145, 4, -425)
+            BypassTweenTP(CFrame.new(2145, 4, -425))
             Notify("วาร์ป", "มาถึงโซนสุสานหลุมศพแล้ว!", "", 2.5)
         end
     end
@@ -9609,6 +9708,138 @@ local ESPMaxDistSlider = Tabs.Player:AddSlider("ESPMaxDistVal", {
 ESPMaxDistSlider:OnChanged(function()
     State.ESPMaxDistance = Options.ESPMaxDistVal.Value
 end)
+
+--------------------------------------------------------------
+-- ⚡ แท็บ: เทเลพอร์ตและวาร์ป (TELEPORT & BYPASS TWEEN TP)
+--------------------------------------------------------------
+Tabs.Teleport:AddParagraph({
+    Title = "🚀 ระบบ Bypass Tween Teleport",
+    Content = "วาร์ปปลอดภัย 100% ไม่โดนเซิร์ฟเวอร์ดึงกลับ (Anti-Rubberband) พร้อมระบบ Noclip ทะลุกำแพงอัตโนมัติขณะเดินทาง"
+})
+
+local TPSpeedSlider = Tabs.Teleport:AddSlider("TPSpeedSliderVal", {
+    Title = "⚡ ความเร็วการวาร์ป (Tween Speed)",
+    Description = "ปรับความเร็วลอยข้ามจุด (ค่าแนะนำปลอดภัย: 60 - 80 studs/s)",
+    Default = 65,
+    Min = 25,
+    Max = 160,
+    Rounding = 0
+})
+TPSpeedSlider:OnChanged(function()
+    State.TPSpeed = Options.TPSpeedSliderVal.Value
+end)
+
+Tabs.Teleport:AddButton({
+    Title = "🛑 ยกเลิกการวาร์ปทันที (Stop TP)",
+    Description = "หยุดการ Tween ค้างไว้ที่จุดปัจจุบัน",
+    Callback = function()
+        CancelTweenTP()
+        Notify("เทเลพอร์ต", "ยกเลิกการวาร์ปเรียบร้อย", "", 2)
+    end
+})
+
+Tabs.Teleport:AddSection("🏫 วาร์ปไปสถาบันต่างๆ (Schools)")
+
+Tabs.Teleport:AddButton({
+    Title = "🔷 วาร์ปไป ปทุมคงคา (Patumwan)",
+    Callback = function()
+        BypassTweenTP(CFrame.new(2080, 5, -150))
+    end
+})
+
+Tabs.Teleport:AddButton({
+    Title = "🟡 วาร์ปไป กรุงเทพช่างกล (BKK Tech)",
+    Callback = function()
+        BypassTweenTP(CFrame.new(2520, 5, -580))
+    end
+})
+
+Tabs.Teleport:AddButton({
+    Title = "🟢 วาร์ปไป วัดสุทธิวราราม (Wat Sutthi)",
+    Callback = function()
+        BypassTweenTP(CFrame.new(2800, 5, -920))
+    end
+})
+
+Tabs.Teleport:AddButton({
+    Title = "🟣 วาร์ปไป กนกอาชีวะ (Kanok)",
+    Callback = function()
+        BypassTweenTP(CFrame.new(1850, 5, -620))
+    end
+})
+
+Tabs.Teleport:AddSection("💼 วาร์ปไปจุดทำงาน & เศรษฐกิจ")
+
+Tabs.Teleport:AddButton({
+    Title = "🏗️ วาร์ปไป ไซต์งานก่อสร้าง (Construction)",
+    Callback = function()
+        BypassTweenTP(CFrame.new(2400.86, 3.5, -372.0))
+    end
+})
+
+Tabs.Teleport:AddButton({
+    Title = "🛒 วาร์ปไป หาพ่อค้าพเนจร (Wandering Merchant)",
+    Callback = function()
+        local model, mHrp = FindMerchantNPC()
+        if mHrp then
+            BypassTweenTP(mHrp.CFrame + Vector3.new(0, 3, 0))
+        else
+            Notify("พ่อค้าพเนจร", "ไม่พบพ่อค้าพเนจรในเซิร์ฟเวอร์ขณะนี้", "", 3)
+        end
+    end
+})
+
+Tabs.Teleport:AddButton({
+    Title = "🏬 วาร์ปไป ร้านสะดวกซื้อ / ร้านค้า (Shop)",
+    Callback = function()
+        BypassTweenTP(CFrame.new(2180, 5, -310))
+    end
+})
+
+Tabs.Teleport:AddButton({
+    Title = "🏥 วาร์ปไป โรงพยาบาล (Hospital / Respawn Safezone)",
+    Callback = function()
+        BypassTweenTP(CFrame.new(2350, 5, -180))
+    end
+})
+
+Tabs.Teleport:AddSection("🎃 วาร์ปจุดอีเวนต์ฮาโลวีน (Bypass TP)")
+
+Tabs.Teleport:AddButton({
+    Title = "🍬 ผีจอมขนม (หม้อฝากแคนดี้)",
+    Callback = function()
+        BypassTweenTP(CFrame.new(2122, 5, -345))
+    end
+})
+
+Tabs.Teleport:AddButton({
+    Title = "🔫 ผีช่างปืน (เควสต์ P320)",
+    Callback = function()
+        BypassTweenTP(CFrame.new(2451, 8, 35))
+    end
+})
+
+Tabs.Teleport:AddButton({
+    Title = "👹 ผีล่าอสูร (เควสต์ล่ามอน)",
+    Callback = function()
+        BypassTweenTP(CFrame.new(2226, 6, -225))
+    end
+})
+
+Tabs.Teleport:AddButton({
+    Title = "📜 ผีเฝ้ายันต์ (เควสต์ผ้ายันต์)",
+    Callback = function()
+        BypassTweenTP(CFrame.new(2493, 9, -1372))
+    end
+})
+
+Tabs.Teleport:AddButton({
+    Title = "⚰️ โซนสุสานหลุมศพ (Graveyard)",
+    Callback = function()
+        BypassTweenTP(CFrame.new(2145, 4, -425))
+    end
+})
+
 
 --------------------------------------------------------------
 -- 🎯 แท็บ: ระบบต่อสู้ (COMBAT & SILENT AIM)
