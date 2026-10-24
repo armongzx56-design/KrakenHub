@@ -136,136 +136,357 @@ if savedKey and savedKey ~= "" then
 end
 
 -------------------------------------------------------------------------------
--- [ 3. UI Key System สวยหรู (เปิดเฉพาะตอนที่ยังไม่มีคีย์) ]
+-- [ 3. UI Key System สวยหรู โทน Dark มี Animation เคลื่อนไหว นุ่มนวล ]
 -------------------------------------------------------------------------------
 local CoreGui = game:GetService("CoreGui")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
 
 pcall(function() if CoreGui:FindFirstChild("KrakenKeyUI") then CoreGui.KrakenKeyUI:Destroy() end end)
 
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "KrakenKeyUI"
 ScreenGui.ResetOnSpawn = false
+ScreenGui.DisplayOrder = 999999
 ScreenGui.Parent = CoreGui
 
+local function Tween(obj, props, duration, style, dir)
+    duration = duration or 0.3
+    style = style or Enum.EasingStyle.Quart
+    dir = dir or Enum.EasingDirection.Out
+    local tween = TweenService:Create(obj, TweenInfo.new(duration, style, dir), props)
+    tween:Play()
+    return tween
+end
+
+-- เงา Glow แสงนีออนพื้นหลัง
+local GlowHalo = Instance.new("ImageLabel")
+GlowHalo.Name = "GlowHalo"
+GlowHalo.Size = UDim2.new(0, 500, 0, 360)
+GlowHalo.Position = UDim2.new(0.5, -250, 0.5, -180)
+GlowHalo.BackgroundTransparency = 1
+GlowHalo.Image = "rbxassetid://5028857084"
+GlowHalo.ImageColor3 = Color3.fromRGB(0, 160, 255)
+GlowHalo.ImageTransparency = 1
+GlowHalo.Parent = ScreenGui
+
+-- กล่องหน้าต่างหลัก (Dark Frame)
 local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 380, 0, 240)
-MainFrame.Position = UDim2.new(0.5, -190, 0.5, -120)
-MainFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 24)
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 420, 0, 275)
+MainFrame.Position = UDim2.new(0.5, -210, 0.5, -115)
+MainFrame.BackgroundColor3 = Color3.fromRGB(14, 15, 22)
+MainFrame.BackgroundTransparency = 1
 MainFrame.BorderSizePixel = 0
-MainFrame.ClipsDescendants = true
+MainFrame.ClipsDescendants = false
 MainFrame.Parent = ScreenGui
 
-local UICorner = Instance.new("UICorner", MainFrame)
-UICorner.CornerRadius = UDim.new(0, 10)
+local MainCorner = Instance.new("UICorner", MainFrame)
+MainCorner.CornerRadius = UDim.new(0, 14)
 
+-- ขอบนีออน Gradient
 local UIStroke = Instance.new("UIStroke", MainFrame)
-UIStroke.Color = Color3.fromRGB(0, 170, 255)
-UIStroke.Thickness = 1.5
+UIStroke.Color = Color3.fromRGB(35, 45, 70)
+UIStroke.Thickness = 1.3
+UIStroke.Transparency = 1
 
+local StrokeGradient = Instance.new("UIGradient", UIStroke)
+StrokeGradient.Color = ColorSequence.new{
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(0, 210, 255)),
+    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(35, 45, 75)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 140, 255))
+}
+StrokeGradient.Rotation = 45
+
+-- ระบบลากหน้าต่าง (Draggable Window)
+local dragging, dragInput, dragStart, startPos
+MainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = MainFrame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+MainFrame.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        local delta = input.Position - dragStart
+        local targetPos = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        Tween(MainFrame, {Position = targetPos}, 0.08, Enum.EasingStyle.Linear)
+        Tween(GlowHalo, {Position = UDim2.new(targetPos.X.Scale, targetPos.X.Offset - 40, targetPos.Y.Scale, targetPos.Y.Offset - 42)}, 0.08, Enum.EasingStyle.Linear)
+    end
+end)
+
+-- แถบสีด้านบนสุด
+local TopBar = Instance.new("Frame", MainFrame)
+TopBar.Size = UDim2.new(1, 0, 0, 3)
+TopBar.Position = UDim2.new(0, 0, 0, 0)
+TopBar.BorderSizePixel = 0
+TopBar.BackgroundColor3 = Color3.fromRGB(0, 180, 255)
+Instance.new("UICorner", TopBar).CornerRadius = UDim.new(0, 3)
+
+local TopGradient = Instance.new("UIGradient", TopBar)
+TopGradient.Color = ColorSequence.new{
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(0, 255, 200)),
+    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(0, 160, 255)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(120, 50, 255))
+}
+
+-- Title & Subtitle
 local Title = Instance.new("TextLabel", MainFrame)
-Title.Size = UDim2.new(1, 0, 0, 40)
-Title.Text = "🌊 KRAKENHUB KEY SYSTEM"
-Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.Size = UDim2.new(1, -48, 0, 32)
+Title.Position = UDim2.new(0, 24, 0, 16)
+Title.Text = "KRAKENHUB  •  KEY SYSTEM"
+Title.TextColor3 = Color3.fromRGB(245, 247, 255)
 Title.Font = Enum.Font.GothamBold
-Title.TextSize = 16
+Title.TextSize = 15
+Title.TextXAlignment = Enum.TextXAlignment.Left
 Title.BackgroundTransparency = 1
+Title.TextTransparency = 1
 
+local SubTitle = Instance.new("TextLabel", MainFrame)
+SubTitle.Size = UDim2.new(1, -48, 0, 18)
+SubTitle.Position = UDim2.new(0, 24, 0, 46)
+SubTitle.Text = "Sailueatarchiwa Edition | Powered by Platoboost"
+SubTitle.TextColor3 = Color3.fromRGB(110, 120, 145)
+SubTitle.Font = Enum.Font.GothamMedium
+SubTitle.TextSize = 11
+SubTitle.TextXAlignment = Enum.TextXAlignment.Left
+SubTitle.BackgroundTransparency = 1
+SubTitle.TextTransparency = 1
+
+-- Status Label
 local StatusLabel = Instance.new("TextLabel", MainFrame)
-StatusLabel.Size = UDim2.new(1, -40, 0, 20)
-StatusLabel.Position = UDim2.new(0, 20, 0, 40)
-StatusLabel.Text = "Please enter your key to continue"
-StatusLabel.TextColor3 = Color3.fromRGB(160, 160, 170)
+StatusLabel.Size = UDim2.new(1, -48, 0, 20)
+StatusLabel.Position = UDim2.new(0, 24, 0, 72)
+StatusLabel.Text = "Please enter your active key to continue"
+StatusLabel.TextColor3 = Color3.fromRGB(140, 150, 175)
 StatusLabel.Font = Enum.Font.Gotham
 StatusLabel.TextSize = 12
+StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
 StatusLabel.BackgroundTransparency = 1
+StatusLabel.TextTransparency = 1
 
 StatusCallback = function(msg)
     StatusLabel.Text = msg
-    StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+    StatusLabel.TextColor3 = Color3.fromRGB(255, 90, 90)
+    -- เอฟเฟกต์สั่นเตือนเมื่อผิดพลาด (Shake)
+    local origPos = MainFrame.Position
+    Tween(MainFrame, {Position = UDim2.new(origPos.X.Scale, origPos.X.Offset - 6, origPos.Y.Scale, origPos.Y.Offset)}, 0.05)
+    task.wait(0.05)
+    Tween(MainFrame, {Position = UDim2.new(origPos.X.Scale, origPos.X.Offset + 6, origPos.Y.Scale, origPos.Y.Offset)}, 0.05)
+    task.wait(0.05)
+    Tween(MainFrame, {Position = origPos}, 0.05)
 end
 
-local KeyInput = Instance.new("TextBox", MainFrame)
-KeyInput.Size = UDim2.new(1, -40, 0, 42)
-KeyInput.Position = UDim2.new(0, 20, 0, 75)
-KeyInput.BackgroundColor3 = Color3.fromRGB(28, 28, 38)
-KeyInput.PlaceholderText = "Paste Key here..."
+-- ช่องกรอก Key Box
+local InputContainer = Instance.new("Frame", MainFrame)
+InputContainer.Size = UDim2.new(1, -48, 0, 44)
+InputContainer.Position = UDim2.new(0, 24, 0, 102)
+InputContainer.BackgroundColor3 = Color3.fromRGB(20, 22, 32)
+InputContainer.BorderSizePixel = 0
+InputContainer.BackgroundTransparency = 1
+Instance.new("UICorner", InputContainer).CornerRadius = UDim.new(0, 10)
+
+local InputStroke = Instance.new("UIStroke", InputContainer)
+InputStroke.Color = Color3.fromRGB(38, 44, 62)
+InputStroke.Thickness = 1.2
+InputStroke.Transparency = 1
+
+local KeyInput = Instance.new("TextBox", InputContainer)
+KeyInput.Size = UDim2.new(1, -24, 1, 0)
+KeyInput.Position = UDim2.new(0, 12, 0, 0)
+KeyInput.BackgroundTransparency = 1
+KeyInput.PlaceholderText = "Paste your license key here..."
+KeyInput.PlaceholderColor3 = Color3.fromRGB(80, 90, 115)
 KeyInput.Text = ""
-KeyInput.TextColor3 = Color3.fromRGB(255, 255, 255)
-KeyInput.Font = Enum.Font.Gotham
+KeyInput.TextColor3 = Color3.fromRGB(240, 245, 255)
+KeyInput.Font = Enum.Font.GothamMedium
 KeyInput.TextSize = 13
 KeyInput.ClearTextOnFocus = false
-Instance.new("UICorner", KeyInput).CornerRadius = UDim.new(0, 8)
+KeyInput.TextXAlignment = Enum.TextXAlignment.Left
+KeyInput.TextTransparency = 1
 
+KeyInput.Focused:Connect(function()
+    Tween(InputStroke, {Color = Color3.fromRGB(0, 170, 255)}, 0.25)
+    Tween(InputContainer, {BackgroundColor3 = Color3.fromRGB(24, 28, 40)}, 0.25)
+end)
+
+KeyInput.FocusLost:Connect(function()
+    Tween(InputStroke, {Color = Color3.fromRGB(38, 44, 62)}, 0.25)
+    Tween(InputContainer, {BackgroundColor3 = Color3.fromRGB(20, 22, 32)}, 0.25)
+end)
+
+-- ปุ่ม Check Key
 local SubmitBtn = Instance.new("TextButton", MainFrame)
-SubmitBtn.Size = UDim2.new(0.5, -25, 0, 38)
-SubmitBtn.Position = UDim2.new(0, 20, 0, 130)
-SubmitBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
-SubmitBtn.Text = "Check Key"
+SubmitBtn.Size = UDim2.new(0.5, -28, 0, 40)
+SubmitBtn.Position = UDim2.new(0, 24, 0, 160)
+SubmitBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 240)
+SubmitBtn.Text = "Verify Key"
 SubmitBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 SubmitBtn.Font = Enum.Font.GothamBold
 SubmitBtn.TextSize = 13
-Instance.new("UICorner", SubmitBtn).CornerRadius = UDim.new(0, 8)
+SubmitBtn.BorderSizePixel = 0
+SubmitBtn.BackgroundTransparency = 1
+SubmitBtn.TextTransparency = 1
+Instance.new("UICorner", SubmitBtn).CornerRadius = UDim.new(0, 9)
 
+local SubmitGradient = Instance.new("UIGradient", SubmitBtn)
+SubmitGradient.Color = ColorSequence.new{
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(0, 190, 255)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 120, 230))
+}
+
+-- ปุ่ม Get Key (Copy Link)
 local GetKeyBtn = Instance.new("TextButton", MainFrame)
-GetKeyBtn.Size = UDim2.new(0.5, -25, 0, 38)
-GetKeyBtn.Position = UDim2.new(0.5, 5, 0, 130)
-GetKeyBtn.BackgroundColor3 = Color3.fromRGB(38, 38, 50)
-GetKeyBtn.Text = "Get Key (Copy Link)"
-GetKeyBtn.TextColor3 = Color3.fromRGB(200, 200, 220)
+GetKeyBtn.Size = UDim2.new(0.5, -28, 0, 40)
+GetKeyBtn.Position = UDim2.new(0.5, 4, 0, 160)
+GetKeyBtn.BackgroundColor3 = Color3.fromRGB(26, 30, 42)
+GetKeyBtn.Text = "Get Free Key"
+GetKeyBtn.TextColor3 = Color3.fromRGB(200, 210, 230)
 GetKeyBtn.Font = Enum.Font.GothamBold
-GetKeyBtn.TextSize = 12
-Instance.new("UICorner", GetKeyBtn).CornerRadius = UDim.new(0, 8)
+GetKeyBtn.TextSize = 13
+GetKeyBtn.BorderSizePixel = 0
+GetKeyBtn.BackgroundTransparency = 1
+GetKeyBtn.TextTransparency = 1
+Instance.new("UICorner", GetKeyBtn).CornerRadius = UDim.new(0, 9)
 
+local GetKeyStroke = Instance.new("UIStroke", GetKeyBtn)
+GetKeyStroke.Color = Color3.fromRGB(45, 52, 75)
+GetKeyStroke.Thickness = 1
+GetKeyStroke.Transparency = 1
+
+-- ปุ่ม Discord / Buy Key
 local DiscordBtn = Instance.new("TextButton", MainFrame)
-DiscordBtn.Size = UDim2.new(1, -40, 0, 30)
-DiscordBtn.Position = UDim2.new(0, 20, 0, 180)
-DiscordBtn.BackgroundColor3 = Color3.fromRGB(88, 101, 242)
-DiscordBtn.Text = "Join Discord / Buy Key"
-DiscordBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-DiscordBtn.Font = Enum.Font.GothamBold
+DiscordBtn.Size = UDim2.new(1, -48, 0, 34)
+DiscordBtn.Position = UDim2.new(0, 24, 0, 214)
+DiscordBtn.BackgroundColor3 = Color3.fromRGB(20, 23, 34)
+DiscordBtn.Text = "Discord Community / Buy Key"
+DiscordBtn.TextColor3 = Color3.fromRGB(120, 140, 220)
+DiscordBtn.Font = Enum.Font.GothamMedium
 DiscordBtn.TextSize = 12
+DiscordBtn.BorderSizePixel = 0
+DiscordBtn.BackgroundTransparency = 1
+DiscordBtn.TextTransparency = 1
 Instance.new("UICorner", DiscordBtn).CornerRadius = UDim.new(0, 8)
 
+-- Hover Effects ให้ทุกปุ่ม
+local function AddHover(btn, normalColor, hoverColor)
+    btn.MouseEnter:Connect(function()
+        Tween(btn, {BackgroundColor3 = hoverColor}, 0.2)
+        Tween(btn, {Size = btn.Size + UDim2.new(0, 0, 0, 2)}, 0.2)
+    end)
+    btn.MouseLeave:Connect(function()
+        Tween(btn, {BackgroundColor3 = normalColor}, 0.2)
+        Tween(btn, {Size = btn.Size - UDim2.new(0, 0, 0, 2)}, 0.2)
+    end)
+end
+
+AddHover(SubmitBtn, Color3.fromRGB(0, 150, 240), Color3.fromRGB(0, 180, 255))
+AddHover(GetKeyBtn, Color3.fromRGB(26, 30, 42), Color3.fromRGB(36, 42, 60))
+AddHover(DiscordBtn, Color3.fromRGB(20, 23, 34), Color3.fromRGB(32, 36, 52))
+
+-- Animation เปิดหน้าต่าง (Entrance Smooth Animation)
+task.spawn(function()
+    Tween(MainFrame, {
+        Position = UDim2.new(0.5, -210, 0.5, -137),
+        BackgroundTransparency = 0
+    }, 0.6, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+    
+    Tween(GlowHalo, {
+        Position = UDim2.new(0.5, -250, 0.5, -180),
+        ImageTransparency = 0.65
+    }, 0.7)
+
+    Tween(UIStroke, {Transparency = 0}, 0.5)
+    Tween(Title, {TextTransparency = 0}, 0.4)
+    Tween(SubTitle, {TextTransparency = 0}, 0.45)
+    Tween(StatusLabel, {TextTransparency = 0}, 0.5)
+    Tween(InputContainer, {BackgroundTransparency = 0}, 0.5)
+    Tween(InputStroke, {Transparency = 0}, 0.5)
+    Tween(KeyInput, {TextTransparency = 0}, 0.5)
+    Tween(SubmitBtn, {BackgroundTransparency = 0, TextTransparency = 0}, 0.55)
+    Tween(GetKeyBtn, {BackgroundTransparency = 0, TextTransparency = 0}, 0.55)
+    Tween(GetKeyStroke, {Transparency = 0}, 0.55)
+    Tween(DiscordBtn, {BackgroundTransparency = 0, TextTransparency = 0}, 0.6)
+end)
+
+-- Button Click Events
 GetKeyBtn.MouseButton1Click:Connect(function()
+    StatusLabel.Text = "Fetching key link from Platoboost..."
+    StatusLabel.TextColor3 = Color3.fromRGB(0, 180, 255)
     local success, link = cacheLink()
     if success and link then
         fSetClipboard(link)
-        StatusLabel.Text = "Copied link to clipboard!"
-        StatusLabel.TextColor3 = Color3.fromRGB(0, 255, 150)
+        StatusLabel.Text = "Key Link copied to clipboard! (Paste in browser)"
+        StatusLabel.TextColor3 = Color3.fromRGB(0, 255, 160)
     else
-        StatusLabel.Text = "Failed to fetch link."
+        StatusLabel.Text = "Failed to fetch link. Try again shortly."
         StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
     end
 end)
 
 DiscordBtn.MouseButton1Click:Connect(function()
     fSetClipboard("https://discord.gg/krakenhub")
-    StatusLabel.Text = "Copied Discord Invite to clipboard!"
-    StatusLabel.TextColor3 = Color3.fromRGB(100, 180, 255)
+    StatusLabel.Text = "Discord invite link copied to clipboard!"
+    StatusLabel.TextColor3 = Color3.fromRGB(120, 180, 255)
 end)
 
 SubmitBtn.MouseButton1Click:Connect(function()
     local enteredKey = KeyInput.Text:gsub("%s+", "")
     if enteredKey == "" then
-        StatusLabel.Text = "Please enter a key!"
+        StatusLabel.Text = "Please enter your key first!"
         StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
         return
     end
 
-    StatusLabel.Text = "Verifying key, please wait..."
+    StatusLabel.Text = "Verifying license with server..."
     StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 0)
+    SubmitBtn.Text = "Checking..."
+    Tween(SubmitBtn, {BackgroundColor3 = Color3.fromRGB(0, 100, 180)}, 0.2)
     task.wait(0.2)
 
     local isValid = verifyKey(enteredKey)
     if isValid then
         SaveKeyToFile(enteredKey)
-        StatusLabel.Text = "Key Accepted! Loading KrakenHub..."
-        StatusLabel.TextColor3 = Color3.fromRGB(0, 255, 150)
-        task.wait(0.5)
+        StatusLabel.Text = "Key Accepted! Welcome to KrakenHub"
+        StatusLabel.TextColor3 = Color3.fromRGB(0, 255, 160)
+        SubmitBtn.Text = "Success!"
+        Tween(SubmitBtn, {BackgroundColor3 = Color3.fromRGB(0, 200, 120)}, 0.3)
+        
+        -- Animation ปิดหน้าต่าง (Exit Smooth Animation)
+        task.wait(0.6)
+        Tween(MainFrame, {
+            Position = UDim2.new(0.5, -210, 0.5, -165),
+            BackgroundTransparency = 1
+        }, 0.45, Enum.EasingStyle.Quart, Enum.EasingDirection.In)
+        Tween(GlowHalo, {ImageTransparency = 1}, 0.4)
+        Tween(Title, {TextTransparency = 1}, 0.3)
+        Tween(SubTitle, {TextTransparency = 1}, 0.3)
+        Tween(StatusLabel, {TextTransparency = 1}, 0.3)
+        Tween(InputContainer, {BackgroundTransparency = 1}, 0.3)
+        Tween(KeyInput, {TextTransparency = 1}, 0.3)
+        Tween(SubmitBtn, {BackgroundTransparency = 1, TextTransparency = 1}, 0.3)
+        Tween(GetKeyBtn, {BackgroundTransparency = 1, TextTransparency = 1}, 0.3)
+        Tween(DiscordBtn, {BackgroundTransparency = 1, TextTransparency = 1}, 0.3)
+        task.wait(0.45)
         ScreenGui:Destroy()
         loadstring(game:HttpGet(MAIN_SCRIPT_URL))()
     else
-        StatusLabel.Text = "Invalid or Expired Key!"
+        SubmitBtn.Text = "Verify Key"
+        Tween(SubmitBtn, {BackgroundColor3 = Color3.fromRGB(0, 150, 240)}, 0.2)
+        StatusLabel.Text = "Invalid or Expired Key! Please check again."
         StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
     end
 end)
