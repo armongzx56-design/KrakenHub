@@ -243,9 +243,114 @@ TopGradient.Color = ColorSequence.new{
     ColorSequenceKeypoint.new(1, Color3.fromRGB(120, 50, 255))
 }
 
+-- Minimize (-) and Close (x) Buttons
+local ControlHolder = Instance.new("Frame", MainFrame)
+ControlHolder.Name = "ControlHolder"
+ControlHolder.Size = UDim2.new(0, 64, 0, 26)
+ControlHolder.Position = UDim2.new(1, -74, 0, 14)
+ControlHolder.BackgroundTransparency = 1
+
+local MinimizeBtn = Instance.new("TextButton", ControlHolder)
+MinimizeBtn.Name = "MinimizeBtn"
+MinimizeBtn.Size = UDim2.new(0, 26, 0, 26)
+MinimizeBtn.Position = UDim2.new(0, 0, 0, 0)
+MinimizeBtn.BackgroundColor3 = Color3.fromRGB(24, 27, 38)
+MinimizeBtn.BorderSizePixel = 0
+MinimizeBtn.Text = "-"
+MinimizeBtn.TextColor3 = Color3.fromRGB(180, 190, 210)
+MinimizeBtn.Font = Enum.Font.GothamBold
+MinimizeBtn.TextSize = 15
+MinimizeBtn.BackgroundTransparency = 1
+MinimizeBtn.TextTransparency = 1
+Instance.new("UICorner", MinimizeBtn).CornerRadius = UDim.new(0, 6)
+
+local CloseBtn = Instance.new("TextButton", ControlHolder)
+CloseBtn.Name = "CloseBtn"
+CloseBtn.Size = UDim2.new(0, 26, 0, 26)
+CloseBtn.Position = UDim2.new(0, 32, 0, 0)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(24, 27, 38)
+CloseBtn.BorderSizePixel = 0
+CloseBtn.Text = "x"
+CloseBtn.TextColor3 = Color3.fromRGB(180, 190, 210)
+CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.TextSize = 13
+CloseBtn.BackgroundTransparency = 1
+CloseBtn.TextTransparency = 1
+Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 6)
+
+local isMinimized = false
+local normalSize = UDim2.new(0, 420, 0, 275)
+local minimizedSize = UDim2.new(0, 420, 0, 72)
+
+MinimizeBtn.MouseEnter:Connect(function()
+    Tween(MinimizeBtn, {BackgroundColor3 = Color3.fromRGB(36, 42, 60), TextColor3 = Color3.fromRGB(0, 200, 255)}, 0.2)
+end)
+MinimizeBtn.MouseLeave:Connect(function()
+    Tween(MinimizeBtn, {BackgroundColor3 = Color3.fromRGB(24, 27, 38), TextColor3 = Color3.fromRGB(180, 190, 210)}, 0.2)
+end)
+
+CloseBtn.MouseEnter:Connect(function()
+    Tween(CloseBtn, {BackgroundColor3 = Color3.fromRGB(220, 50, 50), TextColor3 = Color3.fromRGB(255, 255, 255)}, 0.2)
+end)
+CloseBtn.MouseLeave:Connect(function()
+    Tween(CloseBtn, {BackgroundColor3 = Color3.fromRGB(24, 27, 38), TextColor3 = Color3.fromRGB(180, 190, 210)}, 0.2)
+end)
+
+CloseBtn.MouseButton1Click:Connect(function()
+    Tween(MainFrame, {Position = MainFrame.Position - UDim2.new(0, 0, 0, 25), BackgroundTransparency = 1}, 0.35, Enum.EasingStyle.Quart, Enum.EasingDirection.In)
+    Tween(GlowHalo, {ImageTransparency = 1}, 0.3)
+    Tween(Title, {TextTransparency = 1}, 0.25)
+    Tween(SubTitle, {TextTransparency = 1}, 0.25)
+    Tween(StatusLabel, {TextTransparency = 1}, 0.25)
+    Tween(InputContainer, {BackgroundTransparency = 1}, 0.25)
+    Tween(KeyInput, {TextTransparency = 1}, 0.25)
+    Tween(SubmitBtn, {BackgroundTransparency = 1, TextTransparency = 1}, 0.25)
+    Tween(GetKeyBtn, {BackgroundTransparency = 1, TextTransparency = 1}, 0.25)
+    Tween(DiscordBtn, {BackgroundTransparency = 1, TextTransparency = 1}, 0.25)
+    Tween(MinimizeBtn, {BackgroundTransparency = 1, TextTransparency = 1}, 0.25)
+    Tween(CloseBtn, {BackgroundTransparency = 1, TextTransparency = 1}, 0.25)
+    task.wait(0.35)
+    ScreenGui:Destroy()
+end)
+
+MinimizeBtn.MouseButton1Click:Connect(function()
+    isMinimized = not isMinimized
+    if isMinimized then
+        MinimizeBtn.Text = "+"
+        Tween(MainFrame, {Size = minimizedSize}, 0.35, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+        Tween(GlowHalo, {Size = UDim2.new(0, 480, 0, 130)}, 0.35)
+        Tween(StatusLabel, {TextTransparency = 1}, 0.2)
+        Tween(InputContainer, {BackgroundTransparency = 1}, 0.2)
+        Tween(KeyInput, {TextTransparency = 1}, 0.2)
+        Tween(SubmitBtn, {BackgroundTransparency = 1, TextTransparency = 1}, 0.2)
+        Tween(GetKeyBtn, {BackgroundTransparency = 1, TextTransparency = 1}, 0.2)
+        Tween(DiscordBtn, {BackgroundTransparency = 1, TextTransparency = 1}, 0.2)
+        InputContainer.Visible = false
+        SubmitBtn.Visible = false
+        GetKeyBtn.Visible = false
+        DiscordBtn.Visible = false
+        StatusLabel.Visible = false
+    else
+        MinimizeBtn.Text = "-"
+        InputContainer.Visible = true
+        SubmitBtn.Visible = true
+        GetKeyBtn.Visible = true
+        DiscordBtn.Visible = true
+        StatusLabel.Visible = true
+        Tween(MainFrame, {Size = normalSize}, 0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+        Tween(GlowHalo, {Size = UDim2.new(0, 500, 0, 360)}, 0.4)
+        Tween(StatusLabel, {TextTransparency = 0}, 0.3)
+        Tween(InputContainer, {BackgroundTransparency = 0}, 0.3)
+        Tween(KeyInput, {TextTransparency = 0}, 0.3)
+        Tween(SubmitBtn, {BackgroundTransparency = 0, TextTransparency = 0}, 0.35)
+        Tween(GetKeyBtn, {BackgroundTransparency = 0, TextTransparency = 0}, 0.35)
+        Tween(DiscordBtn, {BackgroundTransparency = 0, TextTransparency = 0}, 0.35)
+    end
+end)
+
 -- Title & Subtitle
 local Title = Instance.new("TextLabel", MainFrame)
-Title.Size = UDim2.new(1, -48, 0, 32)
+Title.Size = UDim2.new(1, -110, 0, 32)
 Title.Position = UDim2.new(0, 24, 0, 16)
 Title.Text = "KRAKENHUB  •  KEY SYSTEM"
 Title.TextColor3 = Color3.fromRGB(245, 247, 255)
@@ -256,7 +361,7 @@ Title.BackgroundTransparency = 1
 Title.TextTransparency = 1
 
 local SubTitle = Instance.new("TextLabel", MainFrame)
-SubTitle.Size = UDim2.new(1, -48, 0, 18)
+SubTitle.Size = UDim2.new(1, -110, 0, 18)
 SubTitle.Position = UDim2.new(0, 24, 0, 46)
 SubTitle.Text = "Sailueatarchiwa Edition | Powered by Platoboost"
 SubTitle.TextColor3 = Color3.fromRGB(110, 120, 145)
@@ -420,6 +525,8 @@ task.spawn(function()
     Tween(GetKeyBtn, {BackgroundTransparency = 0, TextTransparency = 0}, 0.55)
     Tween(GetKeyStroke, {Transparency = 0}, 0.55)
     Tween(DiscordBtn, {BackgroundTransparency = 0, TextTransparency = 0}, 0.6)
+    Tween(MinimizeBtn, {BackgroundTransparency = 0, TextTransparency = 0}, 0.5)
+    Tween(CloseBtn, {BackgroundTransparency = 0, TextTransparency = 0}, 0.5)
 end)
 
 -- Button Click Events
@@ -480,6 +587,8 @@ SubmitBtn.MouseButton1Click:Connect(function()
         Tween(SubmitBtn, {BackgroundTransparency = 1, TextTransparency = 1}, 0.3)
         Tween(GetKeyBtn, {BackgroundTransparency = 1, TextTransparency = 1}, 0.3)
         Tween(DiscordBtn, {BackgroundTransparency = 1, TextTransparency = 1}, 0.3)
+        Tween(MinimizeBtn, {BackgroundTransparency = 1, TextTransparency = 1}, 0.3)
+        Tween(CloseBtn, {BackgroundTransparency = 1, TextTransparency = 1}, 0.3)
         task.wait(0.45)
         ScreenGui:Destroy()
         loadstring(game:HttpGet(MAIN_SCRIPT_URL))()
