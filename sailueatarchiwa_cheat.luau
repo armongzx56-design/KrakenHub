@@ -5346,7 +5346,6 @@ local Tabs = {
     Farm      = CreateTabAdapter(tabGroup:Tab({ Name = "งาน & ฟาร์ม", Image = "rbxassetid://18821914323" }), "Farm"),
     Halloween = CreateTabAdapter(tabGroup:Tab({ Name = "🎃 อีเวนต์" }), "Halloween"),
     Merchant  = CreateTabAdapter(tabGroup:Tab({ Name = "พ่อค้าพเนจร", Image = "rbxassetid://10734952273" }), "Merchant"),
-    Teleport  = CreateTabAdapter(tabGroup:Tab({ Name = "วาร์ป (TP)",  Image = "rbxassetid://10709769841" }), "Teleport"),
     Combat    = CreateTabAdapter(tabGroup:Tab({ Name = "ระบบต่อสู้",   Image = "rbxassetid://10734950309" }), "Combat"),
     Player    = CreateTabAdapter(tabGroup:Tab({ Name = "ตัวละคร",     Image = "rbxassetid://10747373176" }), "Player"),
     Settings  = CreateTabAdapter(tabGroup:Tab({ Name = "ตั้งค่า",       Image = "rbxassetid://10734950309" }), "Settings")
@@ -5356,10 +5355,9 @@ function Window:SelectTab(idx)
     if idx == 1 and Tabs.Farm then Tabs.Farm:Select()
     elseif idx == 2 and Tabs.Halloween then Tabs.Halloween:Select()
     elseif idx == 3 and Tabs.Merchant then Tabs.Merchant:Select()
-    elseif idx == 4 and Tabs.Teleport then Tabs.Teleport:Select()
-    elseif idx == 5 and Tabs.Combat then Tabs.Combat:Select()
-    elseif idx == 6 and Tabs.Player then Tabs.Player:Select()
-    elseif idx == 7 and Tabs.Settings then Tabs.Settings:Select()
+    elseif idx == 4 and Tabs.Combat then Tabs.Combat:Select()
+    elseif idx == 5 and Tabs.Player then Tabs.Player:Select()
+    elseif idx == 6 and Tabs.Settings then Tabs.Settings:Select()
     end
 end
 
@@ -10065,159 +10063,418 @@ ESPMaxDistSlider:OnChanged(function()
     State.ESPMaxDistance = Options.ESPMaxDistVal.Value
 end)
 
---------------------------------------------------------------
--- ⚡ แท็บ: เทเลพอร์ตและวาร์ป (TELEPORT & BYPASS TWEEN TP)
---------------------------------------------------------------
-Tabs.Teleport:AddParagraph({
-    Title = "🚀 ระบบ Bypass Tween Teleport",
-    Content = "วาร์ปปลอดภัย 100% ไม่โดนเซิร์ฟเวอร์ดึงกลับ (Anti-Rubberband) พร้อมระบบ Noclip ทะลุกำแพงอัตโนมัติขณะเดินทาง"
-})
 
-local TPSpeedSlider = Tabs.Teleport:AddSlider("TPSpeedSliderVal", {
-    Title = "⚡ ความเร็วการวาร์ป (Tween Speed)",
-    Description = "ปรับความเร็วลอยข้ามจุด (ค่าแนะนำปลอดภัย: 60 - 80 studs/s)",
-    Default = 65,
-    Min = 25,
-    Max = 160,
-    Rounding = 0
-})
-TPSpeedSlider:OnChanged(function()
-    State.TPSpeed = Options.TPSpeedSliderVal.Value
+--------------------------------------------------------------
+-- 🔫 10. ระบบความแม่นยำของปืน & ไร้แรงดีด (GUN ACCURACY / NO SPREAD / NO RECOIL / NO BULLET DROP)
+--------------------------------------------------------------
+local function EnhanceGun(tool)
+    if not tool or not tool:IsA("Tool") then return end
+    pcall(function()
+        -- 1. ปิด Shake ของปืน (กล้องสั่นไหวเวลาเล็ง/ยิง)
+        local shake = tool:FindFirstChild("Shake")
+        if shake and shake:IsA("LocalScript") then
+            shake.Enabled = not (State.NoRecoil and State.Running)
+        end
+
+        -- 2. ปรับแต่งโมดูล Setting ของ FE Gun Kit
+        local settingMod = tool:FindFirstChild("Setting")
+        if settingMod and settingMod:IsA("ModuleScript") then
+            local s = require(settingMod)
+            if type(s) == "table" then
+                -- 🎯 ยิงตรงจุด 100% (No Spread & Shotgun Spread = 0)
+                if (State.NoSpread or State.SilentAim) and State.Running then
+                    s.Spread = 0
+                    s.MinSpread = 0
+                    s.MaxSpread = 0
+                    s.SpreadRedutionS = 0
+                    s.SpreadRedutionIS = 0
+                    s.BulletBloom = 0
+                    s.CrossExpansion = 0
+                    s.ShotgunPattern = false
+                    if type(s.SpreadPattern) == "table" then
+                        for _, pt in ipairs(s.SpreadPattern) do
+                            if type(pt) == "table" then
+                                pt[1] = 0
+                                pt[2] = 0
+                            end
+                        end
+                    end
+                    if type(s.ChargeAlterTable) == "table" and type(s.ChargeAlterTable.Spread) == "table" then
+                        s.ChargeAlterTable.Spread.Level1 = 0
+                        s.ChargeAlterTable.Spread.Level2 = 0
+                        s.ChargeAlterTable.Spread.Level3 = 0
+                    end
+                end
+
+                -- 🛑 ปืนนิ่งสนิท ไร้แรงถีบ (No Recoil & No Camera Recoiling)
+                if State.NoRecoil and State.Running then
+                    s.Recoil = 0
+                    s.CameraRecoilingEnabled = false
+                    s.ViewmodelRecoilInfluence = 0
+                    s.RecoilDamper = 0
+                    s.RecoilSpeed = 0
+                    s.AngleX_Min = 0
+                    s.AngleX_Max = 0
+                    s.AngleY_Min = 0
+                    s.AngleY_Max = 0
+                    s.AngleZ_Min = 0
+                    s.AngleZ_Max = 0
+                    s.ScopeSwaySpeed = 0
+                    s.ScopeSwayDamper = 0
+                    s.ScopeKnockbackSpeed = 0
+                    s.DropXMin = 0
+                    s.DropYMax = 0
+                    s.XMax = 0
+                    s.YMax = 0
+                end
+
+                -- ⚡ กระสุนพุ่งตรง ไม่ย้อยตามแรงโน้มถ่วง (No Bullet Drop)
+                if (State.FastBullet or State.SilentAim) and State.Running then
+                    s.BulletAcceleration = Vector3.zero
+                    if type(s.ChargeAlterTable) == "table" and type(s.ChargeAlterTable.BulletAcceleration) == "table" then
+                        s.ChargeAlterTable.BulletAcceleration.Level1 = Vector3.zero
+                        s.ChargeAlterTable.BulletAcceleration.Level2 = Vector3.zero
+                        s.ChargeAlterTable.BulletAcceleration.Level3 = Vector3.zero
+                    end
+                    if (s.BulletSpeed or 0) < 4000 then
+                        s.BulletSpeed = 5000
+                    end
+                end
+            end
+        end
+    end)
+end
+
+local function ApplyGunMods()
+    if not State.Running then return end
+    pcall(function()
+        local char = LocalPlayer.Character
+        if char then
+            for _, item in ipairs(char:GetChildren()) do
+                if item:IsA("Tool") then
+                    EnhanceGun(item)
+                end
+            end
+        end
+        local bp = LocalPlayer:FindFirstChild("Backpack")
+        if bp then
+            for _, item in ipairs(bp:GetChildren()) do
+                if item:IsA("Tool") then
+                    EnhanceGun(item)
+                end
+            end
+        end
+    end)
+end
+
+-- ดักจับเมื่อถือปืนใหม่หรือเก็บปืนเข้ากระเป๋า
+local function HookInventoryForGuns()
+    pcall(function()
+        if Connections.CharGunHook then Connections.CharGunHook:Disconnect() end
+        if Connections.BpGunHook then Connections.BpGunHook:Disconnect() end
+
+        local char = LocalPlayer.Character
+        if char then
+            Connections.CharGunHook = char.ChildAdded:Connect(function(child)
+                if child:IsA("Tool") then
+                    task.wait(0.05)
+                    EnhanceGun(child)
+                end
+            end)
+        end
+
+        local bp = LocalPlayer:FindFirstChild("Backpack")
+        if bp then
+            Connections.BpGunHook = bp.ChildAdded:Connect(function(child)
+                if child:IsA("Tool") then
+                    task.wait(0.05)
+                    EnhanceGun(child)
+                end
+            end)
+        end
+    end)
+end
+
+HookInventoryForGuns()
+if Connections.CharAddedGunHook then Connections.CharAddedGunHook:Disconnect() end
+Connections.CharAddedGunHook = LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(1)
+    HookInventoryForGuns()
+    ApplyGunMods()
 end)
 
-Tabs.Teleport:AddButton({
-    Title = "🛑 ยกเลิกการวาร์ปทันที (Stop TP)",
-    Description = "หยุดการ Tween ค้างไว้ที่จุดปัจจุบัน",
-    Callback = function()
-        CancelTweenTP()
-        Notify("เทเลพอร์ต", "ยกเลิกการวาร์ปเรียบร้อย", "", 2)
+-- เฝ้าดูและปรับแต่งปืนที่ถืออยู่ทุก 1.5 วินาที
+task.spawn(function()
+    while State.Running and _G._KrakenScriptId == MY_SCRIPT_ID do
+        pcall(ApplyGunMods)
+        task.wait(1.5)
     end
-})
+end)
 
-Tabs.Teleport:AddSection("🏫 วาร์ปไปสถาบันต่างๆ (Schools - Realtime Auto Safezone)")
+--------------------------------------------------------------
+-- 🎯 ระบบ Silent Aim & FOV Circle
+--------------------------------------------------------------
+local fovCircle = nil
+pcall(function()
+    if typeof(Drawing) == "table" and typeof(Drawing.new) == "function" then
+        fovCircle = Drawing.new("Circle")
+        fovCircle.Thickness = 1.5
+        fovCircle.NumSides = 48
+        fovCircle.Radius = State.CombatFOV or 150
+        fovCircle.Filled = false
+        fovCircle.Color = Color3.fromRGB(255, 60, 60)
+        fovCircle.Transparency = 0.8
+        fovCircle.Visible = false
+    end
+end)
 
-local function GetCurrentPlayerSchool()
-    local t = LocalPlayer.Team
-    local raw = t and t.Name or ""
-    if raw:find("ปทุม") then return "ปทุมคงคา" end
-    if raw:find("ช่างกล") or raw:find("เทพช่าง") or raw:find("bkk") then return "กรุงเทพช่างกล" end
-    if raw:find("สุทธิ") or raw:find("สุธิ") then return "วัดสุทธิวราราม" end
-    if raw:find("ตำรวจ") then return "ตำรวจ" end
-    if raw:find("พระ") then return "พระ" end
-    if raw:find("เด็กบ้าน") then return "เด็กบ้าน" end
+local function GetAimCenter()
+    local cam = Workspace.CurrentCamera
+    if not cam then return Vector2.new(0, 0) end
+    local inset = GuiService:GetGuiInset()
+    local pgui = LocalPlayer:FindFirstChild("PlayerGui")
 
-    -- Fallback: ตรวจ Overhead Tag บนตัวละคร
-    local char = LocalPlayer.Character
-    local head = char and char:FindFirstChild("Head")
-    if head then
-        local ovTag = head:FindFirstChild("OverheadNameBill") or head:FindFirstChildWhichIsA("BillboardGui")
-        if ovTag then
-            for _, d in ipairs(ovTag:GetChildren()) do
-                if d:IsA("TextLabel") and d.Text and d.Text ~= "" then
-                    for _, sc in ipairs(SchoolConfigs) do
-                        if string.find(d.Text, sc.Key, 1, true) then
-                            return sc.Key
+    local gunGui = pgui and pgui:FindFirstChild("GunGUI")
+    if gunGui and gunGui:IsA("ScreenGui") and gunGui.Enabled then
+        local crosshair = gunGui:FindFirstChild("Crosshair")
+        if crosshair and crosshair.AbsolutePosition.X > 0 then
+            local addInset = gunGui.IgnoreGuiInset and Vector2.zero or inset
+            return crosshair.AbsolutePosition + (crosshair.AbsoluteSize / 2) + addInset
+        end
+    end
+
+    local fistgui = pgui and pgui:FindFirstChild("fistgui")
+    if fistgui and fistgui:IsA("ScreenGui") and fistgui.Enabled then
+        local crosshair = fistgui:FindFirstChild("crosshair")
+        if crosshair and crosshair.Visible and crosshair.AbsolutePosition.X > 0 then
+            local addInset = fistgui.IgnoreGuiInset and Vector2.zero or inset
+            return crosshair.AbsolutePosition + (crosshair.AbsoluteSize / 2) + addInset
+        end
+    end
+
+    if pgui then
+        for _, gui in ipairs(pgui:GetChildren()) do
+            if gui:IsA("ScreenGui") and gui.Enabled then
+                local ch = gui:FindFirstChild("Crosshair", true) or gui:FindFirstChild("crosshair", true)
+                if ch and ch:IsA("GuiObject") and ch.Visible and ch.AbsolutePosition.X > 0 then
+                    local addInset = gui.IgnoreGuiInset and Vector2.zero or inset
+                    return ch.AbsolutePosition + (ch.AbsoluteSize / 2) + addInset
+                end
+            end
+        end
+    end
+
+    local uis = UserInputService
+    if uis.MouseBehavior == Enum.MouseBehavior.LockCenter or (cam.Focus.p - cam.CFrame.p).Magnitude <= 1 then
+        return Vector2.new(cam.ViewportSize.X / 2, (cam.ViewportSize.Y / 2) + inset.Y)
+    end
+
+    return uis:GetMouseLocation()
+end
+
+if Connections.FOVCircleLoop then Connections.FOVCircleLoop:Disconnect() end
+Connections.FOVCircleLoop = RunService.RenderStepped:Connect(function()
+    if fovCircle then
+        local cam = Workspace.CurrentCamera
+        local shouldShow = State.Running and State.SilentAim and State.DrawFOV and cam ~= nil
+        fovCircle.Visible = shouldShow
+        if shouldShow then
+            fovCircle.Radius = State.CombatFOV or 150
+            fovCircle.Position = GetAimCenter()
+        end
+    end
+end)
+
+local function IsWallClear(origin, targetPart, targetChar)
+    local diff = (targetPart.Position - origin)
+    local dist = diff.Magnitude
+    if dist <= 0.1 then return true end
+    local dir = diff.Unit
+
+    local rayParams = RaycastParams.new()
+    rayParams.FilterType = Enum.RaycastFilterType.Exclude
+    rayParams.IgnoreWater = true
+    local ignore = {LocalPlayer.Character, Workspace.CurrentCamera}
+    rayParams.FilterDescendantsInstances = ignore
+
+    local curOrigin = origin
+    local remainingDist = dist
+
+    for _ = 1, 8 do
+        local result = Workspace:Raycast(curOrigin, dir * remainingDist, rayParams)
+        if not result then return true end
+        local hitPart = result.Instance
+        if hitPart:IsDescendantOf(targetChar) then return true end
+        if (not hitPart.CanCollide) or hitPart.Transparency > 0.75 or hitPart.Name == "BloodWound" then
+            table.insert(ignore, hitPart)
+            rayParams.FilterDescendantsInstances = ignore
+            curOrigin = result.Position + (dir * 0.1)
+            remainingDist = (targetPart.Position - curOrigin).Magnitude
+            if remainingDist <= 0.5 then return true end
+        else
+            return false
+        end
+    end
+    return false
+end
+
+local function GetAimTarget(firePos)
+    if not State.SilentAim then return nil end
+    local hitChance = State.SilentHitChance or 100
+    if hitChance < 100 and math.random(1, 100) > hitChance then return nil end
+
+    local cam = Workspace.CurrentCamera
+    if not cam then return nil end
+
+    local centerPos = GetAimCenter()
+    local maxFOV = State.CombatFOV or 150
+    local partChoice = State.SilentPart or "Head"
+
+    local bestTargetPos = nil
+    local bestScreenDist = maxFOV + 1
+
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and plr.Character then
+            -- ตรวจสอบ Team/School Check
+            if State.SilentTeamCheck and plr.Team and LocalPlayer.Team and plr.Team == LocalPlayer.Team then
+                continue
+            end
+
+            local char = plr.Character
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            if hum and hum.Health > 0 and hrp then
+                local targetPart = (partChoice == "Head" and char:FindFirstChild("Head"))
+                                or (partChoice == "Torso" and (char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso")))
+                                or (partChoice == "HumanoidRootPart" and hrp)
+                                or char:FindFirstChild("Head") or hrp
+
+                if targetPart then
+                    local sPos, onScreen = cam:WorldToScreenPoint(targetPart.Position)
+                    if onScreen and sPos.Z > 0 then
+                        local sDist = (Vector2.new(sPos.X, sPos.Y) - centerPos).Magnitude
+                        if sDist <= maxFOV and sDist < bestScreenDist then
+                            local clear = true
+                            if State.SilentWallCheck then
+                                clear = IsWallClear(firePos, targetPart, char)
+                            end
+                            if clear then
+                                bestScreenDist = sDist
+                                local finalPos = targetPart.Position
+                                if State.SilentVelocity then
+                                    local targetHRP = char:FindFirstChild("HumanoidRootPart")
+                                    if targetHRP and targetHRP.AssemblyLinearVelocity.Magnitude > 0.5 then
+                                        local dist3D = (finalPos - firePos).Magnitude
+                                        local leadTime = math.clamp(dist3D / 6000, 0, 0.12)
+                                        finalPos = finalPos + (targetHRP.AssemblyLinearVelocity * leadTime)
+                                    end
+                                end
+                                bestTargetPos = finalPos
+                            end
                         end
                     end
                 end
             end
         end
     end
-
-    return raw ~= "" and raw or "คนละรร"
+    return bestTargetPos
 end
 
-local function SmartWarpSchool(targetSchoolKey, schoolNameTH, insideCF, outsideSafeCF)
-    local mySchool = GetCurrentPlayerSchool()
-    local isSameSchool = string.find(mySchool, targetSchoolKey, 1, true) ~= nil
+-- Hook ProjectileHandler สำหรับ Silent Aim & No Spread
+local originalSimulateProjectile = _G._KrakenOriginalSimulateProjectile
+pcall(function()
+    local phMod = ReplicatedStorage:FindFirstChild("Modules") and ReplicatedStorage.Modules:FindFirstChild("ProjectileHandler")
+    if phMod then
+        local ph = require(phMod)
+        if ph and ph.SimulateProjectile then
+            if not originalSimulateProjectile then
+                originalSimulateProjectile = ph.SimulateProjectile
+                _G._KrakenOriginalSimulateProjectile = originalSimulateProjectile
+            end
+            ph.SimulateProjectile = function(self, p128, p129, p130, p131, p132, p133, p134, p135, p136, p137, p138, p139, p140, p141)
+                local char = LocalPlayer.Character
+                local isLocalShooter = false
+                if char then
+                    for _, obj in ipairs({p129, p130, p131, p134}) do
+                        if obj and typeof(obj) == "Instance" and obj:IsDescendantOf(char) then
+                            isLocalShooter = true
+                            break
+                        end
+                    end
+                    if not isLocalShooter then
+                        local currentTool = char:FindFirstChildOfClass("Tool")
+                        if currentTool and (
+                            (p129 and typeof(p129) == "Instance" and (p129 == currentTool or p129:IsDescendantOf(currentTool))) or
+                            (p131 and typeof(p131) == "Instance" and (p131 == currentTool or p131:IsDescendantOf(currentTool))) or
+                            (p134 and typeof(p134) == "Instance" and (p134 == currentTool or p134:IsDescendantOf(currentTool)))
+                        ) then
+                            isLocalShooter = true
+                        end
+                    end
+                end
 
-    if isSameSchool then
-        Notify("ระบบวาร์ปสถาบัน", "คุณอยู่ " .. schoolNameTH .. " อยู่แล้ว -> วาร์ปเข้าใน รร. โดยตรง", "", 3)
-        BypassTweenTP(insideCF)
-    else
-        Notify("ระบบวาร์ปสถาบัน", "คุณอยู่ [" .. mySchool .. "] -> วาร์ปไปหน้าเซฟโซนหน้า " .. schoolNameTH .. " (ป้องกันเสียชีวิต)", "", 4)
-        BypassTweenTP(outsideSafeCF)
-    end
-end
+                if State.Running and isLocalShooter and p134 then
+                    local firePos = (p131 and p131:FindFirstChild("GunFirePoint") and p131:FindFirstChild("GunFirePoint").WorldPosition)
+                                 or (p134 and p134.WorldPosition)
+                                 or (char and char:FindFirstChild("Head") and char.Head.Position)
 
-Tabs.Teleport:AddButton({
-    Title = "🔷 วาร์ปไป ปทุมคงคา (Patumwan)",
-    Description = "รร. เดียวกัน = เข้าใน รร. | คนละ รr. = หน้าเซฟโซนหน้า รร.",
-    Callback = function()
-        SmartWarpSchool("ปทุม", "ปทุมคงคา", CFrame.new(2845, 2, 736), CFrame.new(2200, 4, 435))
-    end
-})
+                    if firePos then
+                        local targetPos = nil
+                        if State.SilentAim then
+                            targetPos = GetAimTarget(firePos)
+                        end
 
-Tabs.Teleport:AddButton({
-    Title = "🟡 วาร์ปไป กรุงเทพช่างกล (BKK Tech)",
-    Description = "รร. เดียวกัน = เข้าใน รr. | คนละ รร. = หน้าเซฟโซนหน้า รร.",
-    Callback = function()
-        SmartWarpSchool("ช่างกล", "กรุงเทพช่างกล", CFrame.new(1874, 2, -1247), CFrame.new(2025, 4, -1220))
-    end
-})
+                        if targetPos then
+                            local trueDir = (targetPos - firePos).Unit
+                            if type(p132) == "table" then
+                                for i = 1, #p132 do p132[i] = trueDir end
+                            end
+                            if type(p133) == "table" then
+                                for i = 1, #p133 do p133[i] = trueDir end
+                            end
+                            if type(p139) == "table" then
+                                p139[2] = Vector3.zero
+                                if (p139[1] or 0) < 5000 then p139[1] = 6000 end
+                            end
+                        elseif State.NoSpread then
+                            local cam = Workspace.CurrentCamera
+                            local center = GetAimCenter()
+                            local screenRay = cam:ScreenPointToRay(center.X, center.Y)
+                            local rayParams = RaycastParams.new()
+                            rayParams.FilterDescendantsInstances = {char, cam}
+                            rayParams.FilterType = Enum.RaycastFilterType.Exclude
+                            local hit = Workspace:Raycast(screenRay.Origin, screenRay.Direction * 3000, rayParams)
+                            local hitPos = hit and hit.Position or (screenRay.Origin + screenRay.Direction * 2000)
+                            local straightDir = (hitPos - firePos).Unit
+                            if type(p132) == "table" then
+                                for i = 1, #p132 do p132[i] = straightDir end
+                            end
+                            if type(p133) == "table" then
+                                for i = 1, #p133 do p133[i] = straightDir end
+                            end
+                        end
 
-Tabs.Teleport:AddButton({
-    Title = "🟢 วาร์ปไป วัดสุทธิวราราม (Wat Sutthi)",
-    Description = "รร. เดียวกัน = เข้าใน รr. | คนละ รร. = หน้าเซฟโซนหน้า รร.",
-    Callback = function()
-        SmartWarpSchool("สุทธิ", "วัดสุทธิวราราม", CFrame.new(2647, 3, -219), CFrame.new(2550, 4, -220))
-    end
-})
-
-Tabs.Teleport:AddButton({
-    Title = "🚓 วาร์ปไป สถานีตำรวจ (Police Station)",
-    Description = "รร. เดียวกัน = เข้าใน สน. | คนละ รr. = เซฟโซนหน้า สน.",
-    Callback = function()
-        SmartWarpSchool("ตำรวจ", "สถานีตำรวจ", CFrame.new(2503, 3, 906), CFrame.new(2242, 4, 792))
-    end
-})
-
-Tabs.Teleport:AddSection("💼 วาร์ปไปจุดทำงาน & เศรษฐกิจ")
-
-Tabs.Teleport:AddButton({
-    Title = "🏗️ วาร์ปไป ไซต์งานก่อสร้าง (Construction)",
-    Callback = function()
-        BypassTweenTP(CFrame.new(2400.86, 3.5, -372.0))
-    end
-})
-
-Tabs.Teleport:AddButton({
-    Title = "🛒 วาร์ปไป หาพ่อค้าพเนจร (Wandering Merchant)",
-    Callback = function()
-        local model, mHrp = FindMerchantNPC()
-        if mHrp then
-            BypassTweenTP(mHrp.CFrame + Vector3.new(0, 3, 0))
-        else
-            Notify("พ่อค้าพเนจร", "ไม่พบพ่อค้าพเนจรในเซิร์ฟเวอร์ขณะนี้", "", 3)
+                        if State.FastBullet and type(p139) == "table" then
+                            p139[2] = Vector3.zero
+                            if (p139[1] or 0) < 5000 then p139[1] = 6000 end
+                        end
+                    end
+                end
+                return originalSimulateProjectile(self, p128, p129, p130, p131, p132, p133, p134, p135, p136, p137, p138, p139, p140, p141)
+            end
         end
     end
-})
-
-Tabs.Teleport:AddButton({
-    Title = "🏬 วาร์ปไป ร้านสะดวกซื้อ / ร้านค้า (Shop)",
-    Callback = function()
-        BypassTweenTP(CFrame.new(2180, 5, -310))
-    end
-})
-
-Tabs.Teleport:AddButton({
-    Title = "🏥 วาร์ปไป โรงพยาบาล (Hospital / Respawn Safezone)",
-    Callback = function()
-        BypassTweenTP(CFrame.new(2350, 5, -180))
-    end
-})
+end)
 
 
---------------------------------------------------------------
--- 🎯 แท็บ: ระบบต่อสู้ (COMBAT & SILENT AIM)
 --------------------------------------------------------------
 Tabs.Combat:AddParagraph({
-    Title = "🎯 Silent Aim & Gun System",
+    Title = "🎯 B3 Silent Aim & Gun System",
     Content = "ระบบล็อคกระสุนอัตโนมัติ คำนวณวิถีกระสุนเข้าเป้าหมาย พร้อมระบบชดเชยความเร็วเป้าหมาย และตรวจสอบสิ่งกีดขวาง"
 })
 
 local SilentAimToggle = Tabs.Combat:AddToggle("SilentAimOn", {
-    Title = "🎯 เปิดใช้ Silent Aim",
+    Title = "🎯 เปิดใช้งาน Silent Aim",
     Description = "วิถีกระสุนจะเล็งเข้าหาเป้าหมายในวงกลม FOV โดยไม่ต้องหันหน้าจอ",
     Default = false
 })
@@ -10227,7 +10484,7 @@ SilentAimToggle:OnChanged(function()
 end)
 
 local PartDropdown = Tabs.Combat:AddDropdown("SilentPartChoice", {
-    Title = "🎯 ตำแหน่งล็อค (Part)",
+    Title = "🎯 ส่วนของร่างกายที่ล็อค (Target Part)",
     Values = {"Head", "HumanoidRootPart", "Torso"},
     Default = "Head"
 })
@@ -10236,7 +10493,7 @@ PartDropdown:OnChanged(function()
 end)
 
 local HitChanceSlider = Tabs.Combat:AddSlider("HitChanceVal", {
-    Title = "🎲 ความแม่นยำ (Hit %)",
+    Title = "🎲 อัตราความแม่นยำ (Hit Chance %)",
     Description = "โอกาสที่กระสุนจะเข้าเป้า (แนะนำ 100% หรือปรับเพื่อความแนบเนียน)",
     Default = 100,
     Min = 10,
@@ -10257,7 +10514,7 @@ TeamCheckToggle:OnChanged(function()
 end)
 
 local WallCheckToggle = Tabs.Combat:AddToggle("WallCheckOn", {
-    Title = "🧱 เช็คกำแพง (Wall Check)",
+    Title = "🧱 ตรวจสอบกำแพง (Wall Check)",
     Description = "ไม่ยิงล็อคเป้าหมายที่อยู่หลังกำแพงหรือสิ่งกีดขวาง",
     Default = false
 })
@@ -10266,7 +10523,7 @@ WallCheckToggle:OnChanged(function()
 end)
 
 local VelocityToggle = Tabs.Combat:AddToggle("VelocityPredictOn", {
-    Title = "⚡ นำวิถีความเร็ว (Predict)",
+    Title = "⚡ คำนวณนำวิถีความเร็วเป้าหมาย (Velocity Prediction)",
     Description = "ดักหน้าทิศทางการเคลื่อนที่ของศัตรู ยิงโดนแม้ศัตรูกำลังวิ่ง",
     Default = false
 })
@@ -10275,7 +10532,7 @@ VelocityToggle:OnChanged(function()
 end)
 
 local FOVSlider = Tabs.Combat:AddSlider("CombatFOVVal", {
-    Title = "⭕ รัศมีวงกลม FOV",
+    Title = "⭕ รัศมี FOV (FOV Radius)",
     Description = "ขนาดวงกลมระยะการล็อคเป้าหมาย (Pixels)",
     Default = 150,
     Min = 40,
@@ -10287,17 +10544,18 @@ FOVSlider:OnChanged(function()
 end)
 
 local DrawFOVToggle = Tabs.Combat:AddToggle("DrawFOVOn", {
-    Title = "👁️ แสดงวงกลม FOV",
+    Title = "👁️ แสดงวงกลม FOV บนหน้าจอ (Draw FOV Circle)",
     Default = false
 })
 DrawFOVToggle:OnChanged(function()
     State.DrawFOV = Options.DrawFOVOn.Value
 end)
 
-Tabs.Combat:AddSection("🔧 ปรับแต่งปืน & กระสุน")
+Tabs.Combat:AddSection("🔧 ปรับแต่งปืน & กระสุน (Gun Modifiers)")
 
 local NoSpreadToggle = Tabs.Combat:AddToggle("NoSpreadOn", {
-    Title = "🎯 ยิงตรงจุด (No Spread)",
+    Title = "🎯 ยิงตรงจุด ไร้แรงกระจาย (No Spread)",
+    Description = "กระสุนไม่กระจาย Spread = 0 ทุกสถานการณ์ ยิงตรงไม่หลุดเป้าแม้วิ่งหรือกระโดด",
     Default = false
 })
 NoSpreadToggle:OnChanged(function()
@@ -10306,7 +10564,8 @@ NoSpreadToggle:OnChanged(function()
 end)
 
 local NoRecoilToggle = Tabs.Combat:AddToggle("NoRecoilOn", {
-    Title = "🛑 ปืนนิ่งสนิท (No Recoil)",
+    Title = "🛑 ปืนนิ่งสนิท ไร้แรงถีบ (No Recoil & No Shake)",
+    Description = "ปิดการสั่นกล้อง แรงถีบ และ ViewmodelRecoil ทั้งหมด ยิงต่อเนื่องโดยไม่เสียความแม่นยำ",
     Default = false
 })
 NoRecoilToggle:OnChanged(function()
@@ -10315,7 +10574,8 @@ NoRecoilToggle:OnChanged(function()
 end)
 
 local FastBulletToggle = Tabs.Combat:AddToggle("FastBulletOn", {
-    Title = "⚡ กระสุนเร็วสูง (Fast Bullet)",
+    Title = "⚡ กระสุนความเร็วสูง ไม่ย้อย (No Bullet Drop)",
+    Description = "กระสุนพุ่งตรงความเร็ว 6000 studs/s ไม่มีแรงโน้มถ่วงทำให้ย้อย ยิงระยะไกลโดนแน่นอน",
     Default = false
 })
 FastBulletToggle:OnChanged(function()
