@@ -145,6 +145,8 @@ local Hub = {
         -- Cheats
         Speed = false,
         SpeedValue = 17,
+        InfiniteStamina = false,
+        Godmode = false,
         Jump = false,
         JumpValue = 35,
         Noclip = false,
@@ -336,9 +338,33 @@ Connections.SpeedEnforcer = RunService.RenderStepped:Connect(function()
         return
     end
 
-    -- หากผู้ใช้เปิด Cheats > Speed เสริมเอง ล็อคเพดานปลอดภัยไม่เกิน 18 studs/s
+    -- หากผู้ใช้เปิด Cheats > Speed เสริมเอง ปรับความเร็วตามหลอด (สูงสุด 20 studs/s)
     if State.Speed then
-        hum.WalkSpeed = math.min(State.SpeedValue or 18, 18)
+        hum.WalkSpeed = math.min(State.SpeedValue or 20, 20)
+    end
+
+    -- ⚡ วิ่งไม่เหนื่อย (Infinite Stamina): เติม Stamina เต็มหลอดตลอดเวลา และป้องกันสถานะเหนื่อยหอบ
+    if State.InfiniteStamina then
+        local fn = GetRunSystemRenderFn()
+        if fn then
+            pcall(debug.setupvalue, fn, 5, false) -- isExhausted = false
+            pcall(debug.setupvalue, fn, 10, 100)  -- stamina = 100
+        end
+        local pgui = LocalPlayer:FindFirstChild("PlayerGui")
+        local rs = pgui and pgui:FindFirstChild("RunSystem")
+        if rs and rs:GetAttribute("BlockStamina") == true then
+            pcall(function() rs:SetAttribute("BlockStamina", false) end)
+        end
+    end
+
+    -- 🛡️ Godmode (อมตะ): รักษาระดับเลือดเต็มตลอดเวลา ป้องกันสถานะล้มตาย/ดาเมจ
+    if State.Godmode then
+        if hum.Health < hum.MaxHealth then
+            pcall(function() hum.Health = hum.MaxHealth end)
+        end
+        if hum:GetState() == Enum.HumanoidStateType.Dead then
+            pcall(function() hum:ChangeState(Enum.HumanoidStateType.Running) end)
+        end
     end
 end)
 
@@ -354,18 +380,71 @@ local defaultLighting = {
     OutdoorAmbient = Lighting.OutdoorAmbient,
 }
 
+local _lightLockConn = nil
+
 local function EnableFullBright()
+    -- ปิด DayNightLighting script ฝั่ง game ก่อน
     pcall(function()
-        Lighting.Brightness = 2
-        Lighting.ClockTime = 14
-        Lighting.FogEnd = 100000
-        Lighting.GlobalShadows = false
-        Lighting.Ambient = Color3.fromRGB(180, 180, 180)
-        Lighting.OutdoorAmbient = Color3.fromRGB(180, 180, 180)
+        local dayNightScript = LocalPlayer.PlayerScripts:FindFirstChild("DayNightLighting")
+        if dayNightScript then dayNightScript.Disabled = true end
+    end)
+
+    -- ตั้งค่าแสงกลางวัน
+    local function applyDay()
+        pcall(function()
+            Lighting.ClockTime = 14
+            Lighting.Brightness = 2
+            Lighting.Ambient = Color3.fromRGB(88, 88, 90)
+            Lighting.OutdoorAmbient = Color3.fromRGB(128, 128, 128)
+            Lighting.ColorShift_Top = Color3.fromRGB(255, 236, 200)
+            Lighting.GlobalShadows = true
+            Lighting.FogEnd = 100000
+            local atmo = Lighting:FindFirstChildOfClass("Atmosphere")
+            if atmo then
+                atmo.Density = 0.28
+                atmo.Offset = 0.6
+                atmo.Glare = 0.15
+                atmo.Haze = 0.8
+                atmo.Color = Color3.fromRGB(190, 190, 200)
+                atmo.Decay = Color3.fromRGB(175, 180, 195)
+            end
+            local grade = Lighting:FindFirstChild("DayNightGrade")
+            if grade then
+                grade.Saturation = 0.03
+                grade.Contrast = 0
+                grade.Brightness = 0.02
+                grade.TintColor = Color3.fromRGB(255, 252, 248)
+            end
+        end)
+    end
+
+    applyDay()
+
+    -- ล็อคด้วย Changed event — ครอบคลุมทุก prop ที่ game พยายามเปลี่ยน
+    if _lightLockConn then _lightLockConn:Disconnect() end
+    _lightLockConn = Lighting.Changed:Connect(function(prop)
+        if not State.FullBright then return end
+        local lockProps = {
+            ClockTime = true, TimeOfDay = true,
+            Brightness = true, Ambient = true,
+            OutdoorAmbient = true, GlobalShadows = true,
+        }
+        if lockProps[prop] then
+            task.defer(applyDay)
+        end
     end)
 end
 
 local function RestoreLighting()
+    -- ตัด lock ก่อนคืนค่า ป้องกัน event loop
+    if _lightLockConn then
+        _lightLockConn:Disconnect()
+        _lightLockConn = nil
+    end
+    pcall(function()
+        local dayNightScript = LocalPlayer.PlayerScripts:FindFirstChild("DayNightLighting")
+        if dayNightScript then dayNightScript.Disabled = false end
+    end)
     pcall(function()
         Lighting.Brightness = defaultLighting.Brightness
         Lighting.ClockTime = defaultLighting.ClockTime
@@ -373,24 +452,12 @@ local function RestoreLighting()
         Lighting.GlobalShadows = defaultLighting.GlobalShadows
         Lighting.Ambient = defaultLighting.Ambient
         Lighting.OutdoorAmbient = defaultLighting.OutdoorAmbient
+        Lighting.ColorShift_Top = Color3.new(0, 0, 0)
     end)
 end
 
-local lastFullBrightTick = 0
-Connections.FullBrightLoop = RunService.Heartbeat:Connect(function()
-    if State.FullBright and State.Running then
-        local now = os.clock()
-        if now - lastFullBrightTick >= 0.5 then
-            lastFullBrightTick = now
-            pcall(function()
-                if Lighting.Brightness ~= 2 then Lighting.Brightness = 2 end
-                if Lighting.ClockTime ~= 14 then Lighting.ClockTime = 14 end
-                if Lighting.FogEnd ~= 100000 then Lighting.FogEnd = 100000 end
-                if Lighting.GlobalShadows ~= false then Lighting.GlobalShadows = false end
-            end)
-        end
-    end
-end)
+-- RenderStepped loop ไม่จำเป็นอีกต่อไป ใช้ Changed event แทน (ไม่กระพริบ)
+Connections.FullBrightLoop = RunService.RenderStepped:Connect(function() end)
 
 --------------------------------------------------------------
 -- 🎯 4. ระบบ TARGET ESP สีชัดเจน แยกประเภท เหล็ก (ส้มทอง) / กำแพง (เขียวนีออน)
@@ -1602,6 +1669,28 @@ function MacLib:Window(Settings)
 	baseUIStroke2.Transparency = 0.9
 	baseUIStroke2.Parent = headshot
 
+	-- 🟢 จุดสถานะออนไลน์ (Online Status Indicator) สีเขียวนีออน
+	local onlineDot = Instance.new("Frame")
+	onlineDot.Name = "OnlineBadge"
+	onlineDot.Size = UDim2.fromOffset(9, 9)
+	onlineDot.Position = UDim2.new(1, -2, 1, -2)
+	onlineDot.AnchorPoint = Vector2.new(0.5, 0.5)
+	onlineDot.BackgroundColor3 = Color3.fromRGB(34, 197, 94)
+	onlineDot.BorderSizePixel = 0
+	onlineDot.ZIndex = 5
+
+	local onlineCorner = Instance.new("UICorner")
+	onlineCorner.CornerRadius = UDim.new(1, 0)
+	onlineCorner.Parent = onlineDot
+
+	local onlineStroke = Instance.new("UIStroke")
+	onlineStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	onlineStroke.Color = Color3.fromRGB(15, 15, 20)
+	onlineStroke.Thickness = 1.5
+	onlineStroke.Parent = onlineDot
+
+	onlineDot.Parent = headshot
+
 	headshot.Parent = informationGroup
 
 	local userAndDisplayFrame = Instance.new("Frame")
@@ -2618,7 +2707,7 @@ function MacLib:Window(Settings)
 
 					local function NewState(State, callback)
 						local targetPos = State and UDim2.new(1, -10, 0.5, 0) or UDim2.new(0, 10, 0.5, 0)
-						local targetBg = State and Color3.fromRGB(60, 60, 66) or Color3.fromRGB(42, 42, 46)
+						local targetBg = State and Color3.fromRGB(220, 38, 38) or Color3.fromRGB(42, 42, 46)
 						local targetHeadColor = State and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(75, 75, 80)
 
 						Tween(togglerHead, tweenInfo, {
@@ -4730,10 +4819,18 @@ local function CreateFloatingToggleButton(windowObj)
         corner.Parent = mainBtn
 
         local stroke = Instance.new("UIStroke")
-        stroke.Color = Color3.fromRGB(255, 45, 45)
-        stroke.Thickness = 1.6
-        stroke.Transparency = 0.25
+        stroke.Color = Color3.fromHSV(0, 1, 1)
+        stroke.Thickness = 1.2
+        stroke.Transparency = 0
+        stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
         stroke.Parent = mainBtn
+
+        -- 🌈 RGB loop — หมุน hue ต่อเนื่อง
+        local _btnHue = 0
+        RunService.Heartbeat:Connect(function(dt)
+            _btnHue = (_btnHue + dt * 0.18) % 1
+            stroke.Color = Color3.fromHSV(_btnHue, 1, 1)
+        end)
 
         local logoImg = Instance.new("ImageLabel")
         logoImg.Name = "Logo"
@@ -4797,10 +4894,10 @@ local function CreateFloatingToggleButton(windowObj)
         end)
 
         mainBtn.MouseEnter:Connect(function()
-            TweenService:Create(stroke, TweenInfo.new(0.2), { Transparency = 0, Thickness = 2.2 }):Play()
+            TweenService:Create(stroke, TweenInfo.new(0.2), { Thickness = 1.8 }):Play()
         end)
         mainBtn.MouseLeave:Connect(function()
-            TweenService:Create(stroke, TweenInfo.new(0.2), { Transparency = 0.25, Thickness = 1.6 }):Play()
+            TweenService:Create(stroke, TweenInfo.new(0.2), { Thickness = 1.2 }):Play()
         end)
 
         screenGui.Parent = targetGuiParent
@@ -4922,9 +5019,9 @@ local function CreateTabAdapter(rawTab, tabName)
 end
 
 local Tabs = {
-    Farm      = CreateTabAdapter(tabGroup:Tab({ Name = "งาน & ฟาร์ม", Image = "rbxassetid://18821914323" }), "Farm"),
-    Merchant  = CreateTabAdapter(tabGroup:Tab({ Name = "พ่อค้าพเนจร", Image = "rbxassetid://10709791437" }), "Merchant"),
-    Combat    = CreateTabAdapter(tabGroup:Tab({ Name = "ระบบต่อสู้",   Image = "rbxassetid://10734950309" }), "Combat"),
+    Farm      = CreateTabAdapter(tabGroup:Tab({ Name = "งาน & ฟาร์ม", Image = "rbxassetid://10723405360" }), "Farm"),
+    Merchant  = CreateTabAdapter(tabGroup:Tab({ Name = "พ่อค้าพเนจร", Image = "rbxassetid://10734952479" }), "Merchant"),
+    Combat    = CreateTabAdapter(tabGroup:Tab({ Name = "ระบบต่อสู้",   Image = "rbxassetid://10709818534" }), "Combat"),
     Player    = CreateTabAdapter(tabGroup:Tab({ Name = "ตัวละคร",     Image = "rbxassetid://10747373176" }), "Player"),
     Settings  = CreateTabAdapter(tabGroup:Tab({ Name = "ตั้งค่า",       Image = "rbxassetid://10734950309" }), "Settings")
 }
@@ -5609,6 +5706,7 @@ local function ClaimConstructionWage(isAuto)
                 local ea = eb and eb:FindFirstChild("EarningsAmount")
                 if ea then ea.Text = "0 Cash" end
             end
+            if UpdateWageDisplay then UpdateWageDisplay("0 Cash") end
         elseif not isAuto then
             Notify("งานก่อสร้าง", "ยังไม่มียอดเงินสะสมให้เคลม หรือทำงานก่อนนะ", "", 2.5)
         end
@@ -5616,13 +5714,50 @@ local function ClaimConstructionWage(isAuto)
     return successResult
 end
 
--- 🔔 ดักจับ Event UpdateEarnings สำหรับระบบ Auto Claim
+local WageEarningsParagraph = nil
+
+local function GetCurrentAccumulatedWage()
+    local text = "0 Cash"
+    pcall(function()
+        local pgui = LocalPlayer:FindFirstChild("PlayerGui")
+        local cUI = pgui and pgui:FindFirstChild("ConstructionUI")
+        local mf = cUI and cUI:FindFirstChild("MainFrame")
+        local wp = mf and mf:FindFirstChild("WorkPage")
+        local eb = wp and wp:FindFirstChild("EarningsBox")
+        local ea = eb and eb:FindFirstChild("EarningsAmount")
+        if ea and ea.Text ~= "" then
+            text = ea.Text
+        end
+    end)
+    return text
+end
+
+local function UpdateWageDisplay(customAmountText)
+    if not WageEarningsParagraph then return end
+    local earnStr = customAmountText or GetCurrentAccumulatedWage()
+    pcall(function()
+        if type(WageEarningsParagraph.SetTitle) == "function" then
+            WageEarningsParagraph:SetTitle("💵 ยอดเงินสะสม: " .. earnStr)
+        end
+        if type(WageEarningsParagraph.SetDesc) == "function" then
+            WageEarningsParagraph:SetDesc("")
+        end
+    end)
+end
+
+-- 🔔 ดักจับ Event UpdateEarnings สำหรับระบบ Auto Claim และ Realtime UI
 pcall(function()
     local const = ReplicatedStorage:FindFirstChild("Job") and ReplicatedStorage.Job:FindFirstChild("Construction")
     local updateEarnings = const and const:FindFirstChild("UpdateEarnings")
     if updateEarnings then
         if Connections.AutoClaimUpdateConn then Connections.AutoClaimUpdateConn:Disconnect() end
         Connections.AutoClaimUpdateConn = updateEarnings.OnClientEvent:Connect(function(newEarnings)
+            if typeof(newEarnings) == "number" then
+                UpdateWageDisplay(tostring(newEarnings) .. " Cash")
+            else
+                UpdateWageDisplay()
+            end
+
             if State.Running and State.AutoClaimConstruction and typeof(newEarnings) == "number" and newEarnings >= 300 then
                 task.delay(0.6, function()
                     if State.Running and State.AutoClaimConstruction then
@@ -6983,48 +7118,28 @@ local cachedMerchantHRP = nil
 local lastMerchantSearchTime = 0
 
 FindMerchantNPC = function()
-    -- ตรวจสอบแคชก่อน หากยังมีอยู่ในเกมให้คืนค่าทันที ไม่ต้องค้นหาซ้ำ
-    if cachedMerchantModel and cachedMerchantModel.Parent and cachedMerchantHRP and cachedMerchantHRP.Parent then
-        return cachedMerchantModel, cachedMerchantHRP
+    -- ตรวจสอบโมเดลที่บันทึกไว้ว่ายังอยู่ใน Workspace หรือไม่
+    if cachedMerchantModel and cachedMerchantModel.Parent and cachedMerchantModel:IsDescendantOf(Workspace) then
+        local liveHRP = cachedMerchantModel:FindFirstChild("HumanoidRootPart")
+                     or cachedMerchantModel:FindFirstChild("Torso")
+                     or cachedMerchantModel:FindFirstChild("Head")
+                     or cachedMerchantModel.PrimaryPart
+                     or cachedMerchantModel:FindFirstChildWhichIsA("BasePart", true)
+        if liveHRP then
+            cachedMerchantHRP = liveHRP
+            return cachedMerchantModel, cachedMerchantHRP
+        end
     end
 
-    local now = os.clock()
-    -- หน่วงเวลาการค้นหาใหม่ ไม่สแกนบ่อยเกินไป (อย่างน้อย 3 วินาที)
-    if now - lastMerchantSearchTime < 3.0 then
-        return cachedMerchantModel, cachedMerchantHRP
-    end
-    lastMerchantSearchTime = now
-
-    -- 1. ค้นหาโมเดล SecretShopNPC ใน Workspace:GetChildren() (เร็วมาก ไม่กิน CPU)
+    -- 1. ค้นหาโมเดล SecretShopNPC ใน Workspace:GetChildren()
     for _, obj in ipairs(Workspace:GetChildren()) do
-        if obj:IsA("Model") and string.find(obj.Name, "SecretShopNPC") then
+        if obj:IsA("Model") and (string.find(obj.Name, "SecretShopNPC") or string.find(obj.Name, "พ่อค้าพเนจร")) then
             local hrp = obj:FindFirstChild("HumanoidRootPart")
                      or obj:FindFirstChild("Torso")
                      or obj:FindFirstChild("Head")
                      or obj:FindFirstChild("UpperTorso")
                      or obj.PrimaryPart
                      or obj:FindFirstChildWhichIsA("BasePart", true)
-
-            if not hrp then
-                local pivot = obj:GetPivot()
-                if pivot and pivot.Position ~= Vector3.zero then
-                    if not Hub.LocalMerchantAnchor or not Hub.LocalMerchantAnchor.Parent then
-                        local anchor = Instance.new("Part")
-                        anchor.Name = "KrakenMerchantAnchor"
-                        anchor.Size = Vector3.new(2, 5, 2)
-                        anchor.Transparency = 1
-                        anchor.CanCollide = false
-                        anchor.Anchored = true
-                        anchor.Parent = Workspace
-                        Hub.LocalMerchantAnchor = anchor
-                    end
-                    Hub.LocalMerchantAnchor.CFrame = pivot
-                    pcall(function()
-                        LocalPlayer:RequestStreamAroundAsync(pivot.Position)
-                    end)
-                    hrp = Hub.LocalMerchantAnchor
-                end
-            end
 
             if hrp then
                 cachedMerchantModel = obj
@@ -7034,8 +7149,8 @@ FindMerchantNPC = function()
         end
     end
 
-    -- 2. ค้นหาในโฟลเดอร์เป้าหมายเฉพาะ (ไม่สแกนทั้ง Workspace:GetDescendants)
-    local targetFolders = {"NPC", "NPCs", "Map", "Spawns", "Shop"}
+    -- 2. ค้นหาในโฟลเดอร์เป้าหมายยอดนิยม
+    local targetFolders = {"NPC", "NPCs", "Map", "Spawns", "Shop", "Shops", "SecretShop"}
     for _, fName in ipairs(targetFolders) do
         local f = Workspace:FindFirstChild(fName)
         if f then
@@ -7052,6 +7167,22 @@ FindMerchantNPC = function()
                         return obj, hrp
                     end
                 end
+            end
+        end
+    end
+
+    -- 3. สแกนแบบลึกค้นหาทั่ว Workspace เผื่อเกมสุ่มจุดเกิดในซับโฟลเดอร์ใหม่
+    for _, desc in ipairs(Workspace:GetDescendants()) do
+        if desc:IsA("Model") and (string.find(desc.Name, "SecretShopNPC") or string.find(desc.Name, "พ่อค้าพเนจร")) then
+            local hrp = desc:FindFirstChild("HumanoidRootPart")
+                     or desc:FindFirstChild("Torso")
+                     or desc:FindFirstChild("Head")
+                     or desc.PrimaryPart
+                     or desc:FindFirstChildWhichIsA("BasePart", true)
+            if hrp then
+                cachedMerchantModel = desc
+                cachedMerchantHRP = hrp
+                return desc, hrp
             end
         end
     end
@@ -7520,6 +7651,20 @@ AutoClaimToggle:OnChanged(function()
     end
 end)
 
+-- 💵 กล่องแสดงยอดเงินสะสม Real-time ตรงกลาง
+WageEarningsParagraph = Tabs.Farm:AddParagraph({
+    Title = "💵 ยอดเงินสะสม: " .. GetCurrentAccumulatedWage(),
+    Content = ""
+})
+
+-- ลูปอัปเดตยอดเงินสะสม Real-time ทุก 1 วินาที
+task.spawn(function()
+    while State.Running and _G._KrakenScriptId == MY_SCRIPT_ID do
+        task.wait(1.0)
+        UpdateWageDisplay()
+    end
+end)
+
 Tabs.Farm:AddButton({
     Title = "💵 กดรับเงินทันที",
     Description = "รับเงินค่าจ้างงานก่อสร้างที่สะสมอยู่ทั้งหมดเข้ากระเป๋าทันที 1 คลิก",
@@ -7576,26 +7721,10 @@ Tabs.Merchant:AddButton({
     end
 })
 
-Tabs.Merchant:AddButton({
-    Title = "🔄 ซิงค์เวลาเซิร์ฟเวอร์",
-    Description = "ดึงข้อมูลและซิงค์รอบเวลาพ่อค้าพเนจรจากเซิร์ฟเวอร์ใหม่ทันที",
-    Callback = function()
-        pcall(function()
-            SyncMerchantServerCycle()
-            local title, desc = GetMerchantStatusDisplay()
-            if MerchantStatusParagraph and type(MerchantStatusParagraph.SetTitle) == "function" then
-                MerchantStatusParagraph:SetTitle(title)
-                MerchantStatusParagraph:SetDesc(desc)
-            end
-        end)
-        Notify("พ่อค้าพเนจร", "ซิงค์เวลาเซิร์ฟเวอร์สำเร็จ!", "", 2.5)
-    end
-})
-
 -- [แท็บ 2: ตัวละคร]
 Tabs.Player:AddParagraph({
-    Title = "🏃 ระบบปรับแต่งตัวละคร & Visuals",
-    Content = "Speed, Jump, Noclip, Fly, InfJump และมองทะลุ (ESP)"
+    Title = "🏃 ระบบปรับแต่งตัวละคร & ความอยู่รอด",
+    Content = "Speed, วิ่งไม่เหนื่อย, Godmode (อมตะ), Noclip, Fly, InfJump และ ESP"
 })
 
 local SpeedToggle = Tabs.Player:AddToggle("SpeedOn", { Title = "⚡ วิ่งไว (Speed Hack)", Default = false })
@@ -7611,11 +7740,33 @@ local SpeedSlider = Tabs.Player:AddSlider("SpeedVal", {
     Title = "⚡ ความเร็วเดิน (Speed)",
     Default = 17,
     Min = 8,
-    Max = 18,
+    Max = 20,
     Rounding = 0
 })
 SpeedSlider:OnChanged(function()
     State.SpeedValue = Options.SpeedVal.Value
+end)
+
+local StaminaToggle = Tabs.Player:AddToggle("InfiniteStaminaOn", {
+    Title = "🏃 วิ่งไม่เหนื่อย (Infinite Stamina)",
+    Description = "ล็อคสเตมิน่าเต็ม 100% ตลอดเวลา วิ่งได้ไม่มีสะดุด ไม่ติดสถานะหอบเหนื่อย",
+    Default = false
+})
+StaminaToggle:OnChanged(function()
+    State.InfiniteStamina = Options.InfiniteStaminaOn.Value
+end)
+
+local GodmodeToggle = Tabs.Player:AddToggle("GodmodeOn", {
+    Title = "🛡️ อมตะ (Godmode)",
+    Description = "ฟื้นฟูเลือดเต็มตลอดเวลา ป้องกันดาเมจและป้องกันสถานะล้มตาย",
+    Default = false
+})
+GodmodeToggle:OnChanged(function()
+    State.Godmode = Options.GodmodeOn.Value
+    if State.Godmode then
+        local hum = GetHuman()
+        if hum then hum.Health = hum.MaxHealth end
+    end
 end)
 
 local NoclipToggle = Tabs.Player:AddToggle("NoclipOn", { Title = "👻 เดินทะลุกำแพง (Noclip)", Default = false })
