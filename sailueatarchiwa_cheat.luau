@@ -104,21 +104,37 @@ end)
 -- ⚡ 2. ระบบเชื่อมต่อ RUNSYSTEM ของเกม (วิ่ง Shift แท้ สเตมิน่าลดตามธรรมชาติ)
 --------------------------------------------------------------
 local cachedRunSystemFn = nil
+local lastRunSystemSearch = 0
+local runSystemSearchFailed = false
 local function GetRunSystemRenderFn()
     if cachedRunSystemFn then return cachedRunSystemFn end
+    if runSystemSearchFailed and (os.clock() - lastRunSystemSearch < 5.0) then
+        return nil
+    end
+    lastRunSystemSearch = os.clock()
+
     local pgui = LocalPlayer:FindFirstChild("PlayerGui")
     local rs = pgui and pgui:FindFirstChild("RunSystem")
-    if not rs or typeof(getconnections) ~= "function" then return nil end
-    for _, c in ipairs(getconnections(RunService.RenderStepped)) do
-        local fn = c.Function
-        if fn then
-            local s, src = pcall(debug.info, fn, "s")
-            if s and tostring(src):find("RunSystem") then
-                cachedRunSystemFn = fn
-                return fn
+    if not rs or typeof(getconnections) ~= "function" then
+        runSystemSearchFailed = true
+        return nil
+    end
+
+    local s, conns = pcall(getconnections, RunService.RenderStepped)
+    if s and type(conns) == "table" then
+        for _, c in ipairs(conns) do
+            local fn = c.Function
+            if fn then
+                local sInfo, src = pcall(debug.info, fn, "s")
+                if sInfo and tostring(src):find("RunSystem") then
+                    cachedRunSystemFn = fn
+                    runSystemSearchFailed = false
+                    return fn
+                end
             end
         end
     end
+    runSystemSearchFailed = true
     return nil
 end
 
@@ -137,7 +153,7 @@ local Hub = {
         SelectedJob = "งานก่อสร้าง",
         AutoFarm = false,
         FarmSpeed = 17.5,
-        AutoSolveMinigame = false,
+        AutoSolveMinigame = true,
         AutoHire = true,
         AutoClaimConstruction = false, -- เคลมเงินค่าจ้างงานก่อสร้างอัตโนมัติ
         ConstructionFilter = "กำแพง & เหล็ก", -- "ทั้งหมด", "กำแพง & เหล็ก", "เฉพาะกำแพง", "เฉพาะเหล็ก"
@@ -163,6 +179,9 @@ local Hub = {
         ESPShowDistance = true,
         ESPShowHealthBar = true,
         FullBright = false,
+        BoostFPS = false,
+        TargetFPS = 60,
+        HideToggleButton = false,
         -- ปืน & Combat
         NoSpread = false,
         NoRecoil = false,
@@ -300,15 +319,16 @@ end
 
 -- ควบคุมความเร็วใน RenderStepped: ล็อคตัว 0 ขณะทำงาน, คืนการควบคุมให้ RunSystem ขณะเดินทาง, และรักษามุมกล้องให้นิ่งสนิท
 local lastCameraShakeClear = 0
+local lastStaminaCheck = 0
 Connections.SpeedEnforcer = RunService.RenderStepped:Connect(function()
     if not State.Running then return end
     local hum = GetHuman()
     local hrp = GetHRP()
     if not hum or hum.Health <= 0 or not hrp then return end
 
-    -- 🛑 ล้างค่าสั่นมุมกล้อง math.noise ของ RunSystem ให้เป็น 0 (หน่วงเวลาเพื่อลดภาระ CPU)
+    -- 🛑 ล้างค่าสั่นมุมกล้อง math.noise ของ RunSystem ให้เป็น 0 (หน่วงเวลา 0.5s เพื่อลดภาระ CPU)
     local now = os.clock()
-    if now - lastCameraShakeClear >= 0.25 then
+    if now - lastCameraShakeClear >= 0.5 then
         lastCameraShakeClear = now
         local fn = GetRunSystemRenderFn()
         if fn then
@@ -343,8 +363,9 @@ Connections.SpeedEnforcer = RunService.RenderStepped:Connect(function()
         hum.WalkSpeed = math.min(State.SpeedValue or 20, 20)
     end
 
-    -- ⚡ วิ่งไม่เหนื่อย (Infinite Stamina): เติม Stamina เต็มหลอดตลอดเวลา และป้องกันสถานะเหนื่อยหอบ
-    if State.InfiniteStamina then
+    -- ⚡ วิ่งไม่เหนื่อย (Infinite Stamina): เติม Stamina เต็มหลอด (เช็คทุก 0.15s เพื่อไม่ให้แย่ง Render Frame)
+    if State.InfiniteStamina and (now - lastStaminaCheck >= 0.15) then
+        lastStaminaCheck = now
         local fn = GetRunSystemRenderFn()
         if fn then
             pcall(debug.setupvalue, fn, 5, false) -- isExhausted = false
@@ -456,26 +477,250 @@ local function RestoreLighting()
     end)
 end
 
--- RenderStepped loop ไม่จำเป็นอีกต่อไป ใช้ Changed event แทน (ไม่กระพริบ)
-Connections.FullBrightLoop = RunService.RenderStepped:Connect(function() end)
+-- RenderStepped loop ไม่จำเป็น ใช้ Changed event แทน
+if Connections.FullBrightLoop then
+    pcall(function() Connections.FullBrightLoop:Disconnect() end)
+    Connections.FullBrightLoop = nil
+end
+
+--------------------------------------------------------------
+-- ⚡ ระบบ ULTRA BOOST FPS (เน้นลื่นไหลสูงสุด ปลดล็อค FPS + คลีนกราฟิก)
+--------------------------------------------------------------
+local _boostFPSConn = nil
+local _origTerrainProps = nil
+local _disabledEffects = {}
+
+local function OptimizeInstance(v)
+    pcall(function()
+        if not v or not v.Parent then return end
+        if v.Name and (v.Name:find("Kraken") or v.Name:find("ESP") or v.Name:find("MacLib")) then
+            return
+        end
+        if v:IsA("BasePart") then
+            v.Material = Enum.Material.SmoothPlastic
+            v.Reflectance = 0
+            v.CastShadow = false
+        elseif v:IsA("Decal") or v:IsA("Texture") then
+            v.Transparency = 1
+        elseif v:IsA("ParticleEmitter") or v:IsA("Trail") or v:IsA("Smoke") or v:IsA("Fire") or v:IsA("Sparkles") or v:IsA("Beam") then
+            v.Enabled = false
+        elseif v:IsA("PostEffect") or v:IsA("Atmosphere") or v:IsA("BloomEffect") or v:IsA("BlurEffect") or v:IsA("ColorCorrectionEffect") or v:IsA("SunRaysEffect") or v:IsA("DepthOfFieldEffect") then
+            if v.Enabled then
+                table.insert(_disabledEffects, v)
+                v.Enabled = false
+            end
+        end
+    end)
+end
+
+local function ApplyFPSCap(fps)
+    pcall(function()
+        if setfpscap then
+            setfpscap(fps)
+        elseif set_fps_cap then
+            set_fps_cap(fps)
+        end
+    end)
+end
+
+local function EnableBoostFPS()
+    -- 1. ปลดล็อค FPS Cap
+    local cap = State.TargetFPS or 999
+    ApplyFPSCap(cap)
+
+    -- 2. ปรับ Rendering Settings ให้ต่ำสุด
+    pcall(function()
+        settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+    end)
+
+    -- 3. ปรับ Lighting
+    pcall(function()
+        Lighting.GlobalShadows = false
+        Lighting.FogEnd = 9e9
+        for _, effect in ipairs(Lighting:GetChildren()) do
+            if effect:IsA("PostEffect") or effect:IsA("Atmosphere") or effect:IsA("Sky") then
+                pcall(function()
+                    if effect:IsA("PostEffect") or effect:IsA("Atmosphere") then
+                        if effect.Enabled then
+                            table.insert(_disabledEffects, effect)
+                            effect.Enabled = false
+                        end
+                    end
+                end)
+            end
+        end
+    end)
+
+    -- 4. ปรับ Terrain
+    pcall(function()
+        local terrain = workspace:FindFirstChildOfClass("Terrain")
+        if terrain then
+            if not _origTerrainProps then
+                _origTerrainProps = {
+                    Decoration = terrain.Decoration,
+                    WaterWaveSize = terrain.WaterWaveSize,
+                    WaterWaveSpeed = terrain.WaterWaveSpeed,
+                    WaterReflectance = terrain.WaterReflectance,
+                    WaterTransparency = terrain.WaterTransparency,
+                }
+            end
+            terrain.Decoration = false
+            terrain.WaterWaveSize = 0
+            terrain.WaterWaveSpeed = 0
+            terrain.WaterReflectance = 0
+            terrain.WaterTransparency = 0
+        end
+    end)
+
+    -- 5. สแกนและลดภาระโมเดล/พาร์ททั้งหมดใน workspace แบบแบ่งแบทช์ (ไม่ทำให้เกิด Frame Drop/Stutter)
+    task.spawn(function()
+        local descendants = workspace:GetDescendants()
+        for i, v in ipairs(descendants) do
+            if not State.BoostFPS then break end
+            OptimizeInstance(v)
+            if i % 150 == 0 then
+                task.wait()
+            end
+        end
+    end)
+
+    -- 6. Hook DescendantAdded เพื่อจัดการ object ที่สตรีมเข้ามาใหม่ทันที
+    if _boostFPSConn then
+        _boostFPSConn:Disconnect()
+        _boostFPSConn = nil
+    end
+    _boostFPSConn = workspace.DescendantAdded:Connect(function(v)
+        if State.BoostFPS then
+            OptimizeInstance(v)
+        end
+    end)
+    Connections.BoostFPSDescendant = _boostFPSConn
+end
+
+local function DisableBoostFPS()
+    if _boostFPSConn then
+        _boostFPSConn:Disconnect()
+        _boostFPSConn = nil
+        Connections.BoostFPSDescendant = nil
+    end
+
+    -- คืนค่า Effects
+    for _, effect in ipairs(_disabledEffects) do
+        pcall(function()
+            if effect and effect.Parent then
+                effect.Enabled = true
+            end
+        end)
+    end
+    _disabledEffects = {}
+
+    -- คืนค่า Terrain
+    pcall(function()
+        local terrain = workspace:FindFirstChildOfClass("Terrain")
+        if terrain and _origTerrainProps then
+            terrain.Decoration = _origTerrainProps.Decoration
+            terrain.WaterWaveSize = _origTerrainProps.WaterWaveSize
+            terrain.WaterWaveSpeed = _origTerrainProps.WaterWaveSpeed
+            terrain.WaterReflectance = _origTerrainProps.WaterReflectance
+            terrain.WaterTransparency = _origTerrainProps.WaterTransparency
+        end
+    end)
+
+    -- คืนค่า Lighting หากไม่ได้เปิด FullBright
+    if not State.FullBright then
+        pcall(function()
+            Lighting.GlobalShadows = defaultLighting.GlobalShadows
+            Lighting.FogEnd = defaultLighting.FogEnd
+        end)
+    end
+end
 
 --------------------------------------------------------------
 -- 🎯 4. ระบบ TARGET ESP สีชัดเจน แยกประเภท เหล็ก (ส้มทอง) / กำแพง (เขียวนีออน)
+-- Re-use Highlight & Billboard แทนการ Destroy/Create ซ้ำๆ (แก้ปัญหา GPU Stutter 100%)
 --------------------------------------------------------------
 local currentTargetHighlight = nil
 local currentTargetBillboard = nil
+local currentTargetAttachPart = nil
 local currentTargetInstance = nil
 local currentTargetStatus = nil
 
+local function EnsureTargetESP()
+    if not currentTargetHighlight or not currentTargetHighlight.Parent then
+        pcall(function() if currentTargetHighlight then currentTargetHighlight:Destroy() end end)
+        local hl = Instance.new("Highlight")
+        hl.Name = "KrakenTargetFarmHighlight"
+        hl.FillTransparency = 0.28
+        hl.OutlineTransparency = 0
+        hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        hl.Enabled = false
+        hl.Parent = CoreGui
+        currentTargetHighlight = hl
+    end
+
+    if not currentTargetBillboard or not currentTargetBillboard.Parent then
+        pcall(function() if currentTargetBillboard then currentTargetBillboard:Destroy() end end)
+        local bb = Instance.new("BillboardGui")
+        bb.Name = "KrakenTargetFarmBillboard"
+        bb.Size = UDim2.new(0, 180, 0, 48)
+        bb.StudsOffset = Vector3.new(0, 3.4, 0)
+        bb.AlwaysOnTop = true
+        bb.MaxDistance = 45
+        bb.Enabled = false
+
+        local frame = Instance.new("Frame")
+        frame.Size = UDim2.new(1, 0, 1, 0)
+        frame.BackgroundColor3 = Color3.fromRGB(15, 20, 25)
+        frame.BackgroundTransparency = 0.18
+        frame.BorderSizePixel = 0
+        frame.Parent = bb
+
+        local uic = Instance.new("UICorner")
+        uic.CornerRadius = UDim.new(0, 8)
+        uic.Parent = frame
+
+        local uis = Instance.new("UIStroke")
+        uis.Name = "BorderStroke"
+        uis.Color = Color3.fromRGB(160, 255, 255)
+        uis.Thickness = 2.0
+        uis.Parent = frame
+
+        local tLabel = Instance.new("TextLabel")
+        tLabel.Name = "TitleLabel"
+        tLabel.Size = UDim2.new(1, 0, 0.52, 0)
+        tLabel.BackgroundTransparency = 1
+        tLabel.Font = Enum.Font.GothamBold
+        tLabel.TextSize = 12
+        tLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+        tLabel.Text = "🎯 จุดทำงานเป้าหมาย"
+        tLabel.Parent = frame
+
+        local dLabel = Instance.new("TextLabel")
+        dLabel.Name = "DistLabel"
+        dLabel.Size = UDim2.new(1, 0, 0.48, 0)
+        dLabel.Position = UDim2.new(0, 0, 0.52, 0)
+        dLabel.BackgroundTransparency = 1
+        dLabel.Font = Enum.Font.GothamMedium
+        dLabel.TextSize = 11
+        dLabel.TextColor3 = Color3.fromRGB(0, 240, 160)
+        dLabel.Text = "เป้าหมาย • กำลังคำนวณ..."
+        dLabel.Parent = frame
+
+        bb.Parent = CoreGui
+        currentTargetBillboard = bb
+    end
+end
+
 local function ClearTargetESP()
     if currentTargetHighlight then
-        pcall(function() currentTargetHighlight:Destroy() end)
-        currentTargetHighlight = nil
+        currentTargetHighlight.Enabled = false
+        currentTargetHighlight.Adornee = nil
     end
     if currentTargetBillboard then
-        pcall(function() currentTargetBillboard:Destroy() end)
-        currentTargetBillboard = nil
+        currentTargetBillboard.Enabled = false
+        currentTargetBillboard.Adornee = nil
     end
+    currentTargetAttachPart = nil
     currentTargetInstance = nil
     currentTargetStatus = nil
 end
@@ -486,23 +731,26 @@ local function SetTargetESP(targetInstance, titleText, customColor, statusText)
         return
     end
 
+    EnsureTargetESP()
     currentTargetStatus = statusText or "เป้าหมาย"
 
-    -- ถ้าเป็นเป้าหมายเดิม แค่อัปเดตข้อความหัวเรื่อง/สถานะ
-    if currentTargetInstance == targetInstance and currentTargetHighlight and currentTargetHighlight.Parent and currentTargetBillboard and currentTargetBillboard.Parent then
-        local frame = currentTargetBillboard:FindFirstChildOfClass("Frame")
-        if frame then
-            local tLabel = frame:FindFirstChild("TitleLabel")
+    -- ถ้าเป็นเป้าหมายเดิม แค่อัปเดตข้อความหัวเรื่อง
+    if currentTargetInstance == targetInstance then
+        if currentTargetBillboard then
+            currentTargetBillboard.Enabled = true
+            local frame = currentTargetBillboard:FindFirstChildOfClass("Frame")
+            local tLabel = frame and frame:FindFirstChild("TitleLabel")
             if tLabel and titleText then
                 tLabel.Text = "🎯 " .. titleText
             end
         end
+        if currentTargetHighlight then
+            currentTargetHighlight.Enabled = true
+        end
         return
     end
 
-    ClearTargetESP()
     currentTargetInstance = targetInstance
-    currentTargetStatus = statusText or "เป้าหมาย"
 
     local adornee = targetInstance
     if adornee:IsA("ProximityPrompt") then
@@ -512,47 +760,41 @@ local function SetTargetESP(targetInstance, titleText, customColor, statusText)
         adornee = adornee.Parent
     end
 
-    -- หากชิ้นส่วนอยู่ใต้ Model ประจำจุด (NailSite, WeldSite, DrillSite) ให้นำ Model นั้นมาทำ Highlight
     if adornee:IsA("BasePart") and adornee.Parent and adornee.Parent:IsA("Model") and adornee.Parent ~= Workspace and adornee.Parent ~= Workspace:FindFirstChild("Job") and adornee.Parent.Name ~= "งาน" then
         adornee = adornee.Parent
     end
 
-    -- กรองชิ้นส่วนขนาดใหญ่ของแมพ (Union ฐานราก, ZoneBound ขนาดเกิน 30 studs)
     if adornee:IsA("BasePart") and (adornee.Size.X > 30 or adornee.Size.Z > 30 or adornee.Size.Y > 30) then
         adornee = nil
     end
 
-    -- กำหนดสีแยกประเภทอย่างชัดเจน
     local textLower = string.lower(titleText or "")
     local fillColor = customColor or Color3.fromRGB(0, 240, 160)
     local outlineColor = Color3.fromRGB(160, 255, 255)
 
     if titleText and (titleText:find("เหล็ก") or textLower:find("steel") or textLower:find("weld")) then
-        fillColor = Color3.fromRGB(255, 145, 0)      -- Neon Orange-Gold
-        outlineColor = Color3.fromRGB(255, 235, 70)   -- Neon Gold-Yellow Glow
+        fillColor = Color3.fromRGB(255, 145, 0)
+        outlineColor = Color3.fromRGB(255, 235, 70)
     elseif titleText and (titleText:find("กำแพง") or titleText:find("ตะปู") or textLower:find("nail") or textLower:find("wall")) then
-        fillColor = Color3.fromRGB(0, 240, 160)      -- Neon Cyan-Green
-        outlineColor = Color3.fromRGB(160, 255, 255)  -- Ice Cyan Glow
+        fillColor = Color3.fromRGB(0, 240, 160)
+        outlineColor = Color3.fromRGB(160, 255, 255)
     elseif titleText and (titleText:find("หิน") or textLower:find("drill") or textLower:find("rock")) then
-        fillColor = Color3.fromRGB(190, 110, 255)    -- Neon Purple
-        outlineColor = Color3.fromRGB(255, 200, 255)  -- Pink-White Glow
+        fillColor = Color3.fromRGB(190, 110, 255)
+        outlineColor = Color3.fromRGB(255, 200, 255)
     elseif titleText and titleText:find("NPC") then
-        fillColor = Color3.fromRGB(0, 210, 255)      -- Sky Blue
+        fillColor = Color3.fromRGB(0, 210, 255)
         outlineColor = Color3.fromRGB(255, 255, 255)
     end
 
     pcall(function()
-        if adornee then
-            local hl = Instance.new("Highlight")
-            hl.Name = "KrakenTargetFarmHighlight"
-            hl.Adornee = adornee
-            hl.FillColor = fillColor
-            hl.FillTransparency = 0.28
-            hl.OutlineColor = outlineColor
-            hl.OutlineTransparency = 0
-            hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-            hl.Parent = CoreGui
-            currentTargetHighlight = hl
+        if adornee and currentTargetHighlight then
+            currentTargetHighlight.Adornee = adornee
+            currentTargetHighlight.FillColor = fillColor
+            currentTargetHighlight.OutlineColor = outlineColor
+            currentTargetHighlight.Enabled = true
+        elseif currentTargetHighlight then
+            currentTargetHighlight.Enabled = false
+            currentTargetHighlight.Adornee = nil
         end
 
         local attachPart = nil
@@ -564,7 +806,7 @@ local function SetTargetESP(targetInstance, titleText, customColor, statusText)
                       or targetInstance:FindFirstChild("Mountain")
                       or targetInstance:FindFirstChild("Prompt")
                       or targetInstance.PrimaryPart
-                      or targetInstance:FindFirstChildWhichIsA("BasePart", true)
+                      or targetInstance:FindFirstChildWhichIsA("BasePart")
         end
         if not attachPart and adornee and adornee:IsA("Model") then
             attachPart = adornee:FindFirstChild("WoodPlank")
@@ -572,60 +814,33 @@ local function SetTargetESP(targetInstance, titleText, customColor, statusText)
                       or adornee:FindFirstChild("Mountain")
                       or adornee:FindFirstChild("Prompt")
                       or adornee.PrimaryPart
-                      or adornee:FindFirstChildWhichIsA("BasePart", true)
+                      or adornee:FindFirstChildWhichIsA("BasePart")
         end
         if not attachPart and adornee and adornee:IsA("BasePart") then
             attachPart = adornee
         end
 
-        if attachPart then
-            local bb = Instance.new("BillboardGui")
-            bb.Name = "KrakenTargetFarmBillboard"
-            bb.Adornee = attachPart
-            bb.Size = UDim2.new(0, 180, 0, 48)
-            bb.StudsOffset = Vector3.new(0, 3.4, 0)
-            bb.AlwaysOnTop = true
-            bb.MaxDistance = 45
+        currentTargetAttachPart = attachPart
 
-            local frame = Instance.new("Frame")
-            frame.Size = UDim2.new(1, 0, 1, 0)
-            frame.BackgroundColor3 = Color3.fromRGB(15, 20, 25)
-            frame.BackgroundTransparency = 0.18
-            frame.BorderSizePixel = 0
-            frame.Parent = bb
+        if attachPart and currentTargetBillboard then
+            currentTargetBillboard.Adornee = attachPart
+            currentTargetBillboard.Enabled = true
 
-            local uic = Instance.new("UICorner")
-            uic.CornerRadius = UDim.new(0, 8)
-            uic.Parent = frame
-
-            local uis = Instance.new("UIStroke")
-            uis.Color = outlineColor
-            uis.Thickness = 2.0
-            uis.Parent = frame
-
-            local tLabel = Instance.new("TextLabel")
-            tLabel.Name = "TitleLabel"
-            tLabel.Size = UDim2.new(1, 0, 0.52, 0)
-            tLabel.BackgroundTransparency = 1
-            tLabel.Font = Enum.Font.GothamBold
-            tLabel.TextSize = 12
-            tLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-            tLabel.Text = "🎯 " .. (titleText or "จุดทำงานเป้าหมาย")
-            tLabel.Parent = frame
-
-            local dLabel = Instance.new("TextLabel")
-            dLabel.Name = "DistLabel"
-            dLabel.Size = UDim2.new(1, 0, 0.48, 0)
-            dLabel.Position = UDim2.new(0, 0, 0.52, 0)
-            dLabel.BackgroundTransparency = 1
-            dLabel.Font = Enum.Font.GothamMedium
-            dLabel.TextSize = 11
-            dLabel.TextColor3 = fillColor
-            dLabel.Text = (currentTargetStatus or "เป้าหมาย") .. " • กำลังคำนวณ..."
-            dLabel.Parent = frame
-
-            bb.Parent = CoreGui
-            currentTargetBillboard = bb
+            local frame = currentTargetBillboard:FindFirstChildOfClass("Frame")
+            if frame then
+                local uis = frame:FindFirstChild("BorderStroke")
+                if uis then uis.Color = outlineColor end
+                local tLabel = frame:FindFirstChild("TitleLabel")
+                if tLabel then tLabel.Text = "🎯 " .. (titleText or "จุดทำงานเป้าหมาย") end
+                local dLabel = frame:FindFirstChild("DistLabel")
+                if dLabel then
+                    dLabel.TextColor3 = fillColor
+                    dLabel.Text = (currentTargetStatus or "เป้าหมาย") .. " • กำลังคำนวณ..."
+                end
+            end
+        elseif currentTargetBillboard then
+            currentTargetBillboard.Enabled = false
+            currentTargetBillboard.Adornee = nil
         end
     end)
 end
@@ -633,16 +848,13 @@ end
 local lastTargetESPUpdate = 0
 Connections.TargetESPUpdate = RunService.Heartbeat:Connect(function()
     local now = os.clock()
-    if now - lastTargetESPUpdate < 0.08 then return end
+    if now - lastTargetESPUpdate < 0.1 then return end
     lastTargetESPUpdate = now
 
-    if currentTargetBillboard and currentTargetInstance then
-        local attachPart = (currentTargetInstance:IsA("BasePart") and currentTargetInstance)
-                        or (currentTargetBillboard.Adornee and currentTargetBillboard.Adornee:IsA("BasePart") and currentTargetBillboard.Adornee)
-                        or currentTargetInstance:FindFirstChildWhichIsA("BasePart", true)
+    if currentTargetBillboard and currentTargetBillboard.Enabled and currentTargetAttachPart then
         local hrp = GetHRP()
-        if attachPart and hrp then
-            local dist = (hrp.Position - attachPart.Position).Magnitude
+        if hrp and currentTargetAttachPart.Parent then
+            local dist = (hrp.Position - currentTargetAttachPart.Position).Magnitude
             local frame = currentTargetBillboard:FindFirstChildOfClass("Frame")
             local dLabel = frame and frame:FindFirstChild("DistLabel")
             if dLabel then
@@ -1153,7 +1365,7 @@ end
 
 
 -- ==============================================================
--- 🎨 MACLIB UI LIBRARY (EMBEDDED NATIVE MACOS UI)
+-- 🎨 UI LIBRARY (EMBEDDED NATIVE MACOS UI)
 -- ==============================================================
 local MacLib = (function()
 local MacLib = { 
@@ -4655,6 +4867,14 @@ function MacLib:Window(Settings)
 
 	local MenuKeybind = Settings.Keybind or Enum.KeyCode.RightControl
 
+	function WindowFunctions:SetKeybind(newKey)
+		MenuKeybind = newKey
+	end
+
+	function WindowFunctions:GetKeybind()
+		return MenuKeybind
+	end
+
 	local function ToggleMenu()
 		local state = not WindowFunctions:GetState()
 		WindowFunctions:SetState(state)
@@ -4662,7 +4882,7 @@ function MacLib:Window(Settings)
 
 	UserInputService.InputEnded:Connect(function(inp, gpe)
 		if gpe then return end
-		if inp.KeyCode == MenuKeybind then
+		if MenuKeybind and inp.KeyCode == MenuKeybind then
 			ToggleMenu()
 		end
 	end)
@@ -4825,11 +5045,27 @@ local function CreateFloatingToggleButton(windowObj)
         stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
         stroke.Parent = mainBtn
 
-        -- 🌈 RGB loop — หมุน hue ต่อเนื่อง
+        -- 🌈 RGB loop — หมุน hue ต่อเนื่อง (throttle 10 FPS เพื่อไม่ให้กินเฟรมเรนเดอร์)
         local _btnHue = 0
-        RunService.Heartbeat:Connect(function(dt)
-            _btnHue = (_btnHue + dt * 0.18) % 1
-            stroke.Color = Color3.fromHSV(_btnHue, 1, 1)
+        local _lastBtnHue = 0
+        if Connections.ToggleBtnRGB then
+            pcall(function() Connections.ToggleBtnRGB:Disconnect() end)
+        end
+        Connections.ToggleBtnRGB = RunService.Heartbeat:Connect(function(dt)
+            if not State.Running or not screenGui.Parent then return end
+            if State.HideToggleButton then
+                if screenGui.Enabled then screenGui.Enabled = false end
+                return
+            else
+                if not screenGui.Enabled then screenGui.Enabled = true end
+            end
+            local now = os.clock()
+            if now - _lastBtnHue >= 0.1 then
+                local delta = now - _lastBtnHue
+                _lastBtnHue = now
+                _btnHue = (_btnHue + delta * 0.18) % 1
+                stroke.Color = Color3.fromHSV(_btnHue, 1, 1)
+            end
         end)
 
         local logoImg = Instance.new("ImageLabel")
@@ -5130,7 +5366,7 @@ pcall(function()
 
         if mgRemote then
             Connections.MiniGameConn = mgRemote.OnClientEvent:Connect(function(siteType, siteInstance, challengeKey)
-                if not State.AutoSolveMinigame or not State.Running then return end
+                if not State.AutoSolveMinigame then return end
 
                 local minWaitTimes = {
                     NailSite = 3.5,
@@ -5155,7 +5391,7 @@ pcall(function()
                 activeMiniGame = session
 
                 task.spawn(function()
-                    while State.Running and State.AutoSolveMinigame and not session.completed do
+                    while State.AutoSolveMinigame and not session.completed do
                         task.wait(0.12)
                         if session.key and inputRemote then
                             pcall(function() inputRemote:FireServer(session.key) end)
@@ -5165,12 +5401,14 @@ pcall(function()
                         if elapsed >= session.minWait then
                             session.completed = true
                             pcall(function()
-                                if doneRemote then
-                                    doneRemote:FireServer(session.siteType, session.siteInstance)
+                                if session.siteType ~= "TrashDigSite" then
+                                    if doneRemote then
+                                        doneRemote:FireServer(session.siteType, session.siteInstance)
+                                    end
+                                    local pgui = LocalPlayer:FindFirstChild("PlayerGui")
+                                    local mgUI = pgui and pgui:FindFirstChild("MiniGameUI")
+                                    if mgUI then mgUI.Enabled = false end
                                 end
-                                local pgui = LocalPlayer:FindFirstChild("PlayerGui")
-                                local mgUI = pgui and pgui:FindFirstChild("MiniGameUI")
-                                if mgUI then mgUI.Enabled = false end
                             end)
                             ReleaseVIM()
                             break
@@ -5184,7 +5422,7 @@ end)
 
 -- ควบคุมเมาส์จำลอง VIM & UI Visuals ให้เป็นธรรมชาติ 100%
 Connections.MinigameHoldLoop = RunService.Heartbeat:Connect(function()
-    if not State.AutoSolveMinigame or not State.Running then
+    if not State.AutoSolveMinigame then
         ReleaseVIM()
         return
     end
@@ -5198,40 +5436,94 @@ Connections.MinigameHoldLoop = RunService.Heartbeat:Connect(function()
         local sw = mg:FindFirstChild("Sweep")
         local ef = mg:FindFirstChild("EngineFrame")
         local efOil = ef and ef:FindFirstChild("OilFrame")
+        local tf = mg:FindFirstChild("TrashFrame")
 
-        local needsHold = (wf and wf.Visible) or (df and df.Visible) or (sf and sf.Visible) or (sw and sw.Visible) or (efOil and efOil.Visible)
+        local needsHold = (wf and wf.Visible) or (df and df.Visible) or (sf and sf.Visible) or (sw and sw.Visible) or (efOil and efOil.Visible) or (tf and tf.Visible)
         if needsHold then
-            local targetBtn = (wf and wf.Visible and wf:FindFirstChild("WeldBtn"))
-                           or (df and df.Visible and (df:FindFirstChild("DrillBtn") or df:FindFirstChild("WeldBtn")))
-                           or (sf and sf.Visible and sf:FindFirstChild("FloorBg"))
-                           or (sw and sw.Visible and sw:FindFirstChild("FloorBg"))
-                           or (efOil and efOil.Visible and efOil:FindFirstChild("OilBtn"))
-            local posX, posY = 960, 450
-            if targetBtn and targetBtn:IsA("GuiObject") then
-                posX = targetBtn.AbsolutePosition.X + targetBtn.AbsoluteSize.X / 2
-                posY = targetBtn.AbsolutePosition.Y + targetBtn.AbsoluteSize.Y / 2
-            end
-
             local hrp = GetHRP()
             if hrp then
                 hrp.AssemblyLinearVelocity = Vector3.zero
                 hrp.AssemblyAngularVelocity = Vector3.zero
             end
 
-            if not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
-                VirtualInputManager:SendMouseButtonEvent(posX, posY, 0, true, game, 0)
-                isVIMHolding = true
-            end
+            if tf and tf.Visible then
+                local darkBox = tf:FindFirstChild("DarkBox")
+                local inputCatcher = darkBox and darkBox:FindFirstChild("InputCatcher")
+                local targetObj = nil
+                if darkBox then
+                    for _, ch in ipairs(darkBox:GetChildren()) do
+                        if ch.Name == "Target" and ch:IsA("GuiObject") and ch.Visible then
+                            local icon = ch:FindFirstChild("Icon")
+                            local isDone = false
+                            if icon and icon:IsA("ImageLabel") then
+                                local c = icon.ImageColor3
+                                if c.R < 0.6 and c.G > 0.7 and c.B < 0.65 then
+                                    isDone = true
+                                end
+                            end
+                            if not isDone then
+                                targetObj = ch
+                                break
+                            end
+                        end
+                    end
+                end
 
-            if (sf and sf.Visible) or (sw and sw.Visible) then
-                local floor = (sf and sf.Visible and sf:FindFirstChild("FloorBg")) or (sw and sw.Visible and sw:FindFirstChild("FloorBg"))
-                if floor then
-                    local absPos = floor.AbsolutePosition
-                    local absSize = floor.AbsoluteSize
-                    local sweepT = tick() * 14
-                    local moveX = absPos.X + absSize.X * (0.5 + 0.42 * math.sin(sweepT))
-                    local moveY = absPos.Y + absSize.Y * (0.5 + 0.35 * math.cos(sweepT * 1.5))
-                    VirtualInputManager:SendMouseMoveEvent(moveX, moveY, game)
+                if targetObj then
+                    local cx = targetObj.AbsolutePosition.X + targetObj.AbsoluteSize.X / 2
+                    local cy = targetObj.AbsolutePosition.Y + targetObj.AbsoluteSize.Y / 2
+
+                    VirtualInputManager:SendMouseMoveEvent(cx, cy, game)
+
+                    if not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+                        VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true, game, 0)
+                        isVIMHolding = true
+                    end
+
+                    pcall(function()
+                        if inputCatcher then
+                            local conns = getconnections(inputCatcher.MouseButton1Down)
+                            if #conns > 0 and conns[1].Function then
+                                local startHoldFn = getupvalues(conns[1].Function)[1]
+                                if startHoldFn then
+                                    local updateLightFn = getupvalues(startHoldFn)[9]
+                                    if updateLightFn then
+                                        updateLightFn(Vector2.new(cx, cy))
+                                    end
+                                end
+                            end
+                        end
+                    end)
+                else
+                    ReleaseVIM()
+                end
+            else
+                local targetBtn = (wf and wf.Visible and wf:FindFirstChild("WeldBtn"))
+                               or (df and df.Visible and (df:FindFirstChild("DrillBtn") or df:FindFirstChild("WeldBtn")))
+                               or (sf and sf.Visible and sf:FindFirstChild("FloorBg"))
+                               or (sw and sw.Visible and sw:FindFirstChild("FloorBg"))
+                               or (efOil and efOil.Visible and efOil:FindFirstChild("OilBtn"))
+                local posX, posY = 960, 450
+                if targetBtn and targetBtn:IsA("GuiObject") then
+                    posX = targetBtn.AbsolutePosition.X + targetBtn.AbsoluteSize.X / 2
+                    posY = targetBtn.AbsolutePosition.Y + targetBtn.AbsoluteSize.Y / 2
+                end
+
+                if not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+                    VirtualInputManager:SendMouseButtonEvent(posX, posY, 0, true, game, 0)
+                    isVIMHolding = true
+                end
+
+                if (sf and sf.Visible) or (sw and sw.Visible) then
+                    local floor = (sf and sf.Visible and sf:FindFirstChild("FloorBg")) or (sw and sw.Visible and sw:FindFirstChild("FloorBg"))
+                    if floor then
+                        local absPos = floor.AbsolutePosition
+                        local absSize = floor.AbsoluteSize
+                        local sweepT = tick() * 14
+                        local moveX = absPos.X + absSize.X * (0.5 + 0.42 * math.sin(sweepT))
+                        local moveY = absPos.Y + absSize.Y * (0.5 + 0.35 * math.cos(sweepT * 1.5))
+                        VirtualInputManager:SendMouseMoveEvent(moveX, moveY, game)
+                    end
                 end
             end
         else
@@ -5244,7 +5536,7 @@ end)
 
 -- ตอกตะปู / ล้อรถ / ขุดขยะ / น็อตเครื่องยนต์ / เทน้ำมัน
 task.spawn(function()
-    while State.Running and _G._KrakenScriptId == MY_SCRIPT_ID do
+    while _G._KrakenScriptId == MY_SCRIPT_ID do
         task.wait(0.12)
         if State.AutoSolveMinigame then
             local pgui = LocalPlayer:FindFirstChild("PlayerGui")
@@ -5276,14 +5568,7 @@ task.spawn(function()
                     end
                 end
 
-                local tf = mg:FindFirstChild("TrashFrame")
-                if tf and tf.Visible then
-                    pcall(function()
-                        local digResult = ReplicatedStorage.Job:FindFirstChild("ขยะ") and ReplicatedStorage.Job["ขยะ"]:FindFirstChild("DigResult")
-                        if digResult then digResult:FireServer(true) end
-                    end)
-                    task.wait(0.5)
-                end
+                -- จัดการขยะ (TrashFrame) ปล่อยให้ MinigameHoldLoop ล็อคไฟฉายทีละจุดตามธรรมชาติ 15 วินาที เพื่อให้เซิร์ฟเวอร์ดรอปไอเทมลงกระเป๋า 100%
 
                 local wf = mg:FindFirstChild("WheelFrame")
                 if wf and wf.Visible then
@@ -5475,39 +5760,17 @@ local function ScanConstructionWorkSpots()
                     if pPart then
                         local spotPos = pPart.Position
                         local standPos = nil
-                        local bestStandDist = 999
-                        local testAngles = {0, 45, 90, 135, 180, 225, 270, 315}
+                        local testAngles = {0, 90, 180, 270}
 
-                        for _, offsetDist in ipairs({2.0, 2.5, 3.0, 3.4}) do
-                            for _, deg in ipairs(testAngles) do
-                                local rad = math.rad(deg)
-                                local offset = Vector3.new(math.cos(rad) * offsetDist, 0, math.sin(rad) * offsetDist)
-                                local testP = spotPos + offset
-                                local rayDown = Workspace:Raycast(testP + Vector3.new(0, 5, 0), Vector3.new(0, -20, 0), rayParams)
-                                if rayDown then
-                                    local floorY = rayDown.Position.Y
-                                    local hrpY = floorY + 3.0
-                                    local candidateHRP = Vector3.new(testP.X, hrpY, testP.Z)
-                                    local dist3D = (candidateHRP - spotPos).Magnitude
-
-                                    if dist3D <= 4.4 and dist3D < bestStandDist then
-                                        local partsInBox = Workspace:GetPartBoundsInBox(CFrame.new(candidateHRP), Vector3.new(1.8, 3.0, 1.8))
-                                        local collides = false
-                                        for _, pt in ipairs(partsInBox) do
-                                            if pt.CanCollide and pt ~= rayDown.Instance and pt.Size.Y > 1.0 and pt.Name ~= "Ground" and pt.Name ~= "Union" and pt.Name ~= "ZoneBound" then
-                                                collides = true
-                                                break
-                                            end
-                                        end
-
-                                        if not collides then
-                                            standPos = candidateHRP
-                                            bestStandDist = dist3D
-                                        end
-                                    end
-                                end
+                        for _, deg in ipairs(testAngles) do
+                            local rad = math.rad(deg)
+                            local offset = Vector3.new(math.cos(rad) * 2.5, 0, math.sin(rad) * 2.5)
+                            local testP = spotPos + offset
+                            local rayDown = Workspace:Raycast(testP + Vector3.new(0, 4, 0), Vector3.new(0, -12, 0), rayParams)
+                            if rayDown then
+                                standPos = Vector3.new(testP.X, rayDown.Position.Y + 3.0, testP.Z)
+                                break
                             end
-                            if standPos then break end
                         end
 
                         if not standPos then
@@ -5575,9 +5838,9 @@ local function GetNearestOpenSpot(jobType)
                 if not failedSpotCooldowns[targetObj] or now >= failedSpotCooldowns[targetObj] then
                     if not failedSpotCooldowns[part] or now >= failedSpotCooldowns[part] then
                         local standPos = spotInfo.standPos or spotInfo.spotPos
-                        if not isOccupied(standPos) and not isOccupied(spotInfo.spotPos) then
-                            local d = (myPos - standPos).Magnitude
-                            if math.abs(myPos.Y - standPos.Y) <= 6.5 and d < bestDist then
+                        local d = (myPos - standPos).Magnitude
+                        if d < bestDist and math.abs(myPos.Y - standPos.Y) <= 6.5 then
+                            if not isOccupied(standPos) and not isOccupied(spotInfo.spotPos) then
                                 bestDist = d
                                 bestSpot = targetObj
                                 bestPrompt = prompt
@@ -6020,7 +6283,7 @@ task.spawn(function()
                     ClearTargetESP()
                 end
             end
-            task.wait(0.25)
+            task.wait(0.8)
         end
     end
 end)
@@ -6035,13 +6298,12 @@ if Connections.Noclip then
     Connections.Noclip = nil
 end
 Connections.Noclip = RunService.Stepped:Connect(function()
-    if State.Running and State.Noclip then
-        local char = LocalPlayer.Character
-        if char then
-            for _, part in ipairs(char:GetChildren()) do
-                if part:IsA("BasePart") and part.CanCollide then
-                    part.CanCollide = false
-                end
+    if not State.Running or not State.Noclip then return end
+    local char = LocalPlayer.Character
+    if char then
+        for _, part in ipairs(char:GetChildren()) do
+            if part:IsA("BasePart") and part.CanCollide then
+                part.CanCollide = false
             end
         end
     end
@@ -6428,6 +6690,8 @@ local function UnifiedPlayerESPUpdate()
                     end
                     if rawTeamName ~= "" then
                         entry.CachedSchool = rawTeamName
+                    else
+                        entry.CachedSchool = "ประชาชน"
                     end
                 end
 
@@ -6533,12 +6797,12 @@ task.spawn(function()
     while State.Running and _G._KrakenScriptId == MY_SCRIPT_ID do
         if State.ESP then
             pcall(UnifiedPlayerESPUpdate)
-            task.wait(0.04)
+            task.wait(0.12)
         else
             if next(Hub.PlayerESPRegistry) then
                 ClearAllPlayerESP()
             end
-            task.wait(0.3)
+            task.wait(0.35)
         end
     end
 end)
@@ -6692,7 +6956,7 @@ task.spawn(function()
 end)
 
 --------------------------------------------------------------
--- 🎯 ปรับแต่งทิศทางกระสุน & B3 SILENT AIM SYSTEM
+-- 🎯 ปรับแต่งทิศทางกระสุน & SILENT AIM SYSTEM
 --------------------------------------------------------------
 local fovCircle = nil
 pcall(function()
@@ -7097,17 +7361,14 @@ local function GetRealtimeMerchantTimeString()
     end
 
     -- 4. หากพ่อค้าปรากฏในแมพแต่ยังไม่มีข้อมูลเวลา เริ่มต้นนับ 10 นาที (600 วินาที)
-    if FindMerchantNPC then
-        local model, hrp = FindMerchantNPC()
-        if model and hrp then
-            if not MerchantData.DespawnTimestamp or MerchantData.DespawnTimestamp <= os.clock() then
-                MerchantData.DespawnTimestamp = os.clock() + 600
-            end
-            local rem = math.max(0, math.floor(MerchantData.DespawnTimestamp - os.clock()))
-            local m = math.floor(rem / 60)
-            local s = math.floor(rem % 60)
-            return string.format(" | ⏱️ %d:%02d", m, s)
+    if cachedMerchantModel and cachedMerchantHRP then
+        if not MerchantData.DespawnTimestamp or MerchantData.DespawnTimestamp <= os.clock() then
+            MerchantData.DespawnTimestamp = os.clock() + 600
         end
+        local rem = math.max(0, math.floor(MerchantData.DespawnTimestamp - os.clock()))
+        local m = math.floor(rem / 60)
+        local s = math.floor(rem % 60)
+        return string.format(" | ⏱️ %d:%02d", m, s)
     end
 
     return ""
@@ -7124,14 +7385,20 @@ FindMerchantNPC = function()
                      or cachedMerchantModel:FindFirstChild("Torso")
                      or cachedMerchantModel:FindFirstChild("Head")
                      or cachedMerchantModel.PrimaryPart
-                     or cachedMerchantModel:FindFirstChildWhichIsA("BasePart", true)
+                     or cachedMerchantModel:FindFirstChildWhichIsA("BasePart")
         if liveHRP then
             cachedMerchantHRP = liveHRP
             return cachedMerchantModel, cachedMerchantHRP
         end
     end
 
-    -- 1. ค้นหาโมเดล SecretShopNPC ใน Workspace:GetChildren()
+    local now = os.clock()
+    if now - lastMerchantSearchTime < 3.0 then
+        return cachedMerchantModel, cachedMerchantHRP
+    end
+    lastMerchantSearchTime = now
+
+    -- 1. ค้นหาโมเดล SecretShopNPC ใน Workspace:GetChildren() (เร็วมาก ไม่กินเฟรม)
     for _, obj in ipairs(Workspace:GetChildren()) do
         if obj:IsA("Model") and (string.find(obj.Name, "SecretShopNPC") or string.find(obj.Name, "พ่อค้าพเนจร")) then
             local hrp = obj:FindFirstChild("HumanoidRootPart")
@@ -7139,7 +7406,7 @@ FindMerchantNPC = function()
                      or obj:FindFirstChild("Head")
                      or obj:FindFirstChild("UpperTorso")
                      or obj.PrimaryPart
-                     or obj:FindFirstChildWhichIsA("BasePart", true)
+                     or obj:FindFirstChildWhichIsA("BasePart")
 
             if hrp then
                 cachedMerchantModel = obj
@@ -7160,29 +7427,13 @@ FindMerchantNPC = function()
                              or obj:FindFirstChild("Torso")
                              or obj:FindFirstChild("Head")
                              or obj.PrimaryPart
-                             or obj:FindFirstChildWhichIsA("BasePart", true)
+                             or obj:FindFirstChildWhichIsA("BasePart")
                     if hrp then
                         cachedMerchantModel = obj
                         cachedMerchantHRP = hrp
                         return obj, hrp
                     end
                 end
-            end
-        end
-    end
-
-    -- 3. สแกนแบบลึกค้นหาทั่ว Workspace เผื่อเกมสุ่มจุดเกิดในซับโฟลเดอร์ใหม่
-    for _, desc in ipairs(Workspace:GetDescendants()) do
-        if desc:IsA("Model") and (string.find(desc.Name, "SecretShopNPC") or string.find(desc.Name, "พ่อค้าพเนจร")) then
-            local hrp = desc:FindFirstChild("HumanoidRootPart")
-                     or desc:FindFirstChild("Torso")
-                     or desc:FindFirstChild("Head")
-                     or desc.PrimaryPart
-                     or desc:FindFirstChildWhichIsA("BasePart", true)
-            if hrp then
-                cachedMerchantModel = desc
-                cachedMerchantHRP = hrp
-                return desc, hrp
             end
         end
     end
@@ -7312,17 +7563,9 @@ UpdateMerchantESPSubInfo = function()
 
     local myHRP = GetHRP()
     local hrp = bb.Adornee
-    if not hrp or not hrp.Parent then
-        if FindMerchantNPC then
-            local _, newHrp = FindMerchantNPC()
-            if newHrp then
-                bb.Adornee = newHrp
-                hrp = newHrp
-            end
-        end
-    end
+    if not hrp or not hrp.Parent then return end
 
-    local dist = (myHRP and hrp and hrp:IsA("BasePart")) and (myHRP.Position - hrp.Position).Magnitude or 0
+    local dist = (myHRP and hrp:IsA("BasePart")) and (myHRP.Position - hrp.Position).Magnitude or 0
     local meters = math.floor(dist * 0.28)
     local timeStr = GetRealtimeMerchantTimeString()
     subLbl.Text = string.format("อีก %d เมตร%s", meters, timeStr)
@@ -7431,7 +7674,7 @@ end
 Connections.MerchantHeartbeat = RunService.Heartbeat:Connect(function()
     if not State.MerchantESP or not State.Running then return end
     local now = os.clock()
-    if now - lastMerchantTick >= 0.1 then
+    if now - lastMerchantTick >= 0.2 then
         lastMerchantTick = now
         UpdateMerchantESPSubInfo()
     end
@@ -7522,7 +7765,7 @@ end
 local MerchantStatusParagraph = nil
 task.spawn(function()
     while State.Running and _G._KrakenScriptId == MY_SCRIPT_ID do
-        task.wait(1.0)
+        task.wait(2.0)
         pcall(function()
             UpdateMerchantESP()
 
@@ -7615,8 +7858,8 @@ end)
 
 local MinigameToggle = Tabs.Farm:AddToggle("AutoSolveMinigameOn", {
     Title = "🔨 แก้มินิเกมอัตโนมัติ",
-    Description = "ตอกตะปู, ซ่อมเครื่องยนต์, ขันน็อตล้อ, ถูพื้น อัตโนมัติ",
-    Default = false
+    Description = "ตอกตะปู, ซ่อมเครื่องยนต์, ขันน็อตล้อ, ถูพื้น, ส่องไฟคุ้ยขยะ อัตโนมัติ 100%",
+    Default = true
 })
 MinigameToggle:OnChanged(function()
     State.AutoSolveMinigame = Options.AutoSolveMinigameOn.Value
@@ -7897,7 +8140,7 @@ end)
 -- 🎯 แท็บ: ระบบต่อสู้ (COMBAT & SILENT AIM)
 --------------------------------------------------------------
 Tabs.Combat:AddParagraph({
-    Title = "🎯 B3 Silent Aim & Gun System",
+    Title = "🎯 Silent Aim & Gun System",
     Content = "ระบบล็อคกระสุนอัตโนมัติ คำนวณวิถีกระสุนเข้าเป้าหมาย พร้อมระบบชดเชยความเร็วเป้าหมาย และตรวจสอบสิ่งกีดขวาง"
 })
 
@@ -8007,6 +8250,35 @@ Tabs.Settings:AddParagraph({
 
 Tabs.Settings:AddSection("💡 การแสดงผล & แสงสว่าง (Visuals & Lighting)")
 
+local BoostFPSToggle = Tabs.Settings:AddToggle("BoostFPSOn", {
+    Title = "⚡ เพิ่มความลื่นไหล (Ultra Boost FPS)",
+    Description = "ปลดล็อค FPS, ปรับพื้นผิว Smooth Plastic, ปิดเงา/หมอก/เอฟเฟกต์ และอนุภาคทั้งหมด ให้เกมลื่นที่สุด",
+    Default = false
+})
+BoostFPSToggle:OnChanged(function()
+    State.BoostFPS = Options.BoostFPSOn.Value
+    if State.BoostFPS then
+        EnableBoostFPS()
+        Notify("Boost FPS", "เปิดใช้งาน Ultra Boost FPS สำเร็จ (เน้นลื่นสูงสุด)", "", 3)
+    else
+        DisableBoostFPS()
+        Notify("Boost FPS", "คืนค่ากราฟิกและปิดการทำงาน Boost FPS แล้ว", "", 2.5)
+    end
+end)
+
+local FPSCapSlider = Tabs.Settings:AddSlider("FPSCapVal", {
+    Title = "🎯 ล็อค FPS (FPS Cap)",
+    Min = 30,
+    Max = 240,
+    Default = 60,
+    Rounding = 0
+})
+FPSCapSlider:OnChanged(function()
+    local targetFPS = math.clamp(math.round(Options.FPSCapVal.Value), 30, 240)
+    State.TargetFPS = targetFPS
+    ApplyFPSCap(targetFPS)
+end)
+
 local FullBrightToggle = Tabs.Settings:AddToggle("FullBrightOn", {
     Title = "☀️ สว่างทั้งแมพ (Full Bright)",
     Description = "ปรับแสงสว่างทั้งแมพ ปิดเงามืด และปรับเป็นเวลากลางวันตลอดเวลา",
@@ -8020,6 +8292,32 @@ FullBrightToggle:OnChanged(function()
     else
         RestoreLighting()
         Notify("การแสดงผล", "คืนค่าแสงสว่างเริ่มต้นของเกมแล้ว", "", 2.5)
+    end
+end)
+
+Tabs.Settings:AddSection("⚙️ ปุ่มลัด & การแสดงผลเมนู (Menu Controls)")
+
+local MenuKeybindObj = Tabs.Settings:AddKeybind("MenuToggleKeybind", {
+    Title = "⌨️ ปุ่มลัดเปิด/ปิดเมนู",
+    Default = Enum.KeyCode.RightControl,
+    Callback = function(key)
+        if Window and Window.SetKeybind then
+            Window:SetKeybind(key)
+            local keyName = (typeof(key) == "EnumItem" and key.Name) or tostring(key)
+            Notify("ตั้งค่าปุ่มลัด", "เปลี่ยนปุ่มเปิด/ปิดเมนูเป็น: " .. keyName, "", 2.5)
+        end
+    end
+})
+
+local HideLogoToggle = Tabs.Settings:AddToggle("HideLogoOn", {
+    Title = "👁️ ซ่อนโลโก้เปิดปิดสคริปต์ (Hide Toggle Logo)",
+    Description = "ซ่อนปุ่มโลโก้ KrakenHub ลอยบนหน้าจอ (สามารถใช้ปุ่มลัดคีย์บอร์ดเปิด/ปิดเมนูแทน)",
+    Default = false
+})
+HideLogoToggle:OnChanged(function()
+    State.HideToggleButton = Options.HideLogoOn.Value
+    if Hub.ToggleButtonGui then
+        Hub.ToggleButtonGui.Enabled = not State.HideToggleButton
     end
 end)
 
@@ -8067,6 +8365,10 @@ function Hub.Unload()
     if State.FullBright then
         RestoreLighting()
     end
+    if State.BoostFPS then
+        DisableBoostFPS()
+    end
+    ApplyFPSCap(60)
     local hum = GetHuman()
     if hum then hum.WalkSpeed = NORMAL_WALK_SPEED; hum.JumpPower = 35 end
     if Hub.ToggleButtonGui then
@@ -8103,4 +8405,4 @@ end)
 
 Window:SelectTab(1)
 
-Notify("KrakenHub v1.0", "โหลดสำเร็จ! สไตล์ MacLib UI", "กดปุ่ม K หรือ Right Ctrl เพื่อเปิด/ปิดหน้าต่าง", 4)
+Notify("KrakenHub v1.0", "โหลดสำเร็จ!", "กดปุ่ม K หรือ Right Ctrl เพื่อเปิด/ปิดหน้าต่าง", 4)
