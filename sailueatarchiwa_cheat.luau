@@ -42,13 +42,13 @@ end
 
 local CoreGui = game:GetService("CoreGui")
 local targetGuiParent = pcall(function() return CoreGui.Name end) and CoreGui or LocalPlayer:WaitForChild("PlayerGui")
-for _, name in ipairs({"KrakenHub_ToggleButton", "SailueatHub_V3", "SailueatHub_V3_5", "SailueatHub_V3_6", "SailueatHub_V3_7", "SailueatHub_V3_8", "SailueatHub_V3_9", "SailueatHub_V2", "SailueatHub_V1", "Fluent"}) do
+for _, name in ipairs({"KrakenHub_ToggleButton", "SailueatHub_V3", "SailueatHub_V3_5", "SailueatHub_V3_6", "SailueatHub_V3_7", "SailueatHub_V3_8", "SailueatHub_V3_9", "SailueatHub_V2", "SailueatHub_V1", "Fluent", "MacLib", "KrakenHub"}) do
     local old = targetGuiParent:FindFirstChild(name)
     if old then pcall(function() old:Destroy() end) end
 end
 pcall(function()
-    for _, c in ipairs(CoreGui:GetChildren()) do
-        if c:IsA("ScreenGui") and (c.Name == "ScreenGui" or c.Name:find("Fluent")) then
+    for _, c in ipairs(targetGuiParent:GetChildren()) do
+        if c:IsA("ScreenGui") and (c.Name:find("MacLib") or c.Name:find("Kraken") or c.Name:find("Fluent") or c.Name == "ScreenGui") then
             c:Destroy()
         end
     end
@@ -258,6 +258,18 @@ local runAnimTrack = nil
 local isCurrentlySprinting = false
 local lastSprintChangeTime = 0
 
+-- ติดตามสถานะคลาน/คริง (C key toggle)
+local isCrouchActive = false
+UserInputService.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    if input.KeyCode == Enum.KeyCode.C then
+        isCrouchActive = not isCrouchActive
+    end
+end)
+LocalPlayer.CharacterRemoving:Connect(function()
+    isCrouchActive = false
+end)
+
 local function GetRunButton()
     local pgui = LocalPlayer:FindFirstChild("PlayerGui")
     return pgui and pgui:FindFirstChild("MobileGUI") and pgui.MobileGUI:FindFirstChild("MobileButtons") and pgui.MobileGUI.MobileButtons:FindFirstChild("RunButton")
@@ -447,9 +459,10 @@ Connections.SpeedEnforcer = RunService.RenderStepped:Connect(function()
         return
     end
 
-    -- หากผู้ใช้เปิด Cheats > Speed เสริมเอง ล็อคเพดานปลอดภัยไม่เกิน 18 studs/s
-    if State.Speed then
-        hum.WalkSpeed = math.min(State.SpeedValue or 18, 18)
+    -- หากผู้ใช้เปิด Cheats > Speed เสริมเอง ล็อคเพดานปลอดภัยไม่เกิน 20 studs/s
+    -- ยกเว้น: ถ้ากำลังคลาน (C toggle) อยู่ ไม่บังคับ override ให้คลานเร็ว
+    if State.Speed and not isCrouchActive then
+        hum.WalkSpeed = math.min(State.SpeedValue or 20, 20)
     end
 end)
 
@@ -487,19 +500,40 @@ local function RestoreLighting()
     end)
 end
 
-local lastFullBrightTick = 0
-Connections.FullBrightLoop = RunService.Heartbeat:Connect(function()
-    if State.FullBright and State.Running then
-        local now = os.clock()
-        if now - lastFullBrightTick >= 0.5 then
-            lastFullBrightTick = now
-            pcall(function()
-                if Lighting.Brightness ~= 2 then Lighting.Brightness = 2 end
-                if Lighting.ClockTime ~= 14 then Lighting.ClockTime = 14 end
-                if Lighting.FogEnd ~= 100000 then Lighting.FogEnd = 100000 end
-                if Lighting.GlobalShadows ~= false then Lighting.GlobalShadows = false end
-            end)
+-- FullBright: ใช้ Lighting.Changed แทน Heartbeat throttle
+-- → snap ค่ากลับทันทีทุกครั้งที่ game script แตะ Lighting ไม่มีกระพริบ
+local fullBrightChangedConn = nil
+
+local function StartFullBrightWatcher()
+    if fullBrightChangedConn then
+        pcall(function() fullBrightChangedConn:Disconnect() end)
+        fullBrightChangedConn = nil
+    end
+    EnableFullBright()
+    fullBrightChangedConn = Lighting.Changed:Connect(function()
+        if State.FullBright and State.Running then
+            pcall(EnableFullBright)
         end
+    end)
+end
+
+local function StopFullBrightWatcher()
+    if fullBrightChangedConn then
+        pcall(function() fullBrightChangedConn:Disconnect() end)
+        fullBrightChangedConn = nil
+    end
+    RestoreLighting()
+end
+
+-- Heartbeat เป็น fallback เผื่อ watcher หลุด (เช็คเบาๆ ทุก 2s)
+local lastFullBrightFallback = 0
+Connections.FullBrightLoop = RunService.Heartbeat:Connect(function()
+    if not State.FullBright or not State.Running then return end
+    if fullBrightChangedConn then return end  -- watcher ทำงานอยู่แล้ว
+    local now = os.clock()
+    if now - lastFullBrightFallback >= 2 then
+        lastFullBrightFallback = now
+        StartFullBrightWatcher()
     end
 end)
 
@@ -1740,7 +1774,8 @@ function MacLib:Window(Settings)
 	userAndDisplayFrame.BorderColor3 = Color3.fromRGB(0, 0, 0)
 	userAndDisplayFrame.BorderSizePixel = 0
 	userAndDisplayFrame.LayoutOrder = 1
-	userAndDisplayFrame.Size = UDim2.new(1, -42, 0, 32)
+	userAndDisplayFrame.AutomaticSize = Enum.AutomaticSize.Y
+	userAndDisplayFrame.Size = UDim2.new(1, -42, 0, 0)
 
 	local displayName = Instance.new("TextLabel")
 	displayName.Name = "DisplayName"
@@ -1798,6 +1833,106 @@ function MacLib:Window(Settings)
 	username.LayoutOrder = 1
 	username.Parent = userAndDisplayFrame
 	username.Size = UDim2.fromScale(1,0)
+
+	local statusContainer = Instance.new("Frame")
+	statusContainer.Name = "StatusContainer"
+	statusContainer.BackgroundTransparency = 1
+	statusContainer.Size = UDim2.new(1, 0, 0, 14)
+	statusContainer.LayoutOrder = 2
+
+	local statusListLayout = Instance.new("UIListLayout")
+	statusListLayout.Name = "StatusListLayout"
+	statusListLayout.FillDirection = Enum.FillDirection.Horizontal
+	statusListLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+	statusListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	statusListLayout.Padding = UDim.new(0, 5)
+	statusListLayout.Parent = statusContainer
+
+	local statusDot = Instance.new("Frame")
+	statusDot.Name = "StatusDot"
+	statusDot.BackgroundColor3 = Color3.fromRGB(52, 199, 89)
+	statusDot.BorderSizePixel = 0
+	statusDot.Size = UDim2.fromOffset(7, 7)
+	statusDot.LayoutOrder = 1
+
+	local dotCorner = Instance.new("UICorner")
+	dotCorner.CornerRadius = UDim.new(1, 0)
+	dotCorner.Parent = statusDot
+
+	local dotStroke = Instance.new("UIStroke")
+	dotStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	dotStroke.Color = Color3.fromRGB(52, 199, 89)
+	dotStroke.Transparency = 0.5
+	dotStroke.Thickness = 1.5
+	dotStroke.Parent = statusDot
+
+	statusDot.Parent = statusContainer
+
+	local statusText = Instance.new("TextLabel")
+	statusText.Name = "StatusText"
+	statusText.FontFace = Font.new(assets.interFont, Enum.FontWeight.Medium, Enum.FontStyle.Normal)
+	statusText.Text = "Online"
+	statusText.TextColor3 = Color3.fromRGB(52, 199, 89)
+	statusText.TextSize = 10.5
+	statusText.TextTransparency = 0.1
+	statusText.BackgroundTransparency = 1
+	statusText.AutomaticSize = Enum.AutomaticSize.X
+	statusText.Size = UDim2.fromOffset(0, 14)
+	statusText.TextXAlignment = Enum.TextXAlignment.Left
+	statusText.TextYAlignment = Enum.TextYAlignment.Center
+	statusText.LayoutOrder = 2
+	statusText.Parent = statusContainer
+
+	statusContainer.Parent = userAndDisplayFrame
+
+	-- Avatar badge dot on bottom-right of avatar
+	local avatarBadge = Instance.new("Frame")
+	avatarBadge.Name = "AvatarOnlineBadge"
+	avatarBadge.Size = UDim2.fromOffset(10, 10)
+	avatarBadge.Position = UDim2.new(1, -2, 1, -2)
+	avatarBadge.AnchorPoint = Vector2.new(1, 1)
+	avatarBadge.BackgroundColor3 = Color3.fromRGB(52, 199, 89)
+	avatarBadge.BorderSizePixel = 0
+
+	local badgeCorner = Instance.new("UICorner")
+	badgeCorner.CornerRadius = UDim.new(1, 0)
+	badgeCorner.Parent = avatarBadge
+
+	local badgeStroke = Instance.new("UIStroke")
+	badgeStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	badgeStroke.Color = Color3.fromRGB(20, 20, 24)
+	badgeStroke.Thickness = 1.8
+	badgeStroke.Parent = avatarBadge
+
+	avatarBadge.Parent = headshot
+
+	-- Smooth pulsing animation for online indicator
+	task.spawn(function()
+		local pulseTweenIn = TweenService:Create(dotStroke, TweenInfo.new(1.1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
+			Transparency = 0.1,
+			Thickness = 2.4
+		})
+		local pulseTweenOut = TweenService:Create(dotStroke, TweenInfo.new(1.1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
+			Transparency = 0.8,
+			Thickness = 1.0
+		})
+		local badgePulseIn = TweenService:Create(avatarBadge, TweenInfo.new(1.1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
+			BackgroundColor3 = Color3.fromRGB(72, 225, 110)
+		})
+		local badgePulseOut = TweenService:Create(avatarBadge, TweenInfo.new(1.1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
+			BackgroundColor3 = Color3.fromRGB(40, 175, 75)
+		})
+
+		while userAndDisplayFrame and userAndDisplayFrame.Parent do
+			pulseTweenIn:Play()
+			badgePulseIn:Play()
+			task.wait(1.1)
+			if not (userAndDisplayFrame and userAndDisplayFrame.Parent) then break end
+			pulseTweenOut:Play()
+			badgePulseOut:Play()
+			task.wait(1.1)
+		end
+	end)
 
 	userAndDisplayFrame.Parent = informationGroup
 
@@ -2141,6 +2276,13 @@ function MacLib:Window(Settings)
 	globalSettingsUIScale.Scale = 1e-07
 	globalSettingsUIScale.Parent = globalSettings
 	globalSettings.Parent = base
+
+	-- UIScale สำหรับ animate เปิด/ปิดหน้าต่าง
+	local menuUIScale = Instance.new("UIScale")
+	menuUIScale.Name = "MenuUIScale"
+	menuUIScale.Scale = 1
+	menuUIScale.Parent = base
+
 	base.Parent = macLib
 
 	function WindowFunctions:UpdateTitle(NewTitle)
@@ -2745,18 +2887,33 @@ function MacLib:Window(Settings)
 
 					local tweenInfo = TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
-					local function NewState(State, callback)
+					local function NewState(State, callback, instant)
 						local targetPos = State and UDim2.new(1, -10, 0.5, 0) or UDim2.new(0, 10, 0.5, 0)
-						local targetBg = State and Color3.fromRGB(60, 60, 66) or Color3.fromRGB(42, 42, 46)
+						local targetBg = State and Color3.fromRGB(235, 55, 60) or Color3.fromRGB(42, 42, 46)
 						local targetHeadColor = State and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(75, 75, 80)
+						local targetStrokeColor = State and Color3.fromRGB(255, 85, 90) or Color3.fromRGB(255, 255, 255)
+						local targetStrokeTrans = State and 0.5 or 0.94
 
-						Tween(togglerHead, tweenInfo, {
-							Position = targetPos,
-							BackgroundColor3 = targetHeadColor
-						}):Play()
-						Tween(toggle1, tweenInfo, {
-							BackgroundColor3 = targetBg
-						}):Play()
+						if instant then
+							-- ตั้งค่าตรงโดยไม่ใช้ Tween เพื่อป้องกันการกระพริบตอนโหลด
+							togglerHead.Position = targetPos
+							togglerHead.BackgroundColor3 = targetHeadColor
+							toggle1.BackgroundColor3 = targetBg
+							toggle1Stroke.Color = targetStrokeColor
+							toggle1Stroke.Transparency = targetStrokeTrans
+						else
+							Tween(togglerHead, tweenInfo, {
+								Position = targetPos,
+								BackgroundColor3 = targetHeadColor
+							}):Play()
+							Tween(toggle1, tweenInfo, {
+								BackgroundColor3 = targetBg
+							}):Play()
+							Tween(toggle1Stroke, tweenInfo, {
+								Color = targetStrokeColor,
+								Transparency = targetStrokeTrans
+							}):Play()
+						end
 
 						ToggleFunctions.State = State
 						ToggleFunctions.Value = State
@@ -2768,7 +2925,8 @@ function MacLib:Window(Settings)
 						end
 					end
 
-					NewState(togglebool)
+					-- ตั้งค่าเริ่มต้นทันทีโดยไม่ใช้ Tween (ป้องกันกระพริบตอนเปิด)
+					NewState(togglebool, nil, true)
 
 					local function Toggle()
 						togglebool = not togglebool
@@ -2791,7 +2949,8 @@ function MacLib:Window(Settings)
 					end
 					function ToggleFunctions:UpdateState(State)
 						togglebool = State
-						NewState(togglebool, ToggleFunctions.Settings.Callback)
+						-- instant = true เพื่อป้องกัน tween ซ้อนกันขณะโหลด config
+						NewState(togglebool, ToggleFunctions.Settings.Callback, true)
 					end
 					function ToggleFunctions:GetState()
 						return togglebool
@@ -3073,9 +3232,9 @@ function MacLib:Window(Settings)
 					local inputBox = Instance.new("TextBox")
 					inputBox.Name = "InputBox"
 					inputBox.FontFace = Font.new(assets.interFont)
-					inputBox.Text = "Hello world!"
+					inputBox.Text = ""
 					inputBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-					inputBox.TextSize = 12
+					inputBox.TextSize = 13
 					inputBox.TextTransparency = 0.1
 					inputBox.AnchorPoint = Vector2.new(1, 0.5)
 					inputBox.AutomaticSize = Enum.AutomaticSize.X
@@ -3086,8 +3245,8 @@ function MacLib:Window(Settings)
 					inputBox.ClipsDescendants = true
 					inputBox.LayoutOrder = 1
 					inputBox.Position = UDim2.fromScale(1, 0.5)
-					inputBox.Size = UDim2.fromOffset(21, 21)
-					inputBox.TextXAlignment = Enum.TextXAlignment.Right
+					inputBox.Size = UDim2.fromOffset(60, 24)
+					inputBox.TextXAlignment = Enum.TextXAlignment.Center
 
 					local inputBoxUICorner = Instance.new("UICorner")
 					inputBoxUICorner.Name = "InputBoxUICorner"
@@ -3103,12 +3262,13 @@ function MacLib:Window(Settings)
 
 					local inputBoxUIPadding = Instance.new("UIPadding")
 					inputBoxUIPadding.Name = "InputBoxUIPadding"
-					inputBoxUIPadding.PaddingLeft = UDim.new(0, 5)
-					inputBoxUIPadding.PaddingRight = UDim.new(0, 5)
+					inputBoxUIPadding.PaddingLeft = UDim.new(0, 8)
+					inputBoxUIPadding.PaddingRight = UDim.new(0, 8)
 					inputBoxUIPadding.Parent = inputBox
 
 					local inputBoxUISizeConstraint = Instance.new("UISizeConstraint")
 					inputBoxUISizeConstraint.Name = "InputBoxUISizeConstraint"
+					inputBoxUISizeConstraint.MinSize = Vector2.new(60, 24)
 					inputBoxUISizeConstraint.Parent = inputBox
 
 					inputBox.Parent = input
@@ -4217,12 +4377,15 @@ function MacLib:Window(Settings)
 				local inputPath = nil
 				local selectedConfig = nil
 
-				configSection:Input({
+				local configInput = configSection:Input({
 					Name = "Config Name",
 					Placeholder = "Name",
 					AcceptedCharacters = "All",
 					Callback = function(input)
 						inputPath = input
+					end,
+					onChanged = function(text)
+						inputPath = text
 					end,
 				})
 
@@ -4236,18 +4399,31 @@ function MacLib:Window(Settings)
 					end,
 				})
 
+				local function getTargetConfig()
+					local val = selectedConfig
+					if not val or val == "" then
+						val = configSelection.Value
+					end
+					if type(val) == "table" then
+						val = val[1]
+					end
+					return val
+				end
+
 				configSection:Button({
 					Name = "Create Config",
 					Callback = function()
-						if not inputPath or string.gsub(inputPath, " ", "") == "" then
+						local cfgName = (configInput and configInput.GetInput and configInput:GetInput()) or inputPath
+						if not cfgName or string.gsub(cfgName, "%s+", "") == "" then
 							WindowFunctions:Notify({
 								Title = "Interface",
 								Description = "Config name cannot be empty."
 							})
 							return
 						end
+						cfgName = string.gsub(cfgName, "^%s*(.-)%s*$", "%1")
 
-						local success, returned = MacLib:SaveConfig(inputPath)
+						local success, returned = MacLib:SaveConfig(cfgName)
 						if not success then
 							WindowFunctions:Notify({
 								Title = "Interface",
@@ -4258,18 +4434,30 @@ function MacLib:Window(Settings)
 
 						WindowFunctions:Notify({
 							Title = "Interface",
-							Description = string.format("Created config %q", inputPath),
+							Description = string.format("Created config %q", cfgName),
 						})
 
+						local list = MacLib:RefreshConfigList()
 						configSelection:ClearOptions()
-						configSelection:InsertOptions(MacLib:RefreshConfigList())
+						configSelection:InsertOptions(list)
+						selectedConfig = cfgName
+						pcall(function() configSelection:SetValue(cfgName) end)
 					end,
 				})
 
 				configSection:Button({
 					Name = "Load Config",
 					Callback = function()
-						local success, returned = MacLib:LoadConfig(configSelection.Value)
+						local target = getTargetConfig()
+						if not target or target == "" then
+							WindowFunctions:Notify({
+								Title = "Interface",
+								Description = "Please select a config from the dropdown first."
+							})
+							return
+						end
+
+						local success, returned = MacLib:LoadConfig(target)
 						if not success then
 							WindowFunctions:Notify({
 								Title = "Interface",
@@ -4280,7 +4468,7 @@ function MacLib:Window(Settings)
 
 						WindowFunctions:Notify({
 							Title = "Interface",
-							Description = string.format("Loaded config %q", tostring(configSelection.Value)),
+							Description = string.format("Loaded config %q", tostring(target)),
 						})
 					end,
 				})
@@ -4288,7 +4476,23 @@ function MacLib:Window(Settings)
 				configSection:Button({
 					Name = "Overwrite Config",
 					Callback = function()
-						local success, returned = MacLib:SaveConfig(configSelection.Value)
+						local target = getTargetConfig()
+						if not target or target == "" then
+							local cfgName = (configInput and configInput.GetInput and configInput:GetInput()) or inputPath
+							if cfgName and string.gsub(cfgName, "%s+", "") ~= "" then
+								target = string.gsub(cfgName, "^%s*(.-)%s*$", "%1")
+							end
+						end
+
+						if not target or target == "" then
+							WindowFunctions:Notify({
+								Title = "Interface",
+								Description = "Please select a config or enter a name first."
+							})
+							return
+						end
+
+						local success, returned = MacLib:SaveConfig(target)
 						if not success then
 							WindowFunctions:Notify({
 								Title = "Interface",
@@ -4299,7 +4503,7 @@ function MacLib:Window(Settings)
 
 						WindowFunctions:Notify({
 							Title = "Interface",
-							Description = string.format("Overwrote config %q", tostring(configSelection.Value)),
+							Description = string.format("Overwrote config %q", tostring(target)),
 						})
 					end,
 				})
@@ -4307,8 +4511,13 @@ function MacLib:Window(Settings)
 				configSection:Button({
 					Name = "Refresh Config List",
 					Callback = function()
+						local list = MacLib:RefreshConfigList()
 						configSelection:ClearOptions()
-						configSelection:InsertOptions(MacLib:RefreshConfigList())
+						configSelection:InsertOptions(list)
+						WindowFunctions:Notify({
+							Title = "Interface",
+							Description = string.format("Refreshed list (%d found)", #list)
+						})
 					end,
 				})
 			end
@@ -4697,9 +4906,30 @@ function MacLib:Window(Settings)
 	local MenuKeybind = Settings.Keybind or Enum.KeyCode.RightControl
 	local AltMenuKeybind = Enum.KeyCode.K
 
+	local menuAnimating = false
 	local function ToggleMenu()
+		if menuAnimating then return end
 		local state = not WindowFunctions:GetState()
-		WindowFunctions:SetState(state)
+		windowState = state
+		if state then
+			-- เปิด: แสดงก่อนแล้ว pop-in
+			base.Visible = true
+			menuUIScale.Scale = 0.95
+			menuAnimating = true
+			local t = Tween(menuUIScale, TweenInfo.new(0.18, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Scale = 1})
+			t:Play()
+			t.Completed:Connect(function() menuAnimating = false end)
+		else
+			-- ปิด: pop-out แล้วซ่อน
+			menuAnimating = true
+			local t = Tween(menuUIScale, TweenInfo.new(0.13, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {Scale = 0.95})
+			t:Play()
+			t.Completed:Connect(function()
+				base.Visible = false
+				menuUIScale.Scale = 1
+				menuAnimating = false
+			end)
+		end
 	end
 
 	function WindowFunctions:SetKeybind(key)
@@ -4835,6 +5065,11 @@ local Window = MacLib:Window({
     Keybind = Enum.KeyCode.RightControl,
     AcrylicBlur = false,
 })
+MacLib:SetFolder("KrakenHub")
+pcall(function()
+    if makefolder and not isfolder("KrakenHub") then makefolder("KrakenHub") end
+    if makefolder and not isfolder("KrakenHub/settings") then makefolder("KrakenHub/settings") end
+end)
 
 function Window:Minimize()
     local cur = Window:GetState()
@@ -5109,8 +5344,8 @@ end
 
 local Tabs = {
     Farm      = CreateTabAdapter(tabGroup:Tab({ Name = "งาน & ฟาร์ม", Image = "rbxassetid://18821914323" }), "Farm"),
-    Halloween = CreateTabAdapter(tabGroup:Tab({ Name = "🎃 อีเวนต์",  Image = "rbxassetid://74630801235788" }), "Halloween"),
-    Merchant  = CreateTabAdapter(tabGroup:Tab({ Name = "พ่อค้าพเนจร", Image = "rbxassetid://10709791437" }), "Merchant"),
+    Halloween = CreateTabAdapter(tabGroup:Tab({ Name = "🎃 อีเวนต์" }), "Halloween"),
+    Merchant  = CreateTabAdapter(tabGroup:Tab({ Name = "พ่อค้าพเนจร", Image = "rbxassetid://10734952273" }), "Merchant"),
     Teleport  = CreateTabAdapter(tabGroup:Tab({ Name = "วาร์ป (TP)",  Image = "rbxassetid://10709769841" }), "Teleport"),
     Combat    = CreateTabAdapter(tabGroup:Tab({ Name = "ระบบต่อสู้",   Image = "rbxassetid://10734950309" }), "Combat"),
     Player    = CreateTabAdapter(tabGroup:Tab({ Name = "ตัวละคร",     Image = "rbxassetid://10747373176" }), "Player"),
@@ -5137,6 +5372,9 @@ local Fluent = {
             Lifetime = cfg.Duration or 4
         })
     end,
+    SaveConfig = function(self, p) return MacLib:SaveConfig(p) end,
+    LoadConfig = function(self, p) return MacLib:LoadConfig(p) end,
+    RefreshConfigList = function(self) return MacLib:RefreshConfigList() end,
     Destroy = function(self)
         pcall(function() Window:Unload() end)
     end
@@ -5147,6 +5385,9 @@ local SaveManager = {
     IgnoreThemeSettings = function() end,
     SetIgnoreIndexes = function() end,
     SetFolder = function(self, f) MacLib:SetFolder(f) end,
+    Save = function(self, p) return MacLib:SaveConfig(p) end,
+    Load = function(self, p) return MacLib:LoadConfig(p) end,
+    Refresh = function(self) return MacLib:RefreshConfigList() end,
     BuildConfigSection = function(self, tab)
         pcall(function()
             if tab and tab.RawTab then
@@ -6253,21 +6494,23 @@ Connections.Noclip = RunService.Stepped:Connect(function()
         State.AutoDepositCandy or
         State.AutoCollectP320 or
         State.IsGettingBucket or
-        State.IsDepositing
+        State.IsDepositing or
+        State.IsTweenTP
     )
+    local shouldNoclip = isFarming or State.Noclip
     local char = GetChar()
     if not char then return end
 
-    if isFarming then
+    if shouldNoclip then
         wasFarmingLastFrame = true
-        for _, part in ipairs(char:GetChildren()) do
+        for _, part in ipairs(char:GetDescendants()) do
             if part:IsA("BasePart") and part.CanCollide then
                 part.CanCollide = false
             end
         end
     elseif wasFarmingLastFrame then
         wasFarmingLastFrame = false
-        -- คืนค่า CanCollide ปกติทันทีเมื่อไม่ได้เปิดระบบฟาร์ม
+        -- คืนค่า CanCollide ปกติทันทีเมื่อไม่ได้เปิดระบบฟาร์มหรือ Noclip
         for _, part in ipairs(char:GetChildren()) do
             if part:IsA("BasePart") then
                 if part.Name == "Torso" or part.Name == "Head" then
@@ -6321,6 +6564,9 @@ local function StopFly()
     end
 end
 
+local flyAscendActive = false
+local flyAscendTarget = 0
+
 local function StartFly()
     StopFly()
     local hrp = GetHRP()
@@ -6345,6 +6591,10 @@ local function StartFly()
     flyBG.Parent = hrp
 
     hum.PlatformStand = true
+
+    -- ตั้ง target ความสูงเหนือพื้นพอดีๆ (+28 studs) ลอยเหนือหัวคนไม่สูงเกินไป กันคนเห็น
+    flyAscendTarget = hrp.Position.Y + 28
+    flyAscendActive = true
 
     -- ปิด Collision ชั่วคราวขณะบิน เพื่อไม่ให้ชนวัตถุแล้วดีดกลับ
     flyNoclipConn = RunService.Stepped:Connect(function()
@@ -6376,6 +6626,19 @@ local function StartFly()
             currentHum:ChangeState(Enum.HumanoidStateType.Freefall)
         end)
 
+        -- ── Phase ขึ้นฟ้า: ใช้ BodyVelocity อย่างเดียว ไม่ CFrame micro-step (ป้องกัน kick)
+        if flyAscendActive then
+            if currentHRP.Position.Y < flyAscendTarget - 3 then
+                flyBV.Velocity = Vector3.new(0, 45, 0)  -- 45 studs/s ปลอดภัย ไม่โดนเตะ
+                flyBG.CFrame = Camera.CFrame
+                return   -- skip normal movement ระหว่าง ascent
+            else
+                flyAscendActive = false   -- ถึงความสูงแล้ว → ควบคุมปกติ
+                flyBV.Velocity = Vector3.zero
+            end
+        end
+
+        -- ── Phase บินปกติ ──
         local camCF = Camera.CFrame
         local moveDir = Vector3.zero
 
@@ -6398,8 +6661,6 @@ local function StartFly()
         local speed = tonumber(State.FlySpeed) or 45
         if moveDir.Magnitude > 0 then
             flyBV.Velocity = moveDir.Unit * speed
-            -- CFrame Micro-step เพื่อหลบ Anti-Rubberband
-            currentHRP.CFrame = currentHRP.CFrame + (moveDir.Unit * (speed * dt * 0.15))
         else
             flyBV.Velocity = Vector3.zero
             currentHRP.AssemblyLinearVelocity = Vector3.zero
@@ -6410,11 +6671,11 @@ local function StartFly()
     end)
 end
 
--- ==============================================================
--- 🚀 ระบบ BYPASS TWEEN TELEPORT (แก้ปัญหาโดนดึงกลับ / วาร์ปปลอดภัย 100%)
--- ==============================================================
+
 local activeTweenTP = nil
 local activeTweenConn = nil
+local activeTweenBV = nil
+local activeTweenBG = nil
 
 local function CancelTweenTP()
     if activeTweenTP then
@@ -6425,7 +6686,20 @@ local function CancelTweenTP()
         pcall(function() activeTweenConn:Disconnect() end)
         activeTweenConn = nil
     end
+    if activeTweenBV then
+        pcall(function() activeTweenBV:Destroy() end)
+        activeTweenBV = nil
+    end
+    if activeTweenBG then
+        pcall(function() activeTweenBG:Destroy() end)
+        activeTweenBG = nil
+    end
+    State.IsTweenTP = false
     local hrp = GetHRP()
+    local hum = GetHuman()
+    if hum then
+        hum.PlatformStand = false
+    end
     if hrp then
         hrp.AssemblyLinearVelocity = Vector3.zero
         hrp.AssemblyAngularVelocity = Vector3.zero
@@ -6446,37 +6720,67 @@ local function BypassTweenTP(targetCFrame, customSpeed)
     local distance = (hrp.Position - targetPos).Magnitude
     if distance < 3 then return true end
 
-    -- Safe Speed: ค่าปลอดภัยไม่ให้เซิร์ฟเวอร์ดึงกลับ (60-80 studs/s)
-    local speed = customSpeed or tonumber(State.TPSpeed) or 65
-    local duration = math.clamp(distance / speed, 0.35, 25)
+    -- เปิดสถานะ Noclip ทะลุ Prop/สิ่งกีดขวาง
+    State.IsTweenTP = true
 
-    -- ปิด CanCollide ทุกส่วนขณะลอยข้ามตึก/กำแพง
-    activeTweenConn = RunService.Stepped:Connect(function()
-        local c = GetChar()
-        if c then
-            for _, part in ipairs(c:GetChildren()) do
-                if part:IsA("BasePart") then
-                    part.CanCollide = false
-                end
-            end
-        end
-        if hrp then
-            hrp.AssemblyLinearVelocity = Vector3.zero
-        end
-    end)
+    -- ความเร็วปลอดภัย: 45 - 55 studs/s เพื่อไม่ให้ติด Anti-Cheat Code 85 (Speed/Teleport check)
+    local speed = customSpeed or tonumber(State.TPSpeed) or 50
+    if speed > 60 then speed = 55 end
 
-    local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out)
-    activeTweenTP = TweenService:Create(hrp, tweenInfo, {CFrame = targetCF})
-    activeTweenTP:Play()
+    hum.PlatformStand = true
 
-    activeTweenTP.Completed:Connect(function()
-        CancelTweenTP()
-        if hrp then
-            hrp.CFrame = targetCF
-            hrp.AssemblyLinearVelocity = Vector3.zero
-            hrp.AssemblyAngularVelocity = Vector3.zero
+    -- ใช้ BodyVelocity ขับเคลื่อนผ่าน Physics Engine แท้ ปลอดภัยจาก CODE 85
+    local bv = Instance.new("BodyVelocity")
+    bv.Name = "BypassTP_BV"
+    bv.MaxForce = Vector3.new(1e6, 1e6, 1e6)
+    bv.Velocity = Vector3.zero
+    bv.Parent = hrp
+    activeTweenBV = bv
+
+    local bg = Instance.new("BodyGyro")
+    bg.Name = "BypassTP_BG"
+    bg.MaxTorque = Vector3.new(1e6, 1e6, 1e6)
+    bg.CFrame = targetCF
+    bg.P = 9000
+    bg.Parent = hrp
+    activeTweenBG = bg
+
+    local startTime = tick()
+    local maxTime = (distance / speed) + 3
+
+    activeTweenConn = RunService.Heartbeat:Connect(function(dt)
+        local curHRP = GetHRP()
+        local curHum = GetHuman()
+        if not curHRP or not curHum or not activeTweenBV or activeTweenBV.Parent ~= curHRP then
+            CancelTweenTP()
+            return
         end
-        Notify("วาร์ปสำเร็จ", "เดินทางถึงจุดหมายแล้ว!", "", 2.5)
+
+        local delta = targetPos - curHRP.Position
+        local distLeft = delta.Magnitude
+
+        if distLeft <= 4 or (tick() - startTime) > maxTime then
+            CancelTweenTP()
+            curHRP.AssemblyLinearVelocity = Vector3.zero
+            curHRP.AssemblyAngularVelocity = Vector3.zero
+            Notify("วาร์ปสำเร็จ", "เดินทางถึงจุดหมายแล้ว!", "", 2.5)
+            return
+        end
+
+        -- เคลื่อนที่แบบ Stealth Glide: ลอยเหนือพื้น ~18-24 studs เลี่ยงคนเห็นและพ้นเสา/หลังคาเตี้ย แล้วค่อยร่อนลงจุดหมาย
+        local flatDist = Vector2.new(delta.X, delta.Z).Magnitude
+        local desiredY = targetPos.Y
+        if flatDist > 20 and distLeft > 15 then
+            desiredY = math.max(targetPos.Y, curHRP.Position.Y) + 18
+            desiredY = math.clamp(desiredY, targetPos.Y, targetPos.Y + 28)
+        end
+
+        local steerPos = Vector3.new(targetPos.X, desiredY, targetPos.Z)
+        local steerDelta = steerPos - curHRP.Position
+        local moveDir = steerDelta.Unit
+
+        activeTweenBV.Velocity = moveDir * math.min(speed, distLeft * 5 + 12)
+        activeTweenBG.CFrame = CFrame.lookAt(curHRP.Position, Vector3.new(targetPos.X, curHRP.Position.Y, targetPos.Z))
     end)
 
     return true
@@ -7869,14 +8173,11 @@ local function TeleportToMerchant()
     end
 
     local targetPos = hrp.Position + (hrp.CFrame.LookVector * 3.5)
+    local targetCF = CFrame.lookAt(targetPos, hrp.Position)
     myHRP.AssemblyLinearVelocity = Vector3.zero
     myHRP.AssemblyAngularVelocity = Vector3.zero
-    myHRP.CFrame = CFrame.lookAt(targetPos, hrp.Position)
-    task.wait(0.05)
-    myHRP.AssemblyLinearVelocity = Vector3.zero
-    myHRP.AssemblyAngularVelocity = Vector3.zero
-
-    Notify("พ่อค้าพเนจร", "วาร์ปมาถึงพ่อค้าพเนจรเรียบร้อย!", "", 3)
+    -- ใช้ BypassTweenTP แทน instant CFrame ป้องกันโดนเตะ
+    BypassTweenTP(targetCF)
     return true
 end
 
@@ -8936,7 +9237,23 @@ local function CollectAllP320Parts(silent)
             if prompt and prompt.Enabled then
                 hrp.AssemblyLinearVelocity = Vector3.zero
                 hrp.AssemblyAngularVelocity = Vector3.zero
-                hrp.CFrame = pObj.CFrame + Vector3.new(0, 2, 0)
+                -- Tween TP เร็ว (200 studs/s) ไม่สแปม notify
+                local _tDist = (hrp.Position - (pObj.CFrame + Vector3.new(0,2,0)).Position).Magnitude
+                if _tDist >= 3 then
+                    local _tDur = math.clamp(_tDist / 200, 0.05, 3)
+                    local _tConn = RunService.Stepped:Connect(function()
+                        for _, _p in ipairs((GetChar() or {}):GetChildren()) do
+                            if _p:IsA("BasePart") then _p.CanCollide = false end
+                        end
+                        hrp.AssemblyLinearVelocity = Vector3.zero
+                    end)
+                    local _tw = TweenService:Create(hrp, TweenInfo.new(_tDur, Enum.EasingStyle.Linear), {CFrame = pObj.CFrame + Vector3.new(0,2,0)})
+                    _tw:Play()
+                    _tw.Completed:Wait()
+                    pcall(function() _tConn:Disconnect() end)
+                    hrp.CFrame = pObj.CFrame + Vector3.new(0, 2, 0)
+                    hrp.AssemblyLinearVelocity = Vector3.zero
+                end
                 task.wait(0.2)
                 pcall(function() fireproximityprompt(prompt) end)
                 task.wait(0.3)
@@ -9141,7 +9458,8 @@ local function TeleportToActiveHalloweenBoss()
             if part and hum and hum.Health > 0 then
                 hrp.AssemblyLinearVelocity = Vector3.zero
                 hrp.AssemblyAngularVelocity = Vector3.zero
-                hrp.CFrame = part.CFrame + Vector3.new(0, 4, 6)
+                -- ใช้ Tween TP แทน instant CFrame
+                BypassTweenTP(part.CFrame + Vector3.new(0, 4, 6))
                 Notify("บอสฮาโลวีน", "วาร์ปมาหาบอส: " .. m.Name .. " เรียบร้อย!", "", 3)
                 return true
             end
@@ -9587,7 +9905,7 @@ local SpeedSlider = Tabs.Player:AddSlider("SpeedVal", {
     Title = "⚡ ความเร็วเดิน (Speed)",
     Default = 17,
     Min = 8,
-    Max = 18,
+    Max = 20,
     Rounding = 0
 })
 SpeedSlider:OnChanged(function()
@@ -9615,6 +9933,44 @@ end)
 local InfJumpToggle = Tabs.Player:AddToggle("InfJumpOn", { Title = "♾️ กระโดดไม่จำกัด", Default = false })
 InfJumpToggle:OnChanged(function()
     State.InfJump = Options.InfJumpOn.Value
+end)
+
+-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- 👻 NOCLIP — ทะลุกำแพง / พื้น / สิ่งกีดขวางทั้งหมด
+-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+local NoclipToggle = Tabs.Player:AddToggle("NoclipOn", {
+    Title = "👻 Noclip (ทะลุกำแพง)",
+    Description = "ทำให้ตัวละครทะลุทุกสิ่งได้ — พื้น กำแพง สิ่งกีดขวาง ปิดเพื่อคืนค่า Collision ปกติ",
+    Default = false
+})
+NoclipToggle:OnChanged(function()
+    State.Noclip = Options.NoclipOn.Value
+    if not State.Noclip then
+        local char = LocalPlayer.Character
+        if char then
+            for _, part in ipairs(char:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    part.CanCollide = (part.Name == "Head" or part.Name == "Torso" or part.Name == "HumanoidRootPart")
+                end
+            end
+        end
+    end
+end)
+
+-- Noclip stepped loop (disables collision before physics frame)
+if Connections.NoclipLoop then
+    pcall(function() Connections.NoclipLoop:Disconnect() end)
+    Connections.NoclipLoop = nil
+end
+Connections.NoclipLoop = RunService.Stepped:Connect(function()
+    if not State.Noclip then return end
+    local char = LocalPlayer.Character
+    if not char then return end
+    for _, part in ipairs(char:GetDescendants()) do
+        if part:IsA("BasePart") and part.CanCollide then
+            part.CanCollide = false
+        end
+    end
 end)
 
 Tabs.Player:AddParagraph({
@@ -9738,33 +10094,81 @@ Tabs.Teleport:AddButton({
     end
 })
 
-Tabs.Teleport:AddSection("🏫 วาร์ปไปสถาบันต่างๆ (Schools)")
+Tabs.Teleport:AddSection("🏫 วาร์ปไปสถาบันต่างๆ (Schools - Realtime Auto Safezone)")
+
+local function GetCurrentPlayerSchool()
+    local t = LocalPlayer.Team
+    local raw = t and t.Name or ""
+    if raw:find("ปทุม") then return "ปทุมคงคา" end
+    if raw:find("ช่างกล") or raw:find("เทพช่าง") or raw:find("bkk") then return "กรุงเทพช่างกล" end
+    if raw:find("สุทธิ") or raw:find("สุธิ") then return "วัดสุทธิวราราม" end
+    if raw:find("ตำรวจ") then return "ตำรวจ" end
+    if raw:find("พระ") then return "พระ" end
+    if raw:find("เด็กบ้าน") then return "เด็กบ้าน" end
+
+    -- Fallback: ตรวจ Overhead Tag บนตัวละคร
+    local char = LocalPlayer.Character
+    local head = char and char:FindFirstChild("Head")
+    if head then
+        local ovTag = head:FindFirstChild("OverheadNameBill") or head:FindFirstChildWhichIsA("BillboardGui")
+        if ovTag then
+            for _, d in ipairs(ovTag:GetChildren()) do
+                if d:IsA("TextLabel") and d.Text and d.Text ~= "" then
+                    for _, sc in ipairs(SchoolConfigs) do
+                        if string.find(d.Text, sc.Key, 1, true) then
+                            return sc.Key
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return raw ~= "" and raw or "คนละรร"
+end
+
+local function SmartWarpSchool(targetSchoolKey, schoolNameTH, insideCF, outsideSafeCF)
+    local mySchool = GetCurrentPlayerSchool()
+    local isSameSchool = string.find(mySchool, targetSchoolKey, 1, true) ~= nil
+
+    if isSameSchool then
+        Notify("ระบบวาร์ปสถาบัน", "คุณอยู่ " .. schoolNameTH .. " อยู่แล้ว -> วาร์ปเข้าใน รร. โดยตรง", "", 3)
+        BypassTweenTP(insideCF)
+    else
+        Notify("ระบบวาร์ปสถาบัน", "คุณอยู่ [" .. mySchool .. "] -> วาร์ปไปหน้าเซฟโซนหน้า " .. schoolNameTH .. " (ป้องกันเสียชีวิต)", "", 4)
+        BypassTweenTP(outsideSafeCF)
+    end
+end
 
 Tabs.Teleport:AddButton({
     Title = "🔷 วาร์ปไป ปทุมคงคา (Patumwan)",
+    Description = "รร. เดียวกัน = เข้าใน รร. | คนละ รr. = หน้าเซฟโซนหน้า รร.",
     Callback = function()
-        BypassTweenTP(CFrame.new(2080, 5, -150))
+        SmartWarpSchool("ปทุม", "ปทุมคงคา", CFrame.new(2845, 2, 736), CFrame.new(2200, 4, 435))
     end
 })
 
 Tabs.Teleport:AddButton({
     Title = "🟡 วาร์ปไป กรุงเทพช่างกล (BKK Tech)",
+    Description = "รร. เดียวกัน = เข้าใน รr. | คนละ รร. = หน้าเซฟโซนหน้า รร.",
     Callback = function()
-        BypassTweenTP(CFrame.new(2520, 5, -580))
+        SmartWarpSchool("ช่างกล", "กรุงเทพช่างกล", CFrame.new(1874, 2, -1247), CFrame.new(2025, 4, -1220))
     end
 })
 
 Tabs.Teleport:AddButton({
     Title = "🟢 วาร์ปไป วัดสุทธิวราราม (Wat Sutthi)",
+    Description = "รร. เดียวกัน = เข้าใน รr. | คนละ รร. = หน้าเซฟโซนหน้า รร.",
     Callback = function()
-        BypassTweenTP(CFrame.new(2800, 5, -920))
+        SmartWarpSchool("สุทธิ", "วัดสุทธิวราราม", CFrame.new(2647, 3, -219), CFrame.new(2550, 4, -220))
     end
 })
 
 Tabs.Teleport:AddButton({
-    Title = "🟣 วาร์ปไป กนกอาชีวะ (Kanok)",
+    Title = "🚓 วาร์ปไป สถานีตำรวจ (Police Station)",
+    Description = "รร. เดียวกัน = เข้าใน สน. | คนละ รr. = เซฟโซนหน้า สน.",
     Callback = function()
-        BypassTweenTP(CFrame.new(1850, 5, -620))
+        SmartWarpSchool("ตำรวจ", "สถานีตำรวจ", CFrame.new(2503, 3, 906), CFrame.new(2242, 4, 792))
     end
 })
 
@@ -9803,49 +10207,12 @@ Tabs.Teleport:AddButton({
     end
 })
 
-Tabs.Teleport:AddSection("🎃 วาร์ปจุดอีเวนต์ฮาโลวีน (Bypass TP)")
-
-Tabs.Teleport:AddButton({
-    Title = "🍬 ผีจอมขนม (หม้อฝากแคนดี้)",
-    Callback = function()
-        BypassTweenTP(CFrame.new(2122, 5, -345))
-    end
-})
-
-Tabs.Teleport:AddButton({
-    Title = "🔫 ผีช่างปืน (เควสต์ P320)",
-    Callback = function()
-        BypassTweenTP(CFrame.new(2451, 8, 35))
-    end
-})
-
-Tabs.Teleport:AddButton({
-    Title = "👹 ผีล่าอสูร (เควสต์ล่ามอน)",
-    Callback = function()
-        BypassTweenTP(CFrame.new(2226, 6, -225))
-    end
-})
-
-Tabs.Teleport:AddButton({
-    Title = "📜 ผีเฝ้ายันต์ (เควสต์ผ้ายันต์)",
-    Callback = function()
-        BypassTweenTP(CFrame.new(2493, 9, -1372))
-    end
-})
-
-Tabs.Teleport:AddButton({
-    Title = "⚰️ โซนสุสานหลุมศพ (Graveyard)",
-    Callback = function()
-        BypassTweenTP(CFrame.new(2145, 4, -425))
-    end
-})
-
 
 --------------------------------------------------------------
 -- 🎯 แท็บ: ระบบต่อสู้ (COMBAT & SILENT AIM)
 --------------------------------------------------------------
 Tabs.Combat:AddParagraph({
-    Title = "🎯 B3 Silent Aim & Gun System",
+    Title = "🎯 Silent Aim & Gun System",
     Content = "ระบบล็อคกระสุนอัตโนมัติ คำนวณวิถีกระสุนเข้าเป้าหมาย พร้อมระบบชดเชยความเร็วเป้าหมาย และตรวจสอบสิ่งกีดขวาง"
 })
 
@@ -9998,10 +10365,10 @@ local FullBrightToggle = Tabs.Settings:AddToggle("FullBrightOn", {
 FullBrightToggle:OnChanged(function()
     State.FullBright = Options.FullBrightOn.Value
     if State.FullBright then
-        EnableFullBright()
+        StartFullBrightWatcher()
         Notify("การแสดงผล", "เปิดใช้งานสว่างทั้งแมพ (Full Bright) เรียบร้อย", "", 2.5)
     else
-        RestoreLighting()
+        StopFullBrightWatcher()
         Notify("การแสดงผล", "คืนค่าแสงสว่างเริ่มต้นของเกมแล้ว", "", 2.5)
     end
 end)
@@ -10050,7 +10417,7 @@ function Hub.Unload()
     ClearMerchantESP()
     SetInfiniteStaminaState(false)
     if State.FullBright then
-        RestoreLighting()
+        StopFullBrightWatcher()
     end
     local hum = GetHuman()
     if hum then hum.WalkSpeed = NORMAL_WALK_SPEED; hum.JumpPower = 35 end
@@ -10102,5 +10469,8 @@ end)
 
 Window:SelectTab(1)
 
-Notify("KrakenHub v1.0", "โหลดสำเร็จ! สไตล์ MacLib UI", "กดปุ่ม K หรือ Right Ctrl เพื่อเปิด/ปิดหน้าต่าง", 4)
+_G.KrakenHub_Sailueat = Hub
+
+Notify("KrakenHub v1.2", "โหลดสำเร็จ! สไตล์ MacLib UI", "กดปุ่ม K หรือ Right Ctrl เพื่อเปิด/ปิดหน้าต่าง", 4)
 end
+
