@@ -7782,7 +7782,7 @@ end)
 -- 🎨 สร้างเมนูใน FLUENT TABS
 --------------------------------------------------------------
 Tabs.Farm:AddParagraph({
-    Title = "🛡️ KrakenHub v1.0 (100% Anti-Kick Bypass Pro)",
+    Title = "🛡️ KrakenHub v1.0 ",
     Content = "• HookMetamethod บล็อกรีโมทแบน & ตรวจจับทุกประเภท\n• ล็อกสปีด 20 studs/s แท้จริง วิ่งไวกว่าคนทั่วไป แต่ต่ำกว่าเกณฑ์เตะ 261\n• ป้องกันหลุดระยะ ProximityPrompt และ Remote Rate-Limit ถาวร"
 })
 
@@ -8046,7 +8046,7 @@ end)
 
 Tabs.Player:AddParagraph({
     Title = "👁️ ระบบ Tactical ESP แยกสีตามสถาบัน (School ESP)",
-    Content = "ปทุมคงคา (ฟ้า) | กรุงเทพช่างกล (เหลือง) | พระ (ส้ม) | เด็กบ้าน (ขาว) | ตำรวจ (แดง) | วัดสุทธิ (เขียว) | กนก (ม่วง)"
+    Content = "ปทุมคงคา (ฟ้า) | กรุงเทพช่างกล (เหลือง) | พระ (ส้ม) | เด็กบ้าน (ขาว) | ตำรวจ (แดง) | วัดสุทธิ (เขียว) |"
 })
 
 local ESPToggle = Tabs.Player:AddToggle("ESPOn", {
@@ -8062,7 +8062,7 @@ ESPToggle:OnChanged(function()
 end)
 
 local ESPTacticalToggle = Tabs.Player:AddToggle("ESPTacticalStyle", {
-    Title = "🔴 โหมดสีแดงล้วน",
+    Title = "🔴 Espแดงทั้งหมด",
     Description = "เปิด = บังคับสีแดงล้วนเหมือนรูปตัวอย่าง | ปิด = แยกสีตามสถาบันที่แมพแบ่งไว้ (ค่าเริ่มต้น)",
     Default = false
 })
