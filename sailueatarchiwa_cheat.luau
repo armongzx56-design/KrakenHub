@@ -100,6 +100,8 @@ pcall(function()
     end
 end)
 
+
+
 --------------------------------------------------------------
 -- ⚡ 2. ระบบเชื่อมต่อ RUNSYSTEM ของเกม (วิ่ง Shift แท้ สเตมิน่าลดตามธรรมชาติ)
 --------------------------------------------------------------
@@ -186,6 +188,7 @@ local Hub = {
         NoSpread = false,
         NoRecoil = false,
         FastBullet = false,
+        FullAuto = false,
         SilentAim = false,
         SilentPart = "Head",
         SilentHitChance = 100,
@@ -193,6 +196,11 @@ local Hub = {
         SilentVelocity = false,
         CombatFOV = 150,
         DrawFOV = false,
+        -- Head Hitbox Expander
+        HitboxExpander = false,
+        HitboxSize = 6,
+        HitboxShow = true,
+        InstantPrompt = true,
         -- พ่อค้าพเนจร (Wandering Merchant)
         MerchantESP = true,
         AutoNotifyMerchant = true,
@@ -1407,10 +1415,10 @@ local assets = {
 	searchIcon = "rbxassetid://86737463322606",
 	colorWheel = "rbxassetid://2849458409",
 	colorTarget = "rbxassetid://73265255323268",
-	grid = "rbxassetid://121484455191370",
+	grid = "rbxassetid://10709790948",
 	globe = "rbxassetid://108952102602834",
 	transform = "rbxassetid://90336395745819",
-	dropdown = "rbxassetid://18865373378",
+	dropdown = "rbxassetid://10709790948",
 	sliderbar = "rbxassetid://18772615246",
 	sliderhead = "rbxassetid://18772834246",
 }
@@ -1777,6 +1785,39 @@ function MacLib:Window(Settings)
 	title.BorderSizePixel = 0
 	title.Size = UDim2.new(1, -20, 0, 0)
 	title.Parent = titleFrame
+
+	-- ✨ แสงปาดวน Loop บนหัวข้อชื่อ (Title Shimmer Sheen Effect)
+	local titleShimmer = Instance.new("UIGradient")
+	titleShimmer.Name = "ShimmerGradient"
+	titleShimmer.Rotation = 25
+	titleShimmer.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(180, 190, 210)),
+		ColorSequenceKeypoint.new(0.35, Color3.fromRGB(190, 200, 220)),
+		ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 255, 255)),
+		ColorSequenceKeypoint.new(0.65, Color3.fromRGB(120, 220, 255)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(180, 190, 210))
+	})
+	titleShimmer.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.35),
+		NumberSequenceKeypoint.new(0.35, 0.35),
+		NumberSequenceKeypoint.new(0.5, 0),
+		NumberSequenceKeypoint.new(0.65, 0.35),
+		NumberSequenceKeypoint.new(1, 0.35)
+	})
+	titleShimmer.Offset = Vector2.new(-1, 0)
+	titleShimmer.Parent = title
+
+	task.spawn(function()
+		while title and title.Parent and titleShimmer.Parent == title do
+			titleShimmer.Offset = Vector2.new(-1, 0)
+			local t = TweenService:Create(titleShimmer, TweenInfo.new(1.4, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
+				Offset = Vector2.new(1, 0)
+			})
+			t:Play()
+			t.Completed:Wait()
+			task.wait(1.0)
+		end
+	end)
 
 	local subtitle = Instance.new("TextLabel")
 	subtitle.Name = "Subtitle"
@@ -3632,7 +3673,8 @@ function MacLib:Window(Settings)
 
 					local dropdownImage = Instance.new("ImageLabel")
 					dropdownImage.Name = "DropdownImage"
-					dropdownImage.Image = assets.grid
+					dropdownImage.Image = Settings.Image or assets.dropdown
+					dropdownImage.ImageColor3 = Color3.fromRGB(190, 195, 205)
 					dropdownImage.ImageTransparency = 0
 					dropdownImage.AnchorPoint = Vector2.new(1, 0)
 					dropdownImage.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
@@ -3849,7 +3891,7 @@ function MacLib:Window(Settings)
 							Size = targetSize
 						})
 						local iconTween = Tween(dropdownImage, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-							Rotation = isDropdownOpen and -90 or 0
+							Rotation = isDropdownOpen and 180 or 0
 						})
 
 						dropTween:Play()
@@ -5216,6 +5258,7 @@ local function CreateTabAdapter(rawTab, tabName)
                 Default = cfg.Default,
                 Multi = cfg.Multi or false,
                 Required = cfg.Required ~= false,
+                Image = cfg.Image or cfg.Icon,
                 Callback = cfg.Callback
             }, flag)
             macDropdown.Value = cfg.Default or (cfg.Values and cfg.Values[1]) or ""
@@ -6810,8 +6853,10 @@ end)
 
 
 --------------------------------------------------------------
--- 10. ระบบความแม่นยำของปืน & ไร้แรงดีด (GUN ACCURACY / NO SPREAD / NO RECOIL / NO BULLET DROP)
+-- 10. ระบบความแม่นยำของปืน, ไร้แรงดีด & ปืนยิงรัวฟูลออโต้ (SAFE CLIENT-SIDE GUN MODS)
 --------------------------------------------------------------
+local OriginalGunSettings = {}
+
 local function EnhanceGun(tool)
     if not tool or not tool:IsA("Tool") then return end
     pcall(function()
@@ -6821,11 +6866,51 @@ local function EnhanceGun(tool)
             shake.Enabled = not (State.NoRecoil and State.Running)
         end
 
-        -- 2. ปรับแต่งโมดูล Setting ของ FE Gun Kit
+        -- 2. ปรับแต่งโมดูล Setting ของ FE Gun Kit เฉพาะค่าฝั่ง Client ที่ปลอดภัย 100%
         local settingMod = tool:FindFirstChild("Setting")
         if settingMod and settingMod:IsA("ModuleScript") then
             local s = require(settingMod)
             if type(s) == "table" then
+                if not OriginalGunSettings[s] then
+                    OriginalGunSettings[s] = {
+                        Spread = s.Spread,
+                        MinSpread = s.MinSpread,
+                        MaxSpread = s.MaxSpread,
+                        Recoil = s.Recoil,
+                        CameraRecoilingEnabled = s.CameraRecoilingEnabled,
+                        ViewmodelRecoilInfluence = s.ViewmodelRecoilInfluence,
+                        RecoilDamper = s.RecoilDamper,
+                        RecoilSpeed = s.RecoilSpeed,
+                        AngleX_Min = s.AngleX_Min,
+                        AngleX_Max = s.AngleX_Max,
+                        AngleY_Min = s.AngleY_Min,
+                        AngleY_Max = s.AngleY_Max,
+                        AngleZ_Min = s.AngleZ_Min,
+                        AngleZ_Max = s.AngleZ_Max,
+                        ScopeSwaySpeed = s.ScopeSwaySpeed,
+                        ScopeSwayDamper = s.ScopeSwayDamper,
+                        ScopeKnockbackSpeed = s.ScopeKnockbackSpeed,
+                        DropXMin = s.DropXMin,
+                        DropYMax = s.DropYMax,
+                        XMax = s.XMax,
+                        YMax = s.YMax,
+                        BulletAcceleration = s.BulletAcceleration,
+                        BulletSpeed = s.BulletSpeed,
+                        Auto = s.Auto,
+                        BurstFireEnabled = s.BurstFireEnabled,
+                        HoldAndReleaseEnabled = s.HoldAndReleaseEnabled,
+                        FireRate = s.FireRate,
+                        DelayBeforeFiring = s.DelayBeforeFiring,
+                        DelayAfterFiring = s.DelayAfterFiring,
+                        CooldownTime = s.CooldownTime,
+                        MaximumRate = s.MaximumRate,
+                        TimeBeforeCooldown = s.TimeBeforeCooldown,
+                        SelectiveFireEnabled = s.SelectiveFireEnabled,
+                        FireModes = s.FireModes,
+                    }
+                end
+                local orig = OriginalGunSettings[s]
+
                 -- 🎯 ยิงตรงจุด 100% (No Spread & Shotgun Spread = 0)
                 if (State.NoSpread or State.SilentAim) and State.Running then
                     s.Spread = 0
@@ -6849,6 +6934,10 @@ local function EnhanceGun(tool)
                         s.ChargeAlterTable.Spread.Level2 = 0
                         s.ChargeAlterTable.Spread.Level3 = 0
                     end
+                elseif orig then
+                    s.Spread = orig.Spread
+                    s.MinSpread = orig.MinSpread
+                    s.MaxSpread = orig.MaxSpread
                 end
 
                 -- 🛑 ปืนนิ่งสนิท ไร้แรงถีบ (No Recoil & No Camera Recoiling)
@@ -6871,6 +6960,25 @@ local function EnhanceGun(tool)
                     s.DropYMax = 0
                     s.XMax = 0
                     s.YMax = 0
+                elseif orig then
+                    s.Recoil = orig.Recoil
+                    s.CameraRecoilingEnabled = orig.CameraRecoilingEnabled
+                    s.ViewmodelRecoilInfluence = orig.ViewmodelRecoilInfluence
+                    s.RecoilDamper = orig.RecoilDamper
+                    s.RecoilSpeed = orig.RecoilSpeed
+                    s.AngleX_Min = orig.AngleX_Min
+                    s.AngleX_Max = orig.AngleX_Max
+                    s.AngleY_Min = orig.AngleY_Min
+                    s.AngleY_Max = orig.AngleY_Max
+                    s.AngleZ_Min = orig.AngleZ_Min
+                    s.AngleZ_Max = orig.AngleZ_Max
+                    s.ScopeSwaySpeed = orig.ScopeSwaySpeed
+                    s.ScopeSwayDamper = orig.ScopeSwayDamper
+                    s.ScopeKnockbackSpeed = orig.ScopeKnockbackSpeed
+                    s.DropXMin = orig.DropXMin
+                    s.DropYMax = orig.DropYMax
+                    s.XMax = orig.XMax
+                    s.YMax = orig.YMax
                 end
 
                 -- ⚡ กระสุนพุ่งตรง ไม่ย้อยตามแรงโน้มถ่วง (No Bullet Drop)
@@ -6884,6 +6992,34 @@ local function EnhanceGun(tool)
                     if (s.BulletSpeed or 0) < 4000 then
                         s.BulletSpeed = 5000
                     end
+                elseif orig then
+                    s.BulletAcceleration = orig.BulletAcceleration
+                    s.BulletSpeed = orig.BulletSpeed
+                end
+
+                -- 🔥 ปืนทุกชนิดยิงฟูลออโต้ปลอดภัย (Safe Full Auto - คงค่า FireRate และ Cooldown เดิม ไม่เร่งจนเซิร์ฟเวอร์เตะ)
+                if State.FullAuto and State.Running then
+                    s.Auto = true
+                    s.BurstFireEnabled = false
+                    s.HoldAndReleaseEnabled = false
+                    s.SelectiveFireEnabled = true
+                    s.FireModes = {true}
+                    if orig then
+                        s.FireRate = orig.FireRate
+                        s.DelayBeforeFiring = orig.DelayBeforeFiring
+                        s.DelayAfterFiring = orig.DelayAfterFiring
+                        s.CooldownTime = orig.CooldownTime
+                    end
+                elseif orig then
+                    s.Auto = orig.Auto
+                    s.BurstFireEnabled = orig.BurstFireEnabled
+                    s.HoldAndReleaseEnabled = orig.HoldAndReleaseEnabled
+                    s.FireRate = orig.FireRate
+                    s.DelayBeforeFiring = orig.DelayBeforeFiring
+                    s.DelayAfterFiring = orig.DelayAfterFiring
+                    s.CooldownTime = orig.CooldownTime
+                    s.SelectiveFireEnabled = orig.SelectiveFireEnabled
+                    s.FireModes = orig.FireModes
                 end
             end
         end
@@ -6952,6 +7088,99 @@ task.spawn(function()
     while State.Running and _G._KrakenScriptId == MY_SCRIPT_ID do
         pcall(ApplyGunMods)
         task.wait(1.5)
+    end
+end)
+
+--------------------------------------------------------------
+-- 10.1 HEAD HITBOX EXPANDER (ขยายเป้าหัวศัตรู / AUTO HEADSHOT)
+--------------------------------------------------------------
+local OriginalHeadSizes = {}
+
+local function ApplyHitboxToCharacter(char)
+    if not char or char == LocalPlayer.Character then return end
+    pcall(function()
+        local head = char:FindFirstChild("Head")
+        if head and head:IsA("BasePart") then
+            if not OriginalHeadSizes[head] then
+                OriginalHeadSizes[head] = {
+                    Size = head.Size,
+                    Transparency = head.Transparency,
+                    CanCollide = head.CanCollide,
+                    Massless = head.Massless,
+                    Material = head.Material
+                }
+            end
+            local orig = OriginalHeadSizes[head]
+            if State.HitboxExpander and State.Running then
+                local sz = tonumber(State.HitboxSize) or 6
+                head.Size = Vector3.new(sz, sz, sz)
+                head.CanCollide = false
+                head.Massless = true
+                if State.HitboxShow then
+                    head.Transparency = 0.5
+                    head.Material = Enum.Material.Neon
+                    head.BrickColor = BrickColor.new("Bright red")
+                else
+                    head.Transparency = orig.Transparency
+                end
+            else
+                if orig then
+                    head.Size = orig.Size
+                    head.Transparency = orig.Transparency
+                    head.CanCollide = orig.CanCollide
+                    head.Massless = orig.Massless
+                    head.Material = orig.Material
+                end
+            end
+        end
+    end)
+end
+
+local function UpdateAllHitboxes()
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and plr.Character then
+            ApplyHitboxToCharacter(plr.Character)
+        end
+    end
+end
+
+task.spawn(function()
+    while State.Running and _G._KrakenScriptId == MY_SCRIPT_ID do
+        if State.HitboxExpander then
+            pcall(UpdateAllHitboxes)
+        end
+        task.wait(1)
+    end
+end)
+
+--------------------------------------------------------------
+-- 10.2 GLOBAL INSTANT INTERACTION (กดปุ่ม E ทุกอย่างในแมพ 0 วิ อัตโนมัติในตัว)
+--------------------------------------------------------------
+local function ProcessPrompt(prompt)
+    if not prompt or not prompt:IsA("ProximityPrompt") then return end
+    pcall(function()
+        prompt.HoldDuration = 0
+    end)
+end
+
+local function UpdateAllPrompts()
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("ProximityPrompt") then
+            ProcessPrompt(obj)
+        end
+    end
+end
+
+-- ปรับให้ทุกปุ่มในแมพเป็น 0 วิ ทันทีที่รันสคริปต์
+task.spawn(function()
+    task.wait(0.2)
+    UpdateAllPrompts()
+end)
+
+Connections.PromptAddedHook = workspace.DescendantAdded:Connect(function(desc)
+    if desc:IsA("ProximityPrompt") then
+        task.wait(0.05)
+        ProcessPrompt(desc)
     end
 end)
 
@@ -7226,6 +7455,8 @@ pcall(function()
         end
     end
 end)
+
+
 
 
 
@@ -8241,6 +8472,68 @@ FastBulletToggle:OnChanged(function()
     State.FastBullet = Options.FastBulletOn.Value
     ApplyGunMods()
 end)
+
+local FullAutoToggle = Tabs.Combat:AddToggle("FullAutoOn", {
+    Title = "🔥 ยิงฟูลออโต้ปลอดภัย (Safe Full Auto)",
+    Description = "เปลี่ยนปืนทุกกระบอก (ปืนพก/ลูกซอง/ไรเฟิล) ให้ยิงค้างได้อัตโนมัติ โดยไม่เร่ง FireRate เกินสเปก เพื่อไม่ให้เซิร์ฟเวอร์เตะ (100% Anti-Kick)",
+    Default = false
+})
+FullAutoToggle:OnChanged(function()
+    State.FullAuto = Options.FullAutoOn.Value
+    ApplyGunMods()
+    if State.FullAuto then
+        Notify("Safe Full Auto", "เปิดใช้งานปืนยิงค้างอัตโนมัติ (ปลอดภัย ไม่โดนเตะ)", "", 2.5)
+    else
+        Notify("Safe Full Auto", "ปิดใช้งานปืนยิงค้าง คืนค่าเดิม", "", 2)
+    end
+end)
+
+Tabs.Combat:AddSection("🎯 ขยายขนาดเป้าหัว (Head Hitbox Expander)")
+
+local HitboxToggle = Tabs.Combat:AddToggle("HitboxExpanderOn", {
+    Title = "🎯 เปิดใช้งาน Hitbox หัว (Auto Headshot)",
+    Description = "ขยายขนาดพาร์ต Head ของศัตรูให้ใหญ่ขึ้น กระสุน Raycast จะพุ่งชนหัว 100% ยิงตรงไหนก็ติด Headshot",
+    Default = false
+})
+HitboxToggle:OnChanged(function()
+    State.HitboxExpander = Options.HitboxExpanderOn.Value
+    UpdateAllHitboxes()
+    if State.HitboxExpander then
+        Notify("Hitbox Expander", "เปิดขยายขนาดหัวศัตรูสำเร็จ!", "", 2.5)
+    else
+        Notify("Hitbox Expander", "คืนค่าขนาดหัวศัตรูปกติ", "", 2)
+    end
+end)
+
+local HitboxSlider = Tabs.Combat:AddSlider("HitboxSizeVal", {
+    Title = "📏 ขนาดเป้าหัวศัตรู (Hitbox Size)",
+    Description = "ปรับขนาดหัวศัตรู ยิ่งใหญ่ยิ่งยิงโดนง่าย (ค่าเริ่มต้น: 6)",
+    Default = 6,
+    Min = 2,
+    Max = 12,
+    Rounding = 1
+})
+HitboxSlider:OnChanged(function()
+    State.HitboxSize = Options.HitboxSizeVal.Value
+    if State.HitboxExpander then
+        UpdateAllHitboxes()
+    end
+end)
+
+local HitboxShowToggle = Tabs.Combat:AddToggle("HitboxShowOn", {
+    Title = "👁️ แสดงกล่องเป้าหมายสีแดง (Show Hitbox Box)",
+    Description = "แสดงกล่องสีแดงนีออนโปร่งใสรอบหัวศัตรู",
+    Default = true
+})
+HitboxShowToggle:OnChanged(function()
+    State.HitboxShow = Options.HitboxShowOn.Value
+    if State.HitboxExpander then
+        UpdateAllHitboxes()
+    end
+end)
+
+
+
 
 -- [แท็บ 4: ตั้งค่า]
 Tabs.Settings:AddParagraph({
