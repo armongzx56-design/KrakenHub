@@ -41,15 +41,21 @@ if _G.SailueatHub_Cleanup then
 end
 
 local CoreGui = game:GetService("CoreGui")
-local targetGuiParent = pcall(function() return CoreGui.Name end) and CoreGui or LocalPlayer:WaitForChild("PlayerGui")
-for _, name in ipairs({"KrakenHub_ToggleButton", "SailueatHub_V3", "SailueatHub_V3_5", "SailueatHub_V3_6", "SailueatHub_V3_7", "SailueatHub_V3_8", "SailueatHub_V3_9", "SailueatHub_V2", "SailueatHub_V1", "Fluent"}) do
+local targetGuiParent = (gethui and gethui()) or (pcall(function() return CoreGui.Name end) and CoreGui) or LocalPlayer:WaitForChild("PlayerGui")
+for _, name in ipairs({"KrakenHub_ToggleButton", "KrakenHub_UI", "SailueatHub_V3", "SailueatHub_V3_5", "SailueatHub_V3_6", "SailueatHub_V3_7", "SailueatHub_V3_8", "SailueatHub_V3_9", "SailueatHub_V2", "SailueatHub_V1", "Fluent"}) do
     local old = targetGuiParent:FindFirstChild(name)
     if old then pcall(function() old:Destroy() end) end
+    if targetGuiParent ~= LocalPlayer:FindFirstChild("PlayerGui") and LocalPlayer:FindFirstChild("PlayerGui") then
+        local pOld = LocalPlayer.PlayerGui:FindFirstChild(name)
+        if pOld then pcall(function() pOld:Destroy() end) end
+    end
 end
 pcall(function()
-    for _, c in ipairs(CoreGui:GetChildren()) do
-        if c:IsA("ScreenGui") and (c.Name == "ScreenGui" or c.Name:find("Fluent")) then
-            c:Destroy()
+    if CoreGui and pcall(function() return CoreGui.Name end) then
+        for _, c in ipairs(CoreGui:GetChildren()) do
+            if c:IsA("ScreenGui") and (c.Name == "KrakenHub_UI" or c.Name == "KrakenHub_ToggleButton" or c.Name:find("Fluent")) then
+                c:Destroy()
+            end
         end
     end
 end)
@@ -1334,39 +1340,22 @@ end
 -- 🎨 โหลด FLUENT UI & โลโก้ KRAKENHUB (K COMMUNITY)
 --------------------------------------------------------------
 local function GetLogoAsset()
-    if typeof(isfile) == "function" and typeof(writefile) == "function" and typeof(getcustomasset) == "function" then
-        local needDownload = not isfile("k_community_logo.png")
-        if isfile("k_community_logo.png") and typeof(readfile) == "function" then
-            pcall(function()
-                local content = readfile("k_community_logo.png")
-                if not content or #content < 1000 or content:sub(1, 4) ~= "\137PNG" then
-                    needDownload = true
-                end
-            end)
-        end
-
-        if needDownload then
-            local logoUrls = {
-                "https://files.catbox.moe/t3q02s.png",
-                "https://raw.githubusercontent.com/armongzx56-design/KrakenHub/main/k_community_logo.png"
-            }
-            for _, url in ipairs(logoUrls) do
-                local s, data = pcall(function() return game:HttpGet(url) end)
-                if s and type(data) == "string" and #data > 1000 and data:sub(1, 4) == "\137PNG" then
-                    pcall(writefile, "k_community_logo.png", data)
-                    break
-                end
+    task.spawn(function()
+        if typeof(isfile) == "function" and typeof(writefile) == "function" and typeof(getcustomasset) == "function" then
+            if not isfile("k_community_logo.png") then
+                pcall(function()
+                    local url = "https://raw.githubusercontent.com/armongzx56-design/KrakenHub/main/k_community_logo.png"
+                    local data = game:HttpGet(url)
+                    if type(data) == "string" and #data > 1000 and data:sub(1, 4) == "\137PNG" then
+                        writefile("k_community_logo.png", data)
+                    end
+                end)
             end
         end
-
-        if isfile("k_community_logo.png") then
-            local s, asset = pcall(getcustomasset, "k_community_logo.png")
-            if s and asset then return asset end
-        end
-        if isfile("k_logo.png") then
-            local s, asset = pcall(getcustomasset, "k_logo.png")
-            if s and asset then return asset end
-        end
+    end)
+    if typeof(isfile) == "function" and typeof(getcustomasset) == "function" and isfile("k_community_logo.png") then
+        local s, asset = pcall(getcustomasset, "k_community_logo.png")
+        if s and asset then return asset end
     end
     return "rbxasset://5059d143b75fc7c70a58a871660c4f16/k_community_logo.png"
 end
@@ -1426,7 +1415,12 @@ local assets = {
 --// Functions
 local function GetGui()
 	local newGui = Instance.new("ScreenGui")
-	newGui.ScreenInsets = Enum.ScreenInsets.None
+	newGui.Name = "KrakenHub_UI"
+	pcall(function()
+		if Enum and Enum.ScreenInsets and Enum.ScreenInsets.None then
+			newGui.ScreenInsets = Enum.ScreenInsets.None
+		end
+	end)
 	newGui.ResetOnSpawn = false
 	newGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	newGui.DisplayOrder = 2147483647
@@ -1436,7 +1430,7 @@ local function GetGui()
 		or (gethui and gethui())
 		or (cloneref and cloneref(MacLib.GetService("CoreGui")) or MacLib.GetService("CoreGui"))
 
-	newGui.Parent = parent
+	newGui.Parent = parent or LocalPlayer:WaitForChild("PlayerGui")
 	return newGui
 end
 
@@ -2237,21 +2231,23 @@ function MacLib:Window(Settings)
 	local function clampBasePosition(targetX, targetY, w, h)
 		local vp = camera_ and camera_.ViewportSize or Vector2.new(1920, 1080)
 		local inset = GuiService:GetGuiInset()
-		local maxX = math.max(0, vp.X - (w * 0.5))
-		local maxY = math.max(0, vp.Y - (h * 0.5) - inset.Y)
-		local minX = math.min(maxX, w * 0.5)
-		local minY = math.min(maxY, h * 0.5)
+		local halfW = w * 0.5
+		local halfH = h * 0.5
+		local minX = halfW
+		local maxX = math.max(halfW, vp.X - halfW)
+		local minY = halfH + inset.Y
+		local maxY = math.max(minY, vp.Y - halfH)
 
 		local clampedX = math.clamp(targetX, minX, maxX)
 		local clampedY = math.clamp(targetY, minY, maxY)
-		return UDim2.new(0, clampedX, 0, clampedY)
+		return UDim2.fromOffset(clampedX, clampedY)
 	end
 
 	local function update(input)
 		local delta = input.Position - dragStart
 		local absSize = base.AbsoluteSize
-		local targetX = startPos.X.Offset + delta.X
-		local targetY = startPos.Y.Offset + delta.Y
+		local targetX = startPos.X + delta.X
+		local targetY = startPos.Y + delta.Y
 		base.Position = clampBasePosition(targetX, targetY, absSize.X, absSize.Y)
 	end
 
@@ -2261,7 +2257,7 @@ function MacLib:Window(Settings)
 			dragging_ = true
 			dragInput = input
 			dragStart = input.Position
-			startPos = base.Position
+			startPos = Vector2.new(base.AbsolutePosition.X + (base.AbsoluteSize.X * 0.5), base.AbsolutePosition.Y + (base.AbsoluteSize.Y * 0.5))
 
 			input.Changed:Connect(function()
 				if input.UserInputState == Enum.UserInputState.End then
@@ -5098,10 +5094,21 @@ return MacLib
 
 end)()
 
+local function GetOptimalWindowSize()
+    local vp = (workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize) or Vector2.new(1920, 1080)
+    -- ตรวจสอบหากเป็นหน้าจอมือถือ (ViewportSize กว้างน้อยกว่า 900 หรือ TouchEnabled)
+    if vp.X < 900 or UserInputService.TouchEnabled then
+        local w = math.clamp(math.floor(vp.X * 0.88), 340, 720)
+        local h = math.clamp(math.floor(vp.Y * 0.82), 260, 480)
+        return UDim2.fromOffset(w, h)
+    end
+    return UDim2.fromOffset(860, 600)
+end
+
 local Window = MacLib:Window({
     Title = "KrakenHub",
     Subtitle = "สายเลือดอาชีวะ | v1.0",
-    Size = UDim2.fromOffset(860, 600),
+    Size = GetOptimalWindowSize(),
     DragStyle = 2,
     ShowUserInfo = true,
     Keybind = Enum.KeyCode.RightControl,
