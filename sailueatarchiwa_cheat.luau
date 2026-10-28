@@ -16,7 +16,11 @@ local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local VirtualInputManager = game:GetService("VirtualInputManager")
+local VirtualInputManager = (function()
+    local ok, vim = pcall(function() return game:GetService("VirtualInputManager") end)
+    if ok and vim then return vim end
+    return nil
+end)()
 local TweenService = game:GetService("TweenService")
 local PathfindingService = game:GetService("PathfindingService")
 local Lighting = game:GetService("Lighting")
@@ -40,8 +44,22 @@ if _G.SailueatHub_Cleanup then
     pcall(_G.SailueatHub_Cleanup)
 end
 
-local CoreGui = game:GetService("CoreGui")
-local targetGuiParent = (gethui and gethui()) or (pcall(function() return CoreGui.Name end) and CoreGui) or LocalPlayer:WaitForChild("PlayerGui")
+local CoreGui = (pcall(function() return game:GetService("CoreGui") end) and game:GetService("CoreGui")) or nil
+local targetGuiParent = (function()
+    if gethui then
+        local ok, h = pcall(gethui)
+        if ok and h then return h end
+    end
+    if CoreGui then
+        local canCore = pcall(function()
+            local test = Instance.new("Folder")
+            test.Parent = CoreGui
+            test:Destroy()
+        end)
+        if canCore then return CoreGui end
+    end
+    return LocalPlayer:WaitForChild("PlayerGui")
+end)()
 for _, name in ipairs({"KrakenHub_ToggleButton", "KrakenHub_UI", "SailueatHub_V3", "SailueatHub_V3_5", "SailueatHub_V3_6", "SailueatHub_V3_7", "SailueatHub_V3_8", "SailueatHub_V3_9", "SailueatHub_V2", "SailueatHub_V1", "Fluent"}) do
     local old = targetGuiParent:FindFirstChild(name)
     if old then pcall(function() old:Destroy() end) end
@@ -1425,12 +1443,34 @@ local function GetGui()
 	newGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	newGui.DisplayOrder = 2147483647
 
-	local parent = RunService:IsStudio() 
-		and LocalPlayer:FindFirstChild("PlayerGui")
-		or (gethui and gethui())
-		or (cloneref and cloneref(MacLib.GetService("CoreGui")) or MacLib.GetService("CoreGui"))
-
-	newGui.Parent = parent or LocalPlayer:WaitForChild("PlayerGui")
+	local parent = nil
+	if RunService:IsStudio() then
+		parent = LocalPlayer:FindFirstChild("PlayerGui")
+	else
+		pcall(function()
+			if gethui then parent = gethui() end
+		end)
+		if not parent then
+			local ok = pcall(function()
+				local t = Instance.new("Folder")
+				local cg = (cloneref and cloneref(MacLib.GetService("CoreGui"))) or MacLib.GetService("CoreGui")
+				t.Parent = cg
+				t:Destroy()
+				parent = cg
+			end)
+		end
+	end
+	if not parent then
+		parent = LocalPlayer:WaitForChild("PlayerGui")
+	end
+	local setOk = pcall(function()
+		newGui.Parent = parent
+	end)
+	if not setOk or not newGui.Parent then
+		pcall(function()
+			newGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+		end)
+	end
 	return newGui
 end
 
@@ -5208,11 +5248,13 @@ local function CreateFloatingToggleButton(windowObj)
         local dragStartPos = nil
         local startFramePos = nil
         local movedEnough = false
+        local dragThreshold = 8
 
         mainBtn.InputBegan:Connect(function(input)
             if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
                 dragging = true
                 movedEnough = false
+                dragThreshold = (input.UserInputType == Enum.UserInputType.Touch) and 18 or 8
                 dragStartPos = input.Position
                 startFramePos = mainBtn.Position
             end
@@ -5221,7 +5263,7 @@ local function CreateFloatingToggleButton(windowObj)
         UserInputService.InputChanged:Connect(function(input)
             if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
                 local delta = input.Position - dragStartPos
-                if delta.Magnitude > 6 then
+                if delta.Magnitude > dragThreshold then
                     movedEnough = true
                 end
                 mainBtn.Position = UDim2.new(
@@ -5241,13 +5283,15 @@ local function CreateFloatingToggleButton(windowObj)
 
         mainBtn.Activated:Connect(function()
             if not movedEnough then
-                TweenService:Create(mainBtn, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-                    Size = UDim2.fromOffset(42, 42)
-                }):Play()
-                task.wait(0.08)
-                TweenService:Create(mainBtn, TweenInfo.new(0.12, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-                    Size = UDim2.fromOffset(48, 48)
-                }):Play()
+                task.spawn(function()
+                    TweenService:Create(mainBtn, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+                        Size = UDim2.fromOffset(42, 42)
+                    }):Play()
+                    task.wait(0.08)
+                    TweenService:Create(mainBtn, TweenInfo.new(0.12, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+                        Size = UDim2.fromOffset(48, 48)
+                    }):Play()
+                end)
 
                 if windowObj and windowObj.Minimize then
                     windowObj:Minimize()
@@ -5262,7 +5306,10 @@ local function CreateFloatingToggleButton(windowObj)
             TweenService:Create(stroke, TweenInfo.new(0.2), { Thickness = 1.2 }):Play()
         end)
 
-        screenGui.Parent = targetGuiParent
+        local okP = pcall(function() screenGui.Parent = targetGuiParent end)
+        if not okP or not screenGui.Parent then
+            pcall(function() screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end)
+        end
         Hub.ToggleButtonGui = screenGui
     end)
 end
@@ -5600,10 +5647,14 @@ Connections.MinigameHoldLoop = RunService.Heartbeat:Connect(function()
                     local cx = targetObj.AbsolutePosition.X + targetObj.AbsoluteSize.X / 2
                     local cy = targetObj.AbsolutePosition.Y + targetObj.AbsoluteSize.Y / 2
 
-                    VirtualInputManager:SendMouseMoveEvent(cx, cy, game)
+                    if VirtualInputManager then
+                        pcall(function() VirtualInputManager:SendMouseMoveEvent(cx, cy, game) end)
+                    end
 
                     if not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
-                        VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true, game, 0)
+                        if VirtualInputManager then
+                            pcall(function() VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true, game, 0) end)
+                        end
                         isVIMHolding = true
                     end
 
@@ -5637,7 +5688,9 @@ Connections.MinigameHoldLoop = RunService.Heartbeat:Connect(function()
                 end
 
                 if not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
-                    VirtualInputManager:SendMouseButtonEvent(posX, posY, 0, true, game, 0)
+                    if VirtualInputManager then
+                        pcall(function() VirtualInputManager:SendMouseButtonEvent(posX, posY, 0, true, game, 0) end)
+                    end
                     isVIMHolding = true
                 end
 
@@ -5649,7 +5702,9 @@ Connections.MinigameHoldLoop = RunService.Heartbeat:Connect(function()
                         local sweepT = tick() * 14
                         local moveX = absPos.X + absSize.X * (0.5 + 0.42 * math.sin(sweepT))
                         local moveY = absPos.Y + absSize.Y * (0.5 + 0.35 * math.cos(sweepT * 1.5))
-                        VirtualInputManager:SendMouseMoveEvent(moveX, moveY, game)
+                        if VirtualInputManager then
+                            pcall(function() VirtualInputManager:SendMouseMoveEvent(moveX, moveY, game) end)
+                        end
                     end
                 end
             end
@@ -7229,7 +7284,6 @@ Connections.FullAutoLoop = RunService.Heartbeat:Connect(function()
         end)
     end
 end)
-end
 
 local function ApplyGunMods()
     if not State.Running then return end
