@@ -1488,6 +1488,8 @@ function MacLib:Window(Settings)
 	base.BackgroundTransparency = 0
 	base.BorderColor3 = Color3.fromRGB(0, 0, 0)
 	base.BorderSizePixel = 0
+	base.ClipsDescendants = true
+	base.Active = true
 	base.Position = UDim2.fromScale(0.5, 0.5)
 	base.Size = Settings.Size or UDim2.fromOffset(868, 650)
 
@@ -2223,20 +2225,49 @@ function MacLib:Window(Settings)
 	local dragStart
 	local startPos
 
+	-- // 📱 MOBILE OPTIMIZATION & ZERO-LATENCY DIRECT UPDATE //
+	local isResizing_ = false
+	local resizeInput_
+	local resizeStart_
+	local startSize_
+
+	local camera_ = workspace.CurrentCamera
+	local GuiService = MacLib.GetService("GuiService")
+
+	local function clampBasePosition(targetX, targetY, w, h)
+		local vp = camera_ and camera_.ViewportSize or Vector2.new(1920, 1080)
+		local inset = GuiService:GetGuiInset()
+		local maxX = math.max(0, vp.X - (w * 0.5))
+		local maxY = math.max(0, vp.Y - (h * 0.5) - inset.Y)
+		local minX = math.min(maxX, w * 0.5)
+		local minY = math.min(maxY, h * 0.5)
+
+		local clampedX = math.clamp(targetX, minX, maxX)
+		local clampedY = math.clamp(targetY, minY, maxY)
+		return UDim2.new(0, clampedX, 0, clampedY)
+	end
+
 	local function update(input)
 		local delta = input.Position - dragStart
 		base.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+		local absSize = base.AbsoluteSize
+		local targetX = startPos.X.Offset + delta.X
+		local targetY = startPos.Y.Offset + delta.Y
+		base.Position = clampBasePosition(targetX, targetY, absSize.X, absSize.Y)
 	end
 
 	local function onDragStart(input)
+		if isResizing_ then return end
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			dragging_ = true
+			dragInput = input
 			dragStart = input.Position
 			startPos = base.Position
 
 			input.Changed:Connect(function()
 				if input.UserInputState == Enum.UserInputState.End then
 					dragging_ = false
+					dragInput = nil
 				end
 			end)
 		end
@@ -2249,6 +2280,42 @@ function MacLib:Window(Settings)
 	end
 
 	if not Settings.DragStyle or Settings.DragStyle == 1 then
+	-- แตะส่วนว่างบน Base เพื่อลากย้ายได้เสมอ
+	base.InputBegan:Connect(function(input)
+		if isResizing_ then return end
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			onDragStart(input)
+		end
+	end)
+
+	base.InputChanged:Connect(onDragUpdate)
+
+	UserInputService.InputChanged:Connect(function(input)
+		if input == dragInput and dragging_ then
+			update(input)
+		elseif input == resizeInput_ and isResizing_ then
+			local delta = input.Position - resizeStart_
+			local minW, minH = 320, 220
+			local maxW = camera_ and camera_.ViewportSize.X or 1200
+			local maxH = camera_ and camera_.ViewportSize.Y or 900
+			local newW = math.clamp(startSize_.X + delta.X, minW, maxW)
+			local newH = math.clamp(startSize_.Y + delta.Y, minH, maxH)
+			base.Size = UDim2.fromOffset(newW, newH)
+		end
+	end)
+
+	UserInputService.InputEnded:Connect(function(input)
+		if input == dragInput or input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging_ = false
+			dragInput = nil
+		end
+		if input == resizeInput_ or input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			isResizing_ = false
+			resizeInput_ = nil
+		end
+	end)
+
+	if moveIcon and interact then
 		interact.InputBegan:Connect(function(input)
 			if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 				onDragStart(input)
@@ -2256,12 +2323,23 @@ function MacLib:Window(Settings)
 		end)
 
 		interact.InputChanged:Connect(onDragUpdate)
+	end
 
 		UserInputService.InputChanged:Connect(function(input)
 			if input == dragInput and dragging_ then
 				update(input)
 			end
 		end)
+	-- // 📐 RESIZE HANDLE AT BOTTOM-RIGHT CORNER (MOBILE FRIENDLY) //
+	local resizeHandle = Instance.new("ImageButton")
+	resizeHandle.Name = "ResizeHandle"
+	resizeHandle.Size = UDim2.fromOffset(40, 40)
+	resizeHandle.AnchorPoint = Vector2.new(1, 1)
+	resizeHandle.Position = UDim2.new(1, 0, 1, 0)
+	resizeHandle.BackgroundTransparency = 1
+	resizeHandle.ZIndex = 50
+	resizeHandle.Active = true
+	resizeHandle.Parent = base
 
 		interact.InputEnded:Connect(function(input)
 			if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
@@ -2274,14 +2352,36 @@ function MacLib:Window(Settings)
 				onDragStart(input)
 			end
 		end)
+	local resizeIcon = Instance.new("TextLabel")
+	resizeIcon.Name = "ResizeIcon"
+	resizeIcon.Size = UDim2.fromScale(1, 1)
+	resizeIcon.BackgroundTransparency = 1
+	resizeIcon.Text = "◢"
+	resizeIcon.TextColor3 = Color3.fromRGB(200, 200, 200)
+	resizeIcon.TextTransparency = 0.5
+	resizeIcon.TextSize = 16
+	resizeIcon.TextXAlignment = Enum.TextXAlignment.Right
+	resizeIcon.TextYAlignment = Enum.TextYAlignment.Bottom
+	resizeIcon.ZIndex = resizeHandle.ZIndex + 1
+	resizeIcon.Parent = resizeHandle
 
 		base.InputChanged:Connect(onDragUpdate)
+	local resizePadding = Instance.new("UIPadding")
+	resizePadding.PaddingRight = UDim.new(0, 4)
+	resizePadding.PaddingBottom = UDim.new(0, 4)
+	resizePadding.Parent = resizeHandle
 
 		UserInputService.InputChanged:Connect(function(input)
 			if input == dragInput and dragging_ then
 				update(input)
 			end
 		end)
+	resizeHandle.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			isResizing_ = true
+			resizeInput_ = input
+			resizeStart_ = input.Position
+			startSize_ = base.AbsoluteSize
 
 		base.InputEnded:Connect(function(input)
 			if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
@@ -2289,6 +2389,14 @@ function MacLib:Window(Settings)
 			end
 		end)
 	end
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then
+					isResizing_ = false
+					resizeInput_ = nil
+				end
+			end)
+		end
+	end)
 
 	local currentTab = Instance.new("TextLabel")
 	currentTab.Name = "CurrentTab"
@@ -5026,6 +5134,7 @@ local Window = MacLib:Window({
     Subtitle = "สายเลือดอาชีวะ | v1.0",
     Size = UDim2.fromOffset(860, 600),
     DragStyle = 1,
+    DragStyle = 2,
     ShowUserInfo = true,
     Keybind = Enum.KeyCode.RightControl,
     AcrylicBlur = false,
