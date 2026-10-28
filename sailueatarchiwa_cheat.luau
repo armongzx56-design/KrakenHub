@@ -6940,19 +6940,26 @@ end)
 -- 10. ระบบความแม่นยำของปืน, ไร้แรงดีด & ปืนยิงรัวฟูลออโต้ (SAFE CLIENT-SIDE GUN MODS)
 --------------------------------------------------------------
 local OriginalGunSettings = {}
+local OriginalGunSprings = {}
 
 local function EnhanceGun(tool)
     if not tool or not tool:IsA("Tool") then return end
     pcall(function()
-        -- 1. ปิด Shake ของปืน (กล้องสั่นไหวเวลาเล็ง/ยิง)
-        local shake = tool:FindFirstChild("Shake")
-        if shake and shake:IsA("LocalScript") then
-            shake.Enabled = not (State.NoRecoil and State.Running)
+        -- 1. ปิด Shake / Camera Shake ของปืนทุกตัวที่พบใน Tool หรือ Camera
+        for _, child in ipairs(tool:GetDescendants()) do
+            if child:IsA("LocalScript") and (child.Name:find("Shake") or child.Name:find("Recoil")) then
+                child.Enabled = not (State.NoRecoil and State.Running)
+            end
         end
 
-        -- 2. ปรับแต่งโมดูล Setting ของ FE Gun Kit เฉพาะค่าฝั่ง Client ที่ปลอดภัย 100%
-        local settingMod = tool:FindFirstChild("Setting")
-        if settingMod and settingMod:IsA("ModuleScript") then
+        -- 2. ปรับแต่งโมดูล Setting (รองรับทั้ง FE Gun Kit, ACS, CE Engine และ Custom Gun Kit)
+        local settingMod = tool:FindFirstChild("Setting") 
+                        or tool:FindFirstChild("Settings") 
+                        or tool:FindFirstChild("Config")
+                        or tool:FindFirstChild("GunSettings")
+                        or tool:FindFirstChildWhichIsA("ModuleScript")
+        
+        if settingMod and settingMod:IsA("ModuleScript") and (settingMod.Name == "Setting" or settingMod.Name == "Settings" or settingMod.Name == "Config" or settingMod.Name == "GunSettings") then
             local s = require(settingMod)
             if type(s) == "table" then
                 if not OriginalGunSettings[s] then
@@ -6971,6 +6978,11 @@ local function EnhanceGun(tool)
                         AngleY_Max = s.AngleY_Max,
                         AngleZ_Min = s.AngleZ_Min,
                         AngleZ_Max = s.AngleZ_Max,
+                        RecoilMin = s.RecoilMin,
+                        RecoilMax = s.RecoilMax,
+                        RecoilUp = s.RecoilUp,
+                        RecoilLeft = s.RecoilLeft,
+                        RecoilRight = s.RecoilRight,
                         ScopeSwaySpeed = s.ScopeSwaySpeed,
                         ScopeSwayDamper = s.ScopeSwayDamper,
                         ScopeKnockbackSpeed = s.ScopeKnockbackSpeed,
@@ -6981,9 +6993,11 @@ local function EnhanceGun(tool)
                         BulletAcceleration = s.BulletAcceleration,
                         BulletSpeed = s.BulletSpeed,
                         Auto = s.Auto,
+                        Automatic = s.Automatic,
                         BurstFireEnabled = s.BurstFireEnabled,
                         HoldAndReleaseEnabled = s.HoldAndReleaseEnabled,
                         FireRate = s.FireRate,
+                        RPM = s.RPM,
                         DelayBeforeFiring = s.DelayBeforeFiring,
                         DelayAfterFiring = s.DelayAfterFiring,
                         CooldownTime = s.CooldownTime,
@@ -6991,6 +7005,7 @@ local function EnhanceGun(tool)
                         TimeBeforeCooldown = s.TimeBeforeCooldown,
                         SelectiveFireEnabled = s.SelectiveFireEnabled,
                         FireModes = s.FireModes,
+                        FireMode = s.FireMode,
                     }
                 end
                 local orig = OriginalGunSettings[s]
@@ -7024,7 +7039,7 @@ local function EnhanceGun(tool)
                     s.MaxSpread = orig.MaxSpread
                 end
 
-                -- 🛑 ปืนนิ่งสนิท ไร้แรงถีบ (No Recoil & No Camera Recoiling)
+                -- 🛑 ปืนนิ่งสนิท ไร้แรงถีบ (Zero Recoil, Zero Sway & Zero Camera Kick)
                 if State.NoRecoil and State.Running then
                     s.Recoil = 0
                     s.CameraRecoilingEnabled = false
@@ -7037,6 +7052,11 @@ local function EnhanceGun(tool)
                     s.AngleY_Max = 0
                     s.AngleZ_Min = 0
                     s.AngleZ_Max = 0
+                    s.RecoilMin = 0
+                    s.RecoilMax = 0
+                    s.RecoilUp = 0
+                    s.RecoilLeft = 0
+                    s.RecoilRight = 0
                     s.ScopeSwaySpeed = 0
                     s.ScopeSwayDamper = 0
                     s.ScopeKnockbackSpeed = 0
@@ -7056,6 +7076,11 @@ local function EnhanceGun(tool)
                     s.AngleY_Max = orig.AngleY_Max
                     s.AngleZ_Min = orig.AngleZ_Min
                     s.AngleZ_Max = orig.AngleZ_Max
+                    s.RecoilMin = orig.RecoilMin
+                    s.RecoilMax = orig.RecoilMax
+                    s.RecoilUp = orig.RecoilUp
+                    s.RecoilLeft = orig.RecoilLeft
+                    s.RecoilRight = orig.RecoilRight
                     s.ScopeSwaySpeed = orig.ScopeSwaySpeed
                     s.ScopeSwayDamper = orig.ScopeSwayDamper
                     s.ScopeKnockbackSpeed = orig.ScopeKnockbackSpeed
@@ -7081,33 +7106,129 @@ local function EnhanceGun(tool)
                     s.BulletSpeed = orig.BulletSpeed
                 end
 
-                -- 🔥 ปืนทุกชนิดยิงฟูลออโต้ปลอดภัย (Safe Full Auto - คงค่า FireRate และ Cooldown เดิม ไม่เร่งจนเซิร์ฟเวอร์เตะ)
+                -- 🔥 ปืนทุกชนิดยิงฟูลออโต้ปลอดภัย (Full Auto)
                 if State.FullAuto and State.Running then
                     s.Auto = true
+                    s.Automatic = true
                     s.BurstFireEnabled = false
                     s.HoldAndReleaseEnabled = false
                     s.SelectiveFireEnabled = true
-                    s.FireModes = {true}
+                    s.FireModes = {true, 1, 2, 3}
+                    s.FireMode = "Auto"
                     if orig then
                         s.FireRate = orig.FireRate
+                        s.RPM = orig.RPM
                         s.DelayBeforeFiring = orig.DelayBeforeFiring
                         s.DelayAfterFiring = orig.DelayAfterFiring
                         s.CooldownTime = orig.CooldownTime
                     end
                 elseif orig then
                     s.Auto = orig.Auto
+                    s.Automatic = orig.Automatic
                     s.BurstFireEnabled = orig.BurstFireEnabled
                     s.HoldAndReleaseEnabled = orig.HoldAndReleaseEnabled
                     s.FireRate = orig.FireRate
+                    s.RPM = orig.RPM
                     s.DelayBeforeFiring = orig.DelayBeforeFiring
                     s.DelayAfterFiring = orig.DelayAfterFiring
                     s.CooldownTime = orig.CooldownTime
                     s.SelectiveFireEnabled = orig.SelectiveFireEnabled
                     s.FireModes = orig.FireModes
+                    s.FireMode = orig.FireMode
                 end
             end
         end
     end)
+end
+
+-- ⚡ ล็อค Camera CFrame ไม่ให้กล้องเด้งสะบัดเวลาเหนี่ยวไก (Zero Recoil Camera Lock)
+local _lastCleanCameraCFrame = nil
+if Connections.NoRecoilCameraHook then
+    pcall(function() Connections.NoRecoilCameraHook:Disconnect() end)
+end
+Connections.NoRecoilCameraHook = RunService.RenderStepped:Connect(function()
+    if not State.Running or not State.NoRecoil then return end
+    local char = LocalPlayer.Character
+    if not char then return end
+    local equippedTool = char:FindFirstChildOfClass("Tool")
+    if not equippedTool then return end
+
+    -- กวาดล้าง Spring / Recoil Object ฝั่ง Viewmodel ถ้ามี
+    local cam = Workspace.CurrentCamera
+    if cam then
+        local viewmodel = cam:FindFirstChild("Viewmodel") or cam:FindFirstChild("ViewModel") or Workspace:FindFirstChild("Viewmodel")
+        if viewmodel then
+            local spring = viewmodel:FindFirstChild("RecoilSpring") or viewmodel:FindFirstChild("Spring")
+            if spring and spring:IsA("ValueBase") then
+                spring.Value = Vector3.zero
+            end
+        end
+    end
+end)
+
+-- 🔫 ระบบ Full Auto Loop: ตรวจจับการกดค้างบนมือถือและคอม (Touch & Mouse Click Hold)
+-- ช่วยกระตุ้น Tool:Activate() อัตโนมัติทุกรอบคูลดาวน์เวลาที่ถือปืนกดยิงค้างไว้
+local _isHoldingFire = false
+local _lastAutoFireTime = 0
+
+if Connections.FullAutoInputBegan then
+    pcall(function() Connections.FullAutoInputBegan:Disconnect() end)
+end
+if Connections.FullAutoInputEnded then
+    pcall(function() Connections.FullAutoInputEnded:Disconnect() end)
+end
+if Connections.FullAutoLoop then
+    pcall(function() Connections.FullAutoLoop:Disconnect() end)
+end
+
+Connections.FullAutoInputBegan = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if not State.Running or not State.FullAuto then return end
+    -- ตรวจจับทั้งการคลิกเมาส์ซ้าย และการแตะจอของมือถือ
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        local char = LocalPlayer.Character
+        local tool = char and char:FindFirstChildOfClass("Tool")
+        if tool and (tool:FindFirstChild("Setting") or tool:FindFirstChild("GunGUI") or tool:FindFirstChild("Handle") or tool:FindFirstChild("FirePoint")) then
+            _isHoldingFire = true
+        end
+    end
+end)
+
+Connections.FullAutoInputEnded = UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        _isHoldingFire = false
+    end
+end)
+
+Connections.FullAutoLoop = RunService.Heartbeat:Connect(function()
+    if not State.Running or not State.FullAuto or not _isHoldingFire then return end
+    local char = LocalPlayer.Character
+    if not char then return end
+    local tool = char:FindFirstChildOfClass("Tool")
+    if not tool then
+        _isHoldingFire = false
+        return
+    end
+
+    local now = os.clock()
+    -- ดึง FireRate จาก Setting หรือใช้ default 0.1s
+    local rate = 0.1
+    pcall(function()
+        local settingMod = tool:FindFirstChild("Setting") or tool:FindFirstChild("Settings")
+        if settingMod and settingMod:IsA("ModuleScript") then
+            local s = require(settingMod)
+            if s and s.FireRate and tonumber(s.FireRate) then
+                rate = math.max(0.06, tonumber(s.FireRate))
+            end
+        end
+    end)
+
+    if now - _lastAutoFireTime >= rate then
+        _lastAutoFireTime = now
+        pcall(function()
+            tool:Activate()
+        end)
+    end
+end)
 end
 
 local function ApplyGunMods()
