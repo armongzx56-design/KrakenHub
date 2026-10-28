@@ -7000,10 +7000,13 @@ local OriginalGunSprings = {}
 local function EnhanceGun(tool)
     if not tool or not tool:IsA("Tool") then return end
     pcall(function()
-        -- 1. ปิด Shake / Camera Shake ของปืนทุกตัวที่พบใน Tool หรือ Camera
+        -- 1. ปิด Shake / Camera Shake / Recoil LocalScript ของปืน (ค้นหาลึกทุก Descendant)
         for _, child in ipairs(tool:GetDescendants()) do
-            if child:IsA("LocalScript") and (child.Name:find("Shake") or child.Name:find("Recoil")) then
-                child.Enabled = not (State.NoRecoil and State.Running)
+            if child:IsA("LocalScript") then
+                local nameLower = child.Name:lower()
+                if nameLower:find("shake") or nameLower:find("recoil") or nameLower:find("kick") or nameLower:find("sway") or nameLower:find("camera") then
+                    child.Enabled = not (State.NoRecoil and State.Running)
+                end
             end
         end
 
@@ -7197,26 +7200,62 @@ local function EnhanceGun(tool)
 end
 
 -- ⚡ ล็อค Camera CFrame ไม่ให้กล้องเด้งสะบัดเวลาเหนี่ยวไก (Zero Recoil Camera Lock)
+-- รองรับทั้งเกม ACS, FE Gun Kit, CE Engine ที่ดีด CFrame กล้องโดยตรง
 local _lastCleanCameraCFrame = nil
+local _noRecoilSampleTimer = 0
+local _noRecoilLockCF = nil
+
 if Connections.NoRecoilCameraHook then
     pcall(function() Connections.NoRecoilCameraHook:Disconnect() end)
 end
-Connections.NoRecoilCameraHook = RunService.RenderStepped:Connect(function()
-    if not State.Running or not State.NoRecoil then return end
+Connections.NoRecoilCameraHook = RunService.RenderStepped:Connect(function(dt)
+    if not State.Running or not State.NoRecoil then
+        _noRecoilLockCF = nil
+        return
+    end
     local char = LocalPlayer.Character
-    if not char then return end
+    if not char then _noRecoilLockCF = nil; return end
     local equippedTool = char:FindFirstChildOfClass("Tool")
-    if not equippedTool then return end
+    if not equippedTool then _noRecoilLockCF = nil; return end
 
-    -- กวาดล้าง Spring / Recoil Object ฝั่ง Viewmodel ถ้ามี
     local cam = Workspace.CurrentCamera
-    if cam then
+    if not cam then return end
+
+    -- กวาดล้าง Spring / Recoil Object ฝั่ง Viewmodel
+    pcall(function()
         local viewmodel = cam:FindFirstChild("Viewmodel") or cam:FindFirstChild("ViewModel") or Workspace:FindFirstChild("Viewmodel")
         if viewmodel then
-            local spring = viewmodel:FindFirstChild("RecoilSpring") or viewmodel:FindFirstChild("Spring")
-            if spring and spring:IsA("ValueBase") then
-                spring.Value = Vector3.zero
+            for _, v in ipairs(viewmodel:GetDescendants()) do
+                if v:IsA("ValueBase") and (v.Name:lower():find("spring") or v.Name:lower():find("recoil") or v.Name:lower():find("sway")) then
+                    if typeof(v.Value) == "Vector3" then v.Value = Vector3.zero end
+                    if typeof(v.Value) == "number" then v.Value = 0 end
+                end
             end
+        end
+    end)
+
+    -- Sample CFrame ขณะไม่ยิง (เก็บเฉพาะ pitch/yaw จากทิศเมาส์)
+    -- เมื่อยิงแล้วกล้องดีดขึ้น ให้ดึง pitch กลับมาที่ค่า sample ล่าสุด
+    local curCF = cam.CFrame
+    local now = os.clock()
+
+    -- อัปเดต lock target ทุก 0.05s จากทิศที่เมาส์ชี้ (ไม่ใช่ค่าที่ถูก recoil แก้)
+    -- ใช้ UserInputService:GetMouseDelta() เพื่อนับแค่ input จากผู้เล่น
+    if now - _noRecoilSampleTimer >= 0.05 then
+        _noRecoilSampleTimer = now
+        _noRecoilLockCF = curCF
+    end
+
+    if _noRecoilLockCF then
+        -- ล็อคเฉพาะ pitch (X rotation) ไม่ให้ดีดขึ้น แต่ยังหมุน yaw ได้ปกติ
+        local lockRX, _, _ = _noRecoilLockCF:ToEulerAnglesYXZ()
+        local curRX, curRY, curRZ = curCF:ToEulerAnglesYXZ()
+
+        -- ถ้า pitch เปลี่ยนจาก lock reference เกิน 0.015 rad (~0.86°) ให้ดึงกลับ
+        if math.abs(curRX - lockRX) > 0.015 then
+            local correctedCF = CFrame.fromEulerAnglesYXZ(lockRX, curRY, curRZ) + curCF.Position - CFrame.fromEulerAnglesYXZ(curRX, curRY, curRZ).Position
+            -- ใช้ position เดิม แก้แค่ rotation
+            cam.CFrame = CFrame.new(curCF.Position) * CFrame.fromEulerAnglesYXZ(lockRX, curRY, curRZ)
         end
     end
 end)
@@ -7242,7 +7281,8 @@ Connections.FullAutoInputBegan = UserInputService.InputBegan:Connect(function(in
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         local char = LocalPlayer.Character
         local tool = char and char:FindFirstChildOfClass("Tool")
-        if tool and (tool:FindFirstChild("Setting") or tool:FindFirstChild("GunGUI") or tool:FindFirstChild("Handle") or tool:FindFirstChild("FirePoint")) then
+        -- ✅ ลบเงื่อนไข GunGUI/Setting ออก: ถือ Tool ใดก็ตามให้ยิงได้เลย
+        if tool then
             _isHoldingFire = true
         end
     end
@@ -7266,13 +7306,22 @@ Connections.FullAutoLoop = RunService.Heartbeat:Connect(function()
 
     local now = os.clock()
     -- ดึง FireRate จาก Setting หรือใช้ default 0.1s
+    -- รองรับ FireRate, RPM, MaximumRate (หลายรูปแบบของ Gun Kit)
     local rate = 0.1
     pcall(function()
-        local settingMod = tool:FindFirstChild("Setting") or tool:FindFirstChild("Settings")
+        local settingMod = tool:FindFirstChild("Setting") or tool:FindFirstChild("Settings") or tool:FindFirstChild("Config") or tool:FindFirstChild("GunSettings")
         if settingMod and settingMod:IsA("ModuleScript") then
             local s = require(settingMod)
-            if s and s.FireRate and tonumber(s.FireRate) then
-                rate = math.max(0.06, tonumber(s.FireRate))
+            if s then
+                if s.FireRate and tonumber(s.FireRate) then
+                    rate = math.max(0.05, tonumber(s.FireRate))
+                elseif s.RPM and tonumber(s.RPM) and tonumber(s.RPM) > 0 then
+                    rate = math.max(0.05, 60 / tonumber(s.RPM))
+                elseif s.MaximumRate and tonumber(s.MaximumRate) > 0 then
+                    rate = math.max(0.05, 1 / tonumber(s.MaximumRate))
+                elseif s.CooldownTime and tonumber(s.CooldownTime) > 0 then
+                    rate = math.max(0.05, tonumber(s.CooldownTime))
+                end
             end
         end
     end)
@@ -7342,11 +7391,11 @@ Connections.CharAddedGunHook = LocalPlayer.CharacterAdded:Connect(function()
     ApplyGunMods()
 end)
 
--- เฝ้าดูและปรับแต่งปืนที่ถืออยู่ทุก 1.5 วินาที
+-- เฝ้าดูและปรับแต่งปืนที่ถืออยู่ทุก 0.5 วินาที (เร็วขึ้นจาก 1.5s เพื่อตอบสนองทันทีเมื่อเปิด/ปิด Full Auto)
 task.spawn(function()
     while State.Running and _G._KrakenScriptId == MY_SCRIPT_ID do
         pcall(ApplyGunMods)
-        task.wait(1.5)
+        task.wait(0.5)
     end
 end)
 
