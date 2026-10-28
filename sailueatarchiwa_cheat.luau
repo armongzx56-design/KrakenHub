@@ -2249,7 +2249,6 @@ function MacLib:Window(Settings)
 
 	local function update(input)
 		local delta = input.Position - dragStart
-		base.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
 		local absSize = base.AbsoluteSize
 		local targetX = startPos.X.Offset + delta.X
 		local targetY = startPos.Y.Offset + delta.Y
@@ -2279,7 +2278,6 @@ function MacLib:Window(Settings)
 		end
 	end
 
-	if not Settings.DragStyle or Settings.DragStyle == 1 then
 	-- แตะส่วนว่างบน Base เพื่อลากย้ายได้เสมอ
 	base.InputBegan:Connect(function(input)
 		if isResizing_ then return end
@@ -2321,15 +2319,9 @@ function MacLib:Window(Settings)
 				onDragStart(input)
 			end
 		end)
-
 		interact.InputChanged:Connect(onDragUpdate)
 	end
 
-		UserInputService.InputChanged:Connect(function(input)
-			if input == dragInput and dragging_ then
-				update(input)
-			end
-		end)
 	-- // 📐 RESIZE HANDLE AT BOTTOM-RIGHT CORNER (MOBILE FRIENDLY) //
 	local resizeHandle = Instance.new("ImageButton")
 	resizeHandle.Name = "ResizeHandle"
@@ -2341,17 +2333,6 @@ function MacLib:Window(Settings)
 	resizeHandle.Active = true
 	resizeHandle.Parent = base
 
-		interact.InputEnded:Connect(function(input)
-			if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-				dragging_ = false
-			end
-		end)
-	elseif Settings.DragStyle == 2 then
-		base.InputBegan:Connect(function(input)
-			if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-				onDragStart(input)
-			end
-		end)
 	local resizeIcon = Instance.new("TextLabel")
 	resizeIcon.Name = "ResizeIcon"
 	resizeIcon.Size = UDim2.fromScale(1, 1)
@@ -2365,17 +2346,11 @@ function MacLib:Window(Settings)
 	resizeIcon.ZIndex = resizeHandle.ZIndex + 1
 	resizeIcon.Parent = resizeHandle
 
-		base.InputChanged:Connect(onDragUpdate)
 	local resizePadding = Instance.new("UIPadding")
 	resizePadding.PaddingRight = UDim.new(0, 4)
 	resizePadding.PaddingBottom = UDim.new(0, 4)
 	resizePadding.Parent = resizeHandle
 
-		UserInputService.InputChanged:Connect(function(input)
-			if input == dragInput and dragging_ then
-				update(input)
-			end
-		end)
 	resizeHandle.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			isResizing_ = true
@@ -2383,12 +2358,6 @@ function MacLib:Window(Settings)
 			resizeStart_ = input.Position
 			startSize_ = base.AbsoluteSize
 
-		base.InputEnded:Connect(function(input)
-			if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-				dragging_ = false
-			end
-		end)
-	end
 			input.Changed:Connect(function()
 				if input.UserInputState == Enum.UserInputState.End then
 					isResizing_ = false
@@ -5133,7 +5102,6 @@ local Window = MacLib:Window({
     Title = "KrakenHub",
     Subtitle = "สายเลือดอาชีวะ | v1.0",
     Size = UDim2.fromOffset(860, 600),
-    DragStyle = 1,
     DragStyle = 2,
     ShowUserInfo = true,
     Keybind = Enum.KeyCode.RightControl,
