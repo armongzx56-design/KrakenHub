@@ -103,7 +103,7 @@ end)
 
 --------------------------------------------------------------
 -- 🛡️ ระบบความปลอดภัย (100% STEALTH ANTI-CHEAT BYPASS)
--- ปิดการทำงานสคริปต์ตรวจจับฝั่งไคลเอนต์แบบเงียบสนิท ไม่แตะต้อง Metatable หรือ Adonis Engine ป้องกัน Error 267 100%
+-- ปิดการทำงานสคริปต์ตรวจจับฝั่งไคลเอนต์แบบเงียบสนิท ไม่แตะต้อง Metatable หรือ Adonis Engine ป้องกัน Error 267 & CODE 59 100%
 --------------------------------------------------------------
 pcall(function()
     local pscripts = LocalPlayer:FindFirstChild("PlayerScripts")
@@ -241,6 +241,8 @@ local Hub = {
         HitboxSize = 6,
         HitboxShow = true,
         InstantPrompt = true,
+        SmartPrompt = true,
+        AutoZeroPrompt = true,
         -- พ่อค้าพเนจร (Wandering Merchant)
         MerchantESP = true,
         AutoNotifyMerchant = true,
@@ -6269,18 +6271,32 @@ task.spawn(function()
                         hum:MoveTo(hrp.Position)
                         task.wait(0.25)
 
-                        -- กด ProximityPrompt ที่โต๊ะ/ตัว NPC (เร็วและปลอดภัย ไม่โดนเตะ 267)
+                        -- กด ProximityPrompt ที่โต๊ะ/ตัว NPC (ปลอดภัย 100% ไม่โดนเตะ 267 / CODE: 49 / CODE: 59)
                         if npcPrompt and npcPrompt.Enabled then
-                            local holdTime = npcPrompt.HoldDuration or 0
+                            local origH = npcPrompt:GetAttribute("_OrigHoldDuration")
+                            local holdTime = (origH and origH > 0 and origH) or npcPrompt.HoldDuration or 0
                             if holdTime > 0 then
-                                pcall(function() npcPrompt:InputHoldBegin() end)
-                                local startH = os.clock()
-                                while (os.clock() - startH) < holdTime and State.AutoFarm and State.Running do
-                                    task.wait(0.03)
+                                local vim = game:GetService("VirtualInputManager")
+                                if vim and typeof(vim.SendKeyEvent) == "function" then
+                                    vim:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+                                    local startH = os.clock()
+                                    while (os.clock() - startH) < (holdTime + 0.12) and State.AutoFarm and State.Running do
+                                        task.wait(0.03)
+                                    end
+                                    vim:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+                                    task.wait(0.08)
+                                else
+                                    pcall(function() npcPrompt:InputHoldBegin() end)
+                                    local startH = os.clock()
+                                    while (os.clock() - startH) < holdTime and State.AutoFarm and State.Running do
+                                        task.wait(0.03)
+                                    end
+                                    pcall(function() npcPrompt:InputHoldEnd() end)
+                                    task.wait(0.05)
+                                    pcall(function() fireproximityprompt(npcPrompt) end)
                                 end
-                                pcall(function() fireproximityprompt(npcPrompt) end)
-                                pcall(function() npcPrompt:InputHoldEnd() end)
                             else
+                                task.wait(0.08)
                                 pcall(function() fireproximityprompt(npcPrompt) end)
                             end
                         end
@@ -6367,21 +6383,39 @@ task.spawn(function()
                     hum:MoveTo(hrp.Position)
                     task.wait(0.05) -- หยุดนิ่งสนิท พร้อมกดทันที
 
-                    -- กดเริ่มงานอย่างรวดเร็วและปลอดภัย (Fast Hold Duration ไม่โดนเตะ 267)
-                    local holdTime = prompt.HoldDuration or 0
+                    -- กดเริ่มงานอย่างรวดเร็วและปลอดภัย (Safe Hold Duration ป้องกัน CODE: 49 และ CODE: 59)
+                    local origHold = prompt:GetAttribute("_OrigHoldDuration")
+                    local holdTime = (origHold and origHold > 0 and origHold) or prompt.HoldDuration or 0
                     if holdTime > 0 then
-                        pcall(function() prompt:InputHoldBegin() end)
-                        local startHold = os.clock()
-                        while (os.clock() - startHold) < holdTime and State.AutoFarm and State.Running and not IsCurrentlyWorking() do
-                            if hrp then
-                                hrp.AssemblyLinearVelocity = Vector3.zero
-                                hrp.AssemblyAngularVelocity = Vector3.zero
+                        local vim = game:GetService("VirtualInputManager")
+                        if vim and typeof(vim.SendKeyEvent) == "function" then
+                            vim:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+                            local startHold = os.clock()
+                            while (os.clock() - startHold) < (holdTime + 0.12) and State.AutoFarm and State.Running and not IsCurrentlyWorking() do
+                                if hrp then
+                                    hrp.AssemblyLinearVelocity = Vector3.zero
+                                    hrp.AssemblyAngularVelocity = Vector3.zero
+                                end
+                                task.wait(0.03)
                             end
-                            task.wait(0.03)
+                            vim:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+                            task.wait(0.08)
+                        else
+                            pcall(function() prompt:InputHoldBegin() end)
+                            local startHold = os.clock()
+                            while (os.clock() - startHold) < holdTime and State.AutoFarm and State.Running and not IsCurrentlyWorking() do
+                                if hrp then
+                                    hrp.AssemblyLinearVelocity = Vector3.zero
+                                    hrp.AssemblyAngularVelocity = Vector3.zero
+                                end
+                                task.wait(0.03)
+                            end
+                            pcall(function() prompt:InputHoldEnd() end)
+                            task.wait(0.05)
+                            pcall(function() fireproximityprompt(prompt) end)
                         end
-                        pcall(function() fireproximityprompt(prompt) end)
-                        pcall(function() prompt:InputHoldEnd() end)
                     else
+                        task.wait(0.08)
                         pcall(function() fireproximityprompt(prompt) end)
                     end
 
@@ -8093,16 +8127,65 @@ task.spawn(function()
 end)
 
 --------------------------------------------------------------
--- 10.2 GLOBAL INSTANT INTERACTION (กดปุ่ม E ทุกอย่างในแมพ 0 วิ อัตโนมัติในตัว)
+-- 10.2 SMART PROXIMITY PROMPT & SAFE INTERACTION (BYPASS CODE: 49 & CODE: 59)
 --------------------------------------------------------------
 local function ProcessPrompt(prompt)
     if not prompt or not prompt:IsA("ProximityPrompt") then return end
     pcall(function()
-        prompt.HoldDuration = 0
+        local pName = prompt.Parent and prompt.Parent.Name or ""
+        local act = prompt.ActionText or ""
+        local obj = prompt.ObjectText or ""
+
+        -- บันทึกค่า HoldDuration ดั้งเดิมจากเซิร์ฟเวอร์
+        local orig = prompt:GetAttribute("_OrigHoldDuration")
+        if orig == nil then
+            orig = prompt.HoldDuration
+            -- กู้คืนค่าความปลอดภัยอัตโนมัติหากเคยถูกเขียนทับเป็น 0
+            if orig == 0 then
+                if act:find("ตู้เซฟ") or pName:find("Safe") or obj:find("Safe") then
+                    orig = 1.0
+                elseif act:find("หยิบ") or act:find("เก็บ") or act:find("Take") or act:find("Loot") or act:find("Pick")
+                    or pName:find("Drop") or pName:find("Bag") or pName:find("Gun") or pName:find("Tool")
+                    or obj:find("Gun") or obj:find("ปืน") or obj:find("Bag") or obj:find("ถุง") then
+                    orig = 1.0
+                elseif act:find("hammer") or act:find("weld") or act:find("construct") or obj:find("construct") then
+                    orig = 3.5
+                elseif act:find("ถู") or act:find("นวด") or act:find("clean") or pName:find("Dirty") then
+                    orig = 5.0
+                elseif act:find("หลุม") or pName:find("Grave") or obj:find("Grave") then
+                    orig = 3.0
+                elseif act:find("Warp") or act:find("วาร์ป") then
+                    orig = 2.0
+                elseif act:find("นั่ง") or pName:find("seat") then
+                    orig = 0.5
+                end
+            end
+            prompt:SetAttribute("_OrigHoldDuration", orig)
+        end
+
+        -- ป้องกันระยะกดเกินจริงจนโดนตรวจจับ CODE: 264 (Distance Check)
+        if prompt.MaxActivationDistance > 8.5 then
+            prompt.MaxActivationDistance = 8.5
+        end
+
+        -- ตรวจสอบประเภทไอเทมที่เซิร์ฟเวอร์อนุญาตให้เป็น 0 วิอย่างแท้จริง (เพลง, ประตูทั่วไป)
+        local isAllowedZero = act:find("เพลง") or act:find("Music") or act:find("ประตู") or act:find("Door")
+
+        if orig <= 0 and isAllowedZero then
+            prompt.HoldDuration = 0
+        else
+            -- ไอเทมเกมเพลย์ทุกชนิด (ตู้เซฟ, ปืนตก, กระเป๋า, งาน): ห้ามเป็น 0 วิ เด็ดขาด!
+            -- หากเซิร์ฟเวอร์ตรวจพบการกด 0 วิ ในการเก็บปืนหรือตู้เซฟ จะเตะ CODE 49 หรือแบนถาวร CODE 59 ทันที
+            if orig <= 0 then
+                orig = 1.0
+                prompt:SetAttribute("_OrigHoldDuration", 1.0)
+            end
+            prompt.HoldDuration = orig
+        end
     end)
 end
 
--- ดักจับเมื่อ ProximityPrompt แสดงผล (0% CPU impact ไม่สแกน Workspace ทั้งแมพ ป้องกันเกมกระตุก)
+-- ดักจับเมื่อ ProximityPrompt แสดงผล (0% CPU impact ไม่สแกนทั้ง Workspace ป้องกันเกมกระตุก)
 pcall(function()
     Connections.PromptShownHook = game:GetService("ProximityPromptService").PromptShown:Connect(ProcessPrompt)
 end)
@@ -8943,7 +9026,7 @@ end)
 --------------------------------------------------------------
 Tabs.Farm:AddParagraph({
     Title = "🛡️ KrakenHub v1.0 ",
-    Content = "• HookMetamethod บล็อกรีโมทแบน & ตรวจจับทุกประเภท\n• ล็อกสปีด 20 studs/s แท้จริง วิ่งไวกว่าคนทั่วไป แต่ต่ำกว่าเกณฑ์เตะ 261\n• ป้องกันหลุดระยะ ProximityPrompt และ Remote Rate-Limit ถาวร"
+    Content = "• 100% Stealth Anti-Cheat Bypass ปลอดภัย ไม่แตะต้อง Metatable\n• ล็อกสปีด 20 studs/s แท้จริง วิ่งไวกว่าคนทั่วไป แต่ต่ำกว่าเกณฑ์เตะ 261\n• ป้องกันหลุดระยะ ProximityPrompt และ Remote Rate-Limit ถาวร"
 })
 
 local JobSelector = Tabs.Farm:AddDropdown("JobSelect", {
@@ -9202,6 +9285,26 @@ end)
 local InfJumpToggle = Tabs.Player:AddToggle("InfJumpOn", { Title = "♾️ กระโดดไม่จำกัด", Default = false })
 InfJumpToggle:OnChanged(function()
     State.InfJump = Options.InfJumpOn.Value
+end)
+
+Tabs.Player:AddSection("🖐️ ปฏิสัมพันธ์ & การกดปุ่ม E (Bypass CODE: 49 & CODE: 59)")
+
+local SmartPromptToggle = Tabs.Player:AddToggle("SmartPromptOn", {
+    Title = "🛡️ Smart E Bypass (กันเตะ 49 & กันแบน 59)",
+    Description = "กด E ปลอดภัย ไม่โดนแบนถาวร: รักษาเวลาเก็บปืน, ตู้เซฟ, ชิ้นส่วน และงานก่อสร้างตรงกับเซิร์ฟเวอร์ 100%",
+    Default = true
+})
+SmartPromptToggle:OnChanged(function()
+    State.SmartPrompt = Options.SmartPromptOn.Value
+end)
+
+local AutoZeroPromptToggle = Tabs.Player:AddToggle("AutoZeroPromptOn", {
+    Title = "⚡ กดติดทันที 0ms (เฉพาะของไม่มีเวลากด)",
+    Description = "กดปุ่ม E ติดทันทีสำหรับไอเทมที่เซิร์ฟเวอร์ไม่ได้กำหนดเวลากดค้าง (เก็บเงิน, ประตู, วิทยุ)",
+    Default = true
+})
+AutoZeroPromptToggle:OnChanged(function()
+    State.AutoZeroPrompt = Options.AutoZeroPromptOn.Value
 end)
 
 Tabs.Player:AddParagraph({
