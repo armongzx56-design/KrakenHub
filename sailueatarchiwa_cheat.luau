@@ -227,7 +227,10 @@ local Hub = {
         NoRecoil = true,
         FastBullet = false,
         FullAuto = true,
+        GlockSwitchFireRate = 0.125,
         FastReload = false,
+        FastReloadRatio = 0.8,
+        MinReloadClamp = 1.35,
         AutoReload = true,
         SilentAim = false,
         SilentPart = "Head",
@@ -240,6 +243,7 @@ local Hub = {
         HitboxExpander = false,
         HitboxSize = 6,
         HitboxShow = true,
+        -- ระบบปฏิสัมพันธ์ & ProximityPrompt (แยก Instant กับ Safe Delay)
         InstantPrompt = true,
         SmartPrompt = true,
         AutoZeroPrompt = true,
@@ -7290,7 +7294,7 @@ local function EnhanceGun(tool)
                     s.BulletSpeed = orig.BulletSpeed
                 end
 
-                -- 🔥 ปืนทุกชนิดยิงฟูลออโต้ปลอดภัย (Full Auto ทั้งบนคอมและมือถือ)
+                -- 🔥 ปืนทุกชนิดยิงรัวออโต้ระดับ Glock Switch ของเซิร์ฟเวอร์ (ป้องกัน CODE: 46)
                 if State.FullAuto and State.Running then
                     s.Auto = true
                     s.Automatic = true
@@ -7309,21 +7313,24 @@ local function EnhanceGun(tool)
                     else
                         s.FireModes = {true, true, true}
                     end
-                    s.MaximumRate = 999
-                    s.CooldownTime = 0
-                    s.DelayBeforeFiring = 0
-                    s.DelayAfterFiring = 0
-                    -- ปรับ FireRate ให้เร็วลื่นไหล ปลอดภัยไม่โดนเตะ (0.09s = ~666 RPM)
-                    if type(s.FireRate) == "number" then
-                        if s.FireRate > 0.12 or s.FireRate <= 0.01 then
-                            s.FireRate = 0.09
-                        end
-                    else
-                        s.FireRate = 0.09
-                    end
-                    _cachedFireInterval = s.FireRate or 0.09
+
+                    -- ปรับ FireRate ให้ตรงกับสเปก Glock Switch ของเซิร์ฟเวอร์ (0.125s = ~480 RPM)
+                    -- ล็อคขั้นต่ำ 0.120s ไม่เร่งจนเซิร์ฟเวอร์ตรวจจับ Rapid Fire (Bypass CODE: 46)
+                    local safeSwitchRate = math.clamp(State.GlockSwitchFireRate or 0.125, 0.120, 0.200)
+                    s.FireRate = safeSwitchRate
+                    s.RPM = math.floor(60 / safeSwitchRate)
+                    _cachedFireInterval = safeSwitchRate
+
                     if orig then
-                        s.RPM = orig.RPM
+                        s.CooldownTime = (type(orig.CooldownTime) == "number" and orig.CooldownTime > 0 and orig.CooldownTime) or 0.04
+                        s.DelayBeforeFiring = orig.DelayBeforeFiring or 0
+                        s.DelayAfterFiring = orig.DelayAfterFiring or 0
+                        s.MaximumRate = math.floor(60 / safeSwitchRate)
+                    else
+                        s.CooldownTime = 0.04
+                        s.DelayBeforeFiring = 0
+                        s.DelayAfterFiring = 0
+                        s.MaximumRate = 480
                     end
                 elseif orig then
                     s.Auto = orig.Auto
@@ -7338,15 +7345,33 @@ local function EnhanceGun(tool)
                     s.SelectiveFireEnabled = orig.SelectiveFireEnabled
                     s.FireModes = orig.FireModes
                     s.FireMode = orig.FireMode
-                    _cachedFireInterval = (type(s.FireRate) == "number" and s.FireRate) or 0.09
+                    _cachedFireInterval = (type(s.FireRate) == "number" and s.FireRate) or 0.125
                 end
 
                 -- ⚡ จัดการการรีโหลดกระสุนอย่างปลอดภัย (ป้องกันการโดนแบน CODE: 59)
-                -- เซิร์ฟเวอร์ตรวจสอบเวลา ReloadTime อย่างเข้มงวด ต้องคงเวลาเดิมของปืนไว้ 100%
+                -- เร่งความเร็วการรีโหลดอย่างปลอดภัย 20-25% พร้อมล็อคเวลาขั้นต่ำ 1.35s ป้องกันแอนตี้ชีตตรวจจับ
                 if orig then
-                    s.ReloadTime = orig.ReloadTime
-                    s.TacticalReloadTime = orig.TacticalReloadTime
-                    s.ReloadAnimationSpeed = orig.ReloadAnimationSpeed
+                    if State.FastReload and State.Running then
+                        local ratio = math.clamp(State.FastReloadRatio or 0.8, 0.70, 0.95)
+                        local minClamp = State.MinReloadClamp or 1.35
+                        if orig.ReloadTime then
+                            s.ReloadTime = math.max(minClamp, orig.ReloadTime * ratio)
+                        end
+                        if orig.TacticalReloadTime then
+                            s.TacticalReloadTime = math.max(minClamp * 0.85, orig.TacticalReloadTime * ratio)
+                        end
+                        s.ReloadAnimationSpeed = (orig.ReloadAnimationSpeed or 1) * (1 / ratio)
+                        if orig.TacticalReloadAnimationSpeed then
+                            s.TacticalReloadAnimationSpeed = (orig.TacticalReloadAnimationSpeed or 1) * (1 / ratio)
+                        end
+                    else
+                        s.ReloadTime = orig.ReloadTime
+                        s.TacticalReloadTime = orig.TacticalReloadTime
+                        s.ReloadAnimationSpeed = orig.ReloadAnimationSpeed
+                        if orig.TacticalReloadAnimationSpeed then
+                            s.TacticalReloadAnimationSpeed = orig.TacticalReloadAnimationSpeed
+                        end
+                    end
                 end
             end
         end
@@ -7366,14 +7391,36 @@ local function EnhanceGun(tool)
                                 if rawget(v, "ViewmodelRecoilInfluence") ~= nil then v.ViewmodelRecoilInfluence = 0 end
                             end
                             if State.FullAuto and State.Running then
+                                local safeSwitchRate = math.clamp(State.GlockSwitchFireRate or 0.125, 0.120, 0.200)
                                 if rawget(v, "Auto") ~= nil then v.Auto = true end
+                                if rawget(v, "Automatic") ~= nil then v.Automatic = true end
                                 if rawget(v, "SelectiveFireEnabled") ~= nil then v.SelectiveFireEnabled = false end
                                 if rawget(v, "BurstFireEnabled") ~= nil then v.BurstFireEnabled = false end
+                                if rawget(v, "FireRate") ~= nil then v.FireRate = safeSwitchRate end
+                                if rawget(v, "RPM") ~= nil then v.RPM = math.floor(60 / safeSwitchRate) end
+                            else
+                                if orig then
+                                    if rawget(v, "Auto") ~= nil then v.Auto = orig.Auto end
+                                    if rawget(v, "Automatic") ~= nil then v.Automatic = orig.Automatic end
+                                    if rawget(v, "FireRate") ~= nil then v.FireRate = orig.FireRate end
+                                    if rawget(v, "RPM") ~= nil then v.RPM = orig.RPM end
+                                end
                             end
-                            -- คงค่า ReloadTime ตามปกติของปืน ป้องกัน CODE: 59
-                            if orig then
-                                if rawget(v, "ReloadTime") ~= nil then v.ReloadTime = orig.ReloadTime end
-                                if rawget(v, "TacticalReloadTime") ~= nil then v.TacticalReloadTime = orig.TacticalReloadTime end
+                            -- รีโหลดกระสุนไวปลอดภัยในระดับ Script Environment (ล็อคความปลอดภัยขั้นต่ำ 1.35 วิ ป้องกัน CODE: 59)
+                            if State.FastReload and State.Running then
+                                local ratio = math.clamp(State.FastReloadRatio or 0.8, 0.70, 0.95)
+                                local minClamp = State.MinReloadClamp or 1.35
+                                if orig and orig.ReloadTime and rawget(v, "ReloadTime") ~= nil then
+                                    v.ReloadTime = math.max(minClamp, orig.ReloadTime * ratio)
+                                end
+                                if orig and orig.TacticalReloadTime and rawget(v, "TacticalReloadTime") ~= nil then
+                                    v.TacticalReloadTime = math.max(minClamp * 0.85, orig.TacticalReloadTime * ratio)
+                                end
+                            else
+                                if orig then
+                                    if rawget(v, "ReloadTime") ~= nil then v.ReloadTime = orig.ReloadTime end
+                                    if rawget(v, "TacticalReloadTime") ~= nil then v.TacticalReloadTime = orig.TacticalReloadTime end
+                                end
                             end
                         end
                     end
@@ -7611,7 +7658,7 @@ local _isHoldingFire = false
 local _lastAutoFireTime = 0
 local _fireTargetTool = nil
 
--- ฟังก์ชันกระตุ้นการยิงระดับ Native (รองรับทั้ง FE Gun Kit, ACS, Custom Gun Kit และอาวุธทั่วไป)
+-- ฟังก์ชันกระตุ้นการยิงระดับ Native (ป้องกันการยิงเบิ้ล 2 นัดซ้อน สาเหตุของ CODE: 46)
 local function TriggerGunShot(tool)
     -- ป้องกันการยิงปืนที่ไม่ได้ถืออยู่ในมือเด็ดขาด (ป้องกัน CODE: 601 เมื่อเก็บปืนหรือถอดปืนเข้ากระเป๋า/ตู้เซฟ)
     local char = LocalPlayer.Character
@@ -7621,6 +7668,7 @@ local function TriggerGunShot(tool)
         return
     end
 
+    local fired = false
     -- 1. ยิงผ่าน mouse.Button1Down สำหรับปืนระบบ FE Gun Kit บนคอม
     local mouse = LocalPlayer:GetMouse()
     if mouse and typeof(getconnections) == "function" then
@@ -7630,8 +7678,10 @@ local function TriggerGunShot(tool)
                 pcall(function()
                     if typeof(firesignal) == "function" then
                         firesignal(conn)
+                        fired = true
                     elseif conn.Fire then
                         conn:Fire()
+                        fired = true
                     end
                 end)
             end
@@ -7639,25 +7689,30 @@ local function TriggerGunShot(tool)
     end
 
     -- 2. ยิงผ่านปุ่ม FireButton ใน GunGUI สำหรับมือถือ
-    local pgui = LocalPlayer:FindFirstChild("PlayerGui")
-    if pgui then
-        local gunGui = pgui:FindFirstChild("GunGUI")
-        local fireBtn = gunGui and gunGui:FindFirstChild("MobileButtons") and gunGui.MobileButtons:FindFirstChild("FireButton")
-        if fireBtn and typeof(getconnections) == "function" then
-            for _, conn in ipairs(getconnections(fireBtn.MouseButton1Down)) do
-                pcall(function()
-                    if typeof(firesignal) == "function" then
-                        firesignal(conn)
-                    elseif conn.Fire then
-                        conn:Fire()
-                    end
-                end)
+    if not fired then
+        local pgui = LocalPlayer:FindFirstChild("PlayerGui")
+        if pgui then
+            local gunGui = pgui:FindFirstChild("GunGUI")
+            local fireBtn = gunGui and gunGui:FindFirstChild("MobileButtons") and gunGui.MobileButtons:FindFirstChild("FireButton")
+            if fireBtn and typeof(getconnections) == "function" then
+                for _, conn in ipairs(getconnections(fireBtn.MouseButton1Down)) do
+                    pcall(function()
+                        if typeof(firesignal) == "function" then
+                            firesignal(conn)
+                            fired = true
+                        elseif conn.Fire then
+                            conn:Fire()
+                            fired = true
+                        end
+                    end)
+                end
             end
         end
     end
 
-    -- 3. เรียก tool:Activate() เฉพาะตอนที่ปืนยังอยู่ใน Character เท่านั้น
-    if tool.Parent == char then
+    -- 3. Fallback เฉพาะ Tool ทั่วไปที่ไม่ได้เชื่อมโยงกับ Button1Down (เช่น หมัด/มีด)
+    -- ห้ามเรียกคู่กับ Button1Down เด็ดขาดเพื่อป้องกันการยิงเบิ้ล 2 นัดในเวลาเดียวกัน (ป้องกัน CODE: 46)
+    if not fired and tool.Parent == char then
         pcall(function() tool:Activate() end)
     end
 end
@@ -7669,7 +7724,11 @@ local _lastAutoReloadTick = 0
 
 local function TriggerGunReload(tool)
     local now = os.clock()
-    if now - _lastAutoReloadTick < 1.5 then return end
+    local reloadCooldown = 1.5
+    if State.FastReload then
+        reloadCooldown = math.max(State.MinReloadClamp or 1.35, 1.5 * (State.FastReloadRatio or 0.8))
+    end
+    if now - _lastAutoReloadTick < reloadCooldown then return end
     _lastAutoReloadTick = now
 
     -- กดปุ่ม R อย่างสมจริงและปลอดภัยผ่าน VirtualInputManager (พฤติกรรมเหมือนคนกดมือ 100%)
@@ -7866,8 +7925,13 @@ Connections.FullAutoInputBegan = UserInputService.InputBegan:Connect(function(in
                 CheckGunAmmoAndAutoReload(tool)
             end
 
-            -- นัดแรกยิงออกทันทีเมื่อกดคลิกซ้าย (Instant 0ms First Shot)
-            TriggerGunShot(tool)
+            -- สำหรับอาวุธที่ไม่มี GunScript_Local (เช่น มีด/หมัด/Tool ทั่วไป) ให้กระตุ้นการยิงนัดแรก
+            local hasFEGun = tool:FindFirstChild("GunScript_Local") or tool:FindFirstChildWhichIsA("LocalScript")
+            if not hasFEGun then
+                TriggerGunShot(tool)
+            end
+            -- สำหรับปืน FE Gun Kit บนคอม: Roblox ส่งคลิกซ้ายให้ GunScript_Local อัตโนมัติอยู่แล้ว
+            -- และ GunScript_Local จะยิงออโต้ตาม FireRate (0.125s) ของ Glock Switch อย่างสมบูรณ์ ไม่ยิงซ้อน
         end
     end
 end)
@@ -7895,7 +7959,7 @@ Connections.FullAutoInputEnded = UserInputService.InputEnded:Connect(function(in
     end
 end)
 
--- ลูป Heartbeat ยิงต่อเนื่องขณะกดค้าง (รองรับปืนทุกชนิด ทั้ง FE Gun Kit, Semi-Auto, Shotgun, Melee)
+-- ลูป Heartbeat ยิงต่อเนื่องขณะกดค้าง (จัดการ AutoReload และยิงต่อเนื่องแบบไม่ยิงซ้ำซ้อน)
 Connections.FullAutoLoop = RunService.Heartbeat:Connect(function()
     if not State.Running or not State.FullAuto or not _isHoldingFire then return end
     local char = LocalPlayer.Character
@@ -7916,11 +7980,16 @@ Connections.FullAutoLoop = RunService.Heartbeat:Connect(function()
         CheckGunAmmoAndAutoReload(tool)
     end
 
-    local now = os.clock()
-    local interval = _cachedFireInterval or 0.09
-    if now - _lastAutoFireTime >= interval then
-        _lastAutoFireTime = now
-        TriggerGunShot(tool)
+    -- ปืน FE Gun Kit จะยิงออโต้ระดับ Glock Switch (0.125s) ผ่าน GunScript_Local เองอย่างเสถียร
+    -- รันลูปกระตุ้นเฉพาะกรณีที่ Tool ไม่มี GunScript_Local เท่านั้น เพื่อป้องกัน CODE: 46
+    local hasFEGun = tool:FindFirstChild("GunScript_Local") or tool:FindFirstChildWhichIsA("LocalScript")
+    if not hasFEGun then
+        local now = os.clock()
+        local interval = math.clamp(State.GlockSwitchFireRate or 0.125, 0.120, 0.200)
+        if now - _lastAutoFireTime >= interval then
+            _lastAutoFireTime = now
+            TriggerGunShot(tool)
+        end
     end
 end)
 
@@ -8102,37 +8171,102 @@ task.spawn(function()
 end)
 
 --------------------------------------------------------------
--- 10.2 SMART PROXIMITY PROMPT & SAFE INTERACTION (BYPASS CODE: 49 & CODE: 59)
+-- 10.2 SMART CATEGORIZED PROXIMITY PROMPT (INSTANT E vs SAFE DELAY)
 --------------------------------------------------------------
+local function ClassifyPrompt(prompt)
+    local act = prompt.ActionText or ""
+    local obj = prompt.ObjectText or ""
+    local pName = prompt.Parent and prompt.Parent.Name or ""
+    local fullName = ""
+    pcall(function() fullName = prompt:GetFullName() end)
+
+    local actLower = string.lower(act)
+    local objLower = string.lower(obj)
+    local pNameLower = string.lower(pName)
+    local fullLower = string.lower(fullName)
+
+    -- 1. หมวดตู้เซฟ (Safe): กดติดทันที 0ms ตามที่ dj ต้องการ
+    local isSafe = act:find("ตู้เซฟ") or obj:find("ตู้เซฟ") or pName:find("Safe") or obj:find("Safe")
+                or act:find("Safe") or pName:find("เซฟ") or fullLower:find("safe") or fullLower:find("ตู้เซฟ")
+
+    -- 2. หมวดพ่อค้า & คุย NPC (Merchant / Shop): กดติดทันที 0ms ตามที่ dj ต้องการ
+    local isMerchant = act:find("พ่อค้า") or obj:find("พ่อค้า") or pName:find("Merchant") or obj:find("Merchant")
+                    or act:find("คุย") or act:find("สนทนา") or actLower:find("talk")
+                    or act:find("ซื้อ") or act:find("ขาย") or actLower:find("shop") or actLower:find("store")
+                    or actLower:find("dealer") or act:find("เปิดร้าน") or pNameLower:find("merchant") or fullLower:find("merchant")
+
+    -- 3. หมวดประตู, รถยนต์, เก้าอี้, เพลง: กดติดทันที 0ms ปลอดภัย 100%
+    local isGeneralInstant = act:find("ประตู") or actLower:find("door") or obj:find("ประตู") or objLower:find("door")
+                          or act:find("เพลง") or actLower:find("music") or actLower:find("radio") or obj:find("วิทยุ")
+                          or act:find("ขับ") or actLower:find("drive") or act:find("ขึ้นรถ") or pNameLower:find("vehicle") or pNameLower:find("car")
+                          or act:find("นั่ง") or actLower:find("sit") or pNameLower:find("seat") or pNameLower:find("chair")
+
+    -- 4. หมวดจุดทำงาน / ฟาร์มงาน (Job Work Sites): ต้องมีดีเลย์ค้างตามเซิร์ฟเวอร์ ป้องกัน CODE: 49
+    local isJob = false
+    local jobMinDelay = 3.5
+
+    if fullLower:find("job") or pNameLower:find("job") then
+        isJob = true
+    end
+    if actLower:find("hammer") or actLower:find("weld") or actLower:find("construct") or act:find("ก่อสร้าง") or act:find("เชื่อม") or act:find("ตอก") then
+        isJob = true
+        jobMinDelay = 3.5
+    elseif act:find("ถู") or act:find("นวด") or actLower:find("clean") or actLower:find("mop") or pNameLower:find("dirty") or objLower:find("dirty") then
+        isJob = true
+        jobMinDelay = 5.0
+    elseif act:find("ขยะ") or act:find("คุ้ย") or actLower:find("trash") or actLower:find("waste") or pNameLower:find("trash") or pNameLower:find("dumpster") then
+        isJob = true
+        jobMinDelay = 3.0
+    elseif act:find("ซ่อม") or actLower:find("repair") or actLower:find("fix") or act:find("แบก") or actLower:find("carry") then
+        isJob = true
+        jobMinDelay = 3.5
+    end
+
+    -- 5. หมวดเก็บของ / ปืนตก / กระเป๋าตก / หลุมศพ (Item Looting): ต้องมีดีเลย์ ป้องกันแบนถาวร CODE: 59
+    local isLoot = false
+    local lootMinDelay = 1.2
+
+    if not isSafe and not isMerchant then
+        if pNameLower:find("dropbag") or pNameLower:find("drop_bag") or fullLower:find("dropbag") or pName:find("ถุงเงิน") or pNameLower:find("cashdrop") then
+            isLoot = true
+            lootMinDelay = 1.2
+        elseif pNameLower:find("grave") or objLower:find("grave") or act:find("หลุม") or fullLower:find("grave") then
+            isLoot = true
+            lootMinDelay = 3.0
+        elseif act:find("หยิบ") or act:find("เก็บของ") or act:find("เก็บไอเทม") or actLower:find("loot") or actLower:find("take") or actLower:find("pick") or act:find("ขโมย") or actLower:find("steal") then
+            isLoot = true
+            lootMinDelay = 1.2
+        elseif (act:find("เก็บ") or act:find("หยิบ")) and (obj:find("ปืน") or objLower:find("gun") or obj:find("กระเป๋า") or objLower:find("bag") or obj:find("ถุง") or obj:find("เงิน") or pNameLower:find("gun") or pNameLower:find("bag") or pNameLower:find("tool")) then
+            isLoot = true
+            lootMinDelay = 1.2
+        end
+    end
+
+    return {
+        isSafe = isSafe,
+        isMerchant = isMerchant,
+        isGeneralInstant = isGeneralInstant,
+        isJob = isJob,
+        jobMinDelay = jobMinDelay,
+        isLoot = isLoot,
+        lootMinDelay = lootMinDelay
+    }
+end
+
 local function ProcessPrompt(prompt)
     if not prompt or not prompt:IsA("ProximityPrompt") then return end
     pcall(function()
-        local pName = prompt.Parent and prompt.Parent.Name or ""
-        local act = prompt.ActionText or ""
-        local obj = prompt.ObjectText or ""
+        local class = ClassifyPrompt(prompt)
 
         -- บันทึกค่า HoldDuration ดั้งเดิมจากเซิร์ฟเวอร์
         local orig = prompt:GetAttribute("_OrigHoldDuration")
         if orig == nil then
             orig = prompt.HoldDuration
-            -- กู้คืนค่าความปลอดภัยอัตโนมัติหากเคยถูกเขียนทับเป็น 0
             if orig == 0 then
-                if act:find("ตู้เซฟ") or pName:find("Safe") or obj:find("Safe") then
-                    orig = 1.0
-                elseif act:find("หยิบ") or act:find("เก็บ") or act:find("Take") or act:find("Loot") or act:find("Pick")
-                    or pName:find("Drop") or pName:find("Bag") or pName:find("Gun") or pName:find("Tool")
-                    or obj:find("Gun") or obj:find("ปืน") or obj:find("Bag") or obj:find("ถุง") then
-                    orig = 1.0
-                elseif act:find("hammer") or act:find("weld") or act:find("construct") or obj:find("construct") then
-                    orig = 3.5
-                elseif act:find("ถู") or act:find("นวด") or act:find("clean") or pName:find("Dirty") then
-                    orig = 5.0
-                elseif act:find("หลุม") or pName:find("Grave") or obj:find("Grave") then
-                    orig = 3.0
-                elseif act:find("Warp") or act:find("วาร์ป") then
-                    orig = 2.0
-                elseif act:find("นั่ง") or pName:find("seat") then
-                    orig = 0.5
+                if class.isJob then
+                    orig = class.jobMinDelay
+                elseif class.isLoot then
+                    orig = class.lootMinDelay
                 end
             end
             prompt:SetAttribute("_OrigHoldDuration", orig)
@@ -8143,19 +8277,29 @@ local function ProcessPrompt(prompt)
             prompt.MaxActivationDistance = 8.5
         end
 
-        -- ตรวจสอบประเภทไอเทมที่เซิร์ฟเวอร์อนุญาตให้เป็น 0 วิอย่างแท้จริง (เพลง, ประตูทั่วไป)
-        local isAllowedZero = act:find("เพลง") or act:find("Music") or act:find("ประตู") or act:find("Door")
-
-        if orig <= 0 and isAllowedZero then
-            prompt.HoldDuration = 0
-        else
-            -- ไอเทมเกมเพลย์ทุกชนิด (ตู้เซฟ, ปืนตก, กระเป๋า, งาน): ห้ามเป็น 0 วิ เด็ดขาด!
-            -- หากเซิร์ฟเวอร์ตรวจพบการกด 0 วิ ในการเก็บปืนหรือตู้เซฟ จะเตะ CODE 49 หรือแบนถาวร CODE 59 ทันที
-            if orig <= 0 then
-                orig = 1.0
-                prompt:SetAttribute("_OrigHoldDuration", 1.0)
+        -- แยกประเภทตามที่ dj กำหนดอย่างชัดเจน:
+        if class.isJob then
+            -- 🛡️ หมวดฟาร์มงาน: มีดีเลย์การกดค้างตามเซิร์ฟเวอร์ (3.0s - 5.0s) ห้าม 0s ป้องกันโดนเตะ CODE: 49
+            local safeDuration = math.max(class.jobMinDelay, orig or 0)
+            prompt.HoldDuration = safeDuration
+        elseif class.isLoot then
+            -- 🛡️ หมวดเก็บของ / ปืนตก / กระเป๋าตก: มีดีเลย์การกด (1.2s - 3.0s) ห้าม 0s ป้องกันโดนแบน CODE: 59
+            local safeDuration = math.max(class.lootMinDelay, orig or 0)
+            prompt.HoldDuration = safeDuration
+        elseif class.isSafe or class.isMerchant or class.isGeneralInstant then
+            -- ⚡ หมวดตู้เซฟ, พ่อค้าพเนจร, คุย NPC, ประตู, รถยนต์, เก้าอี้: กดติดทันที 0ms!
+            if State.InstantPrompt or State.AutoZeroPrompt then
+                prompt.HoldDuration = 0
+            else
+                prompt.HoldDuration = orig
             end
-            prompt.HoldDuration = orig
+        else
+            -- หมวดทั่วไปอื่นๆ
+            if (orig or 0) <= 0 and (State.InstantPrompt or State.AutoZeroPrompt) then
+                prompt.HoldDuration = 0
+            else
+                prompt.HoldDuration = orig or 0
+            end
         end
     end)
 end
@@ -9262,24 +9406,24 @@ InfJumpToggle:OnChanged(function()
     State.InfJump = Options.InfJumpOn.Value
 end)
 
-Tabs.Player:AddSection("🖐️ ปฏิสัมพันธ์ & การกดปุ่ม E (Bypass CODE: 49 & CODE: 59)")
+Tabs.Player:AddSection("🖐️ ระบบกดปุ่ม E อัจฉริยะ (Smart Categorized E - กันเตะ 49 & กันแบน 59)")
+
+local InstantPromptToggle = Tabs.Player:AddToggle("InstantPromptOn", {
+    Title = "⚡ กด E ทันที 0ms (พ่อค้า, ตู้เซฟ, ประตู, รถยนต์)",
+    Description = "กด E ติดทันที 0 วินาที สำหรับพ่อค้าพเนจร, ตู้เซฟ, คุย NPC, ประตู, รถยนต์ และเก้าอี้ สะดวกและรวดเร็วสุดๆ",
+    Default = true
+})
+InstantPromptToggle:OnChanged(function()
+    State.InstantPrompt = Options.InstantPromptOn.Value
+end)
 
 local SmartPromptToggle = Tabs.Player:AddToggle("SmartPromptOn", {
-    Title = "🛡️ Smart E Bypass (กันเตะ 49 & กันแบน 59)",
-    Description = "กด E ปลอดภัย ไม่โดนแบนถาวร: รักษาเวลาเก็บปืน, ตู้เซฟ, ชิ้นส่วน และงานก่อสร้างตรงกับเซิร์ฟเวอร์ 100%",
+    Title = "🛡️ ล็อคดีเลย์ปลอดภัย (เก็บของ, ปืนตก, ฟาร์มงาน)",
+    Description = "ป้องกันโดนเตะ CODE: 49 และโดนแบนถาวร CODE: 59: รักษาเวลากดค้างสำหรับจุดฟาร์มงาน (3.5-5.0 วิ) และเก็บปืน/กระเป๋าตก (1.2 วิ)",
     Default = true
 })
 SmartPromptToggle:OnChanged(function()
     State.SmartPrompt = Options.SmartPromptOn.Value
-end)
-
-local AutoZeroPromptToggle = Tabs.Player:AddToggle("AutoZeroPromptOn", {
-    Title = "⚡ กดติดทันที 0ms (เฉพาะของไม่มีเวลากด)",
-    Description = "กดปุ่ม E ติดทันทีสำหรับไอเทมที่เซิร์ฟเวอร์ไม่ได้กำหนดเวลากดค้าง (เก็บเงิน, ประตู, วิทยุ)",
-    Default = true
-})
-AutoZeroPromptToggle:OnChanged(function()
-    State.AutoZeroPrompt = Options.AutoZeroPromptOn.Value
 end)
 
 Tabs.Player:AddParagraph({
@@ -9481,32 +9625,63 @@ FastBulletToggle:OnChanged(function()
 end)
 
 local FullAutoToggle = Tabs.Combat:AddToggle("FullAutoOn", {
-    Title = "🔥 ยิงฟูลออโต้ปลอดภัย (Safe Full Auto)",
-    Description = "เปลี่ยนปืนทุกกระบอก (ปืนพก/ลูกซอง/ไรเฟิล) ให้ยิงค้างได้อัตโนมัติ โดยไม่เร่ง FireRate เกินสเปก เพื่อไม่ให้เซิร์ฟเวอร์เตะ (100% Anti-Kick)",
+    Title = "🔥 สวิตช์ยิงรัวออโต้ (Glock Switch Mode)",
+    Description = "เปลี่ยนปืนทุกกระบอกให้ยิงรัวอัตโนมัติเท่ากับสเปก 'Glock Switch' ของเซิร์ฟเวอร์ (0.125 วิ / ~480 RPM) ปลอดภัย 100% ไม่โดนเตะ CODE: 46",
     Default = true
 })
 FullAutoToggle:OnChanged(function()
     State.FullAuto = Options.FullAutoOn.Value
     ApplyGunMods()
     if State.FullAuto then
-        Notify("Safe Full Auto", "เปิดใช้งานปืนยิงค้างอัตโนมัติ (ปลอดภัย ไม่โดนเตะ)", "", 2.5)
+        Notify("Glock Switch", "เปิดใช้งานสวิตช์ยิงรัวสเปก Glock Switch เซิร์ฟเวอร์ (~480 RPM)", "", 2.5)
     else
-        Notify("Safe Full Auto", "ปิดใช้งานปืนยิงค้าง คืนค่าเดิม", "", 2)
+        Notify("Full Auto", "ปิดใช้งานสวิตช์ยิงรัว คืนค่าเดิมของปืน", "", 2)
+    end
+end)
+
+local GlockSwitchSpeedSlider = Tabs.Combat:AddSlider("GlockSwitchSpeedVal", {
+    Title = "⚡ ความเร็วสวิตช์ยิงรัว (Glock Switch FireRate)",
+    Description = "ปรับความเร็วการยิง (0.125 วิ = Glock Switch มาตรฐานเซิร์ฟเวอร์, 0.135 วิ = ปลอดภัยพิเศษ, ล็อคขั้นต่ำ 0.120 วิ ป้องกันเตะ 46)",
+    Default = 0.125,
+    Min = 0.120,
+    Max = 0.180,
+    Rounding = 3
+})
+GlockSwitchSpeedSlider:OnChanged(function()
+    State.GlockSwitchFireRate = Options.GlockSwitchSpeedVal.Value
+    if State.FullAuto then
+        ApplyGunMods()
     end
 end)
 
 local FastReloadToggle = Tabs.Combat:AddToggle("FastReloadOn", {
     Title = "⚡ รีโหลดกระสุนไว (Safe Fast Reload)",
-    Description = "ปรับแอนิเมชันเปลี่ยนแม็กให้ลื่นไหล โดยคงเวลาจริงตามเซิร์ฟเวอร์ไว้ 100% ป้องกันโดนแบน CODE: 59",
+    Description = "รีโหลดกระสุนไวขึ้นอย่างปลอดภัย โดยเร่งความเร็วแอนิเมชันและลดเวลาลง 20-25% พร้อมล็อคเวลาขั้นต่ำ 1.35 วิ ป้องกันโดนแบน CODE: 59",
     Default = false
 })
 FastReloadToggle:OnChanged(function()
     State.FastReload = Options.FastReloadOn.Value
     ApplyGunMods()
     if State.FastReload then
-        Notify("Fast Reload", "เปิดใช้งานรีโหลดปลอดภัยแล้ว", "", 2.5)
+        local pct = math.floor((1 - (State.FastReloadRatio or 0.8)) * 100)
+        Notify("Fast Reload", "เปิดใช้งานรีโหลดไวปลอดภัยแล้ว (เร็วขึ้น " .. pct .. "%)", "", 2.5)
     else
         Notify("Fast Reload", "คืนค่าระยะเวลารีโหลดตามปกติของปืน", "", 2)
+    end
+end)
+
+local FastReloadSlider = Tabs.Combat:AddSlider("FastReloadSpeedVal", {
+    Title = "⚡ ตัวคูณความเร็วรีโหลด (Reload Speed)",
+    Description = "ปรับความเร็วรีโหลด (0.75x = ไวขึ้น 25%, 0.80x = ไวขึ้น 20%, 0.90x = ไวขึ้น 10%) ล็อคความปลอดภัยขั้นต่ำ 1.35 วิ",
+    Default = 0.8,
+    Min = 0.70,
+    Max = 0.95,
+    Rounding = 2
+})
+FastReloadSlider:OnChanged(function()
+    State.FastReloadRatio = Options.FastReloadSpeedVal.Value
+    if State.FastReload then
+        ApplyGunMods()
     end
 end)
 
