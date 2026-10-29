@@ -6521,20 +6521,62 @@ end)
 --------------------------------------------------------------
 -- 9. ระบบตัวละคร (CHEATS: SPEED, JUMP, NOCLIP, FLY, INFJUMP, ESP)
 --------------------------------------------------------------
+local function RestoreCharacterCollisions()
+    pcall(function()
+        local char = LocalPlayer.Character
+        if not char then return end
+        for _, part in ipairs(char:GetDescendants()) do
+            if part:IsA("BasePart") then
+                local pName = part.Name
+                if pName == "Torso" or pName == "Head" or pName == "UpperTorso" or pName == "LowerTorso" then
+                    part.CanCollide = true
+                elseif pName == "HumanoidRootPart" then
+                    part.CanCollide = false
+                else
+                    part.CanCollide = false
+                end
+            end
+        end
+    end)
+end
+
+local function ApplySmoothNoclip()
+    local char = LocalPlayer.Character
+    if not char then return end
+    -- ปลดล็อค CanCollide ทุก BasePart ในตัวละคร (รวมถึง Accessory, หมวก, เสื้อเกราะ, อาวุธในมือ ป้องกันเด้งกลับ 100%)
+    for _, part in ipairs(char:GetDescendants()) do
+        if part:IsA("BasePart") and part.CanCollide then
+            part.CanCollide = false
+        end
+    end
+
+    -- ป้องกัน Humanoid ติดสถานะปีนป่ายหรือติดขัดในกำแพงจนเกิดอาการเด้งกลับ (Anti-Bounce)
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        local st = hum:GetState()
+        if st == Enum.HumanoidStateType.Climbing or st == Enum.HumanoidStateType.StrafingNoPhysics then
+            hum:ChangeState(Enum.HumanoidStateType.Running)
+        end
+    end
+end
+
 if Connections.Noclip then
     pcall(function() Connections.Noclip:Disconnect() end)
     Connections.Noclip = nil
 end
+if Connections.NoclipRender then
+    pcall(function() Connections.NoclipRender:Disconnect() end)
+    Connections.NoclipRender = nil
+end
+
 Connections.Noclip = RunService.Stepped:Connect(function()
     if not State.Running or not State.Noclip then return end
-    local char = LocalPlayer.Character
-    if char then
-        for _, part in ipairs(char:GetChildren()) do
-            if part:IsA("BasePart") and part.CanCollide then
-                part.CanCollide = false
-            end
-        end
-    end
+    ApplySmoothNoclip()
+end)
+
+Connections.NoclipRender = RunService.RenderStepped:Connect(function()
+    if not State.Running or not State.Noclip then return end
+    ApplySmoothNoclip()
 end)
 
 Connections.InfJump = UserInputService.JumpRequest:Connect(function()
@@ -9374,24 +9416,17 @@ GodmodeToggle:OnChanged(function()
     end
 end)
 
-local NoclipToggle = Tabs.Player:AddToggle("NoclipOn", { Title = "👻 เดินทะลุกำแพง (Noclip)", Default = false })
+local NoclipToggle = Tabs.Player:AddToggle("NoclipOn", {
+    Title = "👻 เดินทะลุกำแพงสมูท (Smooth Noclip)",
+    Description = "เดินทะลุกำแพง/สิ่งกีดขวางได้ลื่นไหล 100% ปลดล็อคทุกชิ้นส่วนและ Accessories ไม่มีอาการเด้งกลับหรือสะดุด",
+    Default = false
+})
 NoclipToggle:OnChanged(function()
     State.Noclip = Options.NoclipOn.Value
     if not State.Noclip then
-        pcall(function()
-            local char = LocalPlayer.Character
-            if char then
-                for _, part in ipairs(char:GetChildren()) do
-                    if part:IsA("BasePart") then
-                        if part.Name == "Torso" or part.Name == "Head" then
-                            part.CanCollide = true
-                        else
-                            part.CanCollide = false
-                        end
-                    end
-                end
-            end
-        end)
+        RestoreCharacterCollisions()
+    else
+        ApplySmoothNoclip()
     end
 end)
 
@@ -9834,6 +9869,7 @@ function Hub.Unload()
     State.AutoFarm = false
     State.AutoSolveMinigame = false
     State.Noclip = false
+    pcall(RestoreCharacterCollisions)
     State.Fly = false
     State.ESP = false
     State.NoSpread = false
