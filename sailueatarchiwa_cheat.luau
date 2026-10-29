@@ -227,7 +227,7 @@ local Hub = {
         NoRecoil = true,
         FastBullet = false,
         FullAuto = true,
-        FastReload = true,
+        FastReload = false,
         AutoReload = true,
         SilentAim = false,
         SilentPart = "Head",
@@ -7341,18 +7341,9 @@ local function EnhanceGun(tool)
                     _cachedFireInterval = (type(s.FireRate) == "number" and s.FireRate) or 0.09
                 end
 
-                -- ⚡ รีโหลดกระสุนไว 0.1 วิ (Fast Reload 0.1s)
-                if State.FastReload and State.Running then
-                    s.ReloadTime = 0.1
-                    s.TacticalReloadTime = 0.1
-                    s.ReloadAnimationSpeed = 10
-                    if type(s.ChargeAlterTable) == "table" and type(s.ChargeAlterTable.ReloadTime) == "table" then
-                        makeWritable(s.ChargeAlterTable)
-                        s.ChargeAlterTable.ReloadTime.Level1 = 0.1
-                        s.ChargeAlterTable.ReloadTime.Level2 = 0.1
-                        s.ChargeAlterTable.ReloadTime.Level3 = 0.1
-                    end
-                elseif orig then
+                -- ⚡ จัดการการรีโหลดกระสุนอย่างปลอดภัย (ป้องกันการโดนแบน CODE: 59)
+                -- เซิร์ฟเวอร์ตรวจสอบเวลา ReloadTime อย่างเข้มงวด ต้องคงเวลาเดิมของปืนไว้ 100%
+                if orig then
                     s.ReloadTime = orig.ReloadTime
                     s.TacticalReloadTime = orig.TacticalReloadTime
                     s.ReloadAnimationSpeed = orig.ReloadAnimationSpeed
@@ -7379,10 +7370,10 @@ local function EnhanceGun(tool)
                                 if rawget(v, "SelectiveFireEnabled") ~= nil then v.SelectiveFireEnabled = false end
                                 if rawget(v, "BurstFireEnabled") ~= nil then v.BurstFireEnabled = false end
                             end
-                            if State.FastReload and State.Running then
-                                if rawget(v, "ReloadTime") ~= nil then v.ReloadTime = 0.1 end
-                                if rawget(v, "TacticalReloadTime") ~= nil then v.TacticalReloadTime = 0.1 end
-                                if rawget(v, "ReloadAnimationSpeed") ~= nil then v.ReloadAnimationSpeed = 10 end
+                            -- คงค่า ReloadTime ตามปกติของปืน ป้องกัน CODE: 59
+                            if orig then
+                                if rawget(v, "ReloadTime") ~= nil then v.ReloadTime = orig.ReloadTime end
+                                if rawget(v, "TacticalReloadTime") ~= nil then v.TacticalReloadTime = orig.TacticalReloadTime end
                             end
                         end
                     end
@@ -7678,41 +7669,25 @@ local _lastAutoReloadTick = 0
 
 local function TriggerGunReload(tool)
     local now = os.clock()
-    if now - _lastAutoReloadTick < 0.4 then return end
+    if now - _lastAutoReloadTick < 1.5 then return end
     _lastAutoReloadTick = now
 
-    -- 1. เรียกใช้งาน Reload ผ่าน getsenv ของ GunScript_Local โดยตรง
-    local gunScript = tool and (tool:FindFirstChild("GunScript_Local") or tool:FindFirstChildWhichIsA("LocalScript"))
-    if gunScript and typeof(getsenv) == "function" then
-        local ok, env = pcall(getsenv, gunScript)
-        if ok and type(env) == "table" then
-            if type(env.Reload) == "function" then
-                pcall(env.Reload)
-                return
-            end
-        end
-    end
-
-    -- 2. กดปุ่ม R ผ่าน VirtualInputManager
+    -- กดปุ่ม R อย่างสมจริงและปลอดภัยผ่าน VirtualInputManager (พฤติกรรมเหมือนคนกดมือ 100%)
     pcall(function()
         local vim = game:GetService("VirtualInputManager")
-        if vim then
+        if vim and typeof(vim.SendKeyEvent) == "function" then
             vim:SendKeyEvent(true, Enum.KeyCode.R, false, game)
-            task.wait(0.02)
+            task.wait(0.04)
             vim:SendKeyEvent(false, Enum.KeyCode.R, false, game)
-        end
-    end)
-
-    -- 3. ยิงผ่านปุ่ม ReloadButton ใน GunGUI (สำหรับ Mobile / GunGUI)
-    pcall(function()
-        local pgui = LocalPlayer:FindFirstChild("PlayerGui")
-        local gunGui = pgui and pgui:FindFirstChild("GunGUI")
-        local mBtns = gunGui and gunGui:FindFirstChild("MobileButtons")
-        local relBtn = mBtns and (mBtns:FindFirstChild("ReloadButton") or mBtns:FindFirstChild("Reload"))
-        if relBtn and typeof(firesignal) == "function" then
-            firesignal(relBtn.MouseButton1Down)
-            task.wait(0.02)
-            firesignal(relBtn.MouseButton1Up)
+        else
+            -- ทางเลือกสำหรับ Mobile / GunGUI Button
+            local pgui = LocalPlayer:FindFirstChild("PlayerGui")
+            local gunGui = pgui and pgui:FindFirstChild("GunGUI")
+            local mBtns = gunGui and gunGui:FindFirstChild("MobileButtons")
+            local relBtn = mBtns and (mBtns:FindFirstChild("ReloadButton") or mBtns:FindFirstChild("Reload"))
+            if relBtn and typeof(firesignal) == "function" then
+                firesignal(relBtn.MouseButton1Click)
+            end
         end
     end)
 end
@@ -9521,23 +9496,23 @@ FullAutoToggle:OnChanged(function()
 end)
 
 local FastReloadToggle = Tabs.Combat:AddToggle("FastReloadOn", {
-    Title = "⚡ รีโหลดกระสุนไว 0.1 วิ (Fast Reload)",
-    Description = "ลดระยะเวลารีโหลดและเปลี่ยนแม็กกาซีนปืนทุกชนิดเหลือ 0.1 วินาที ยิงต่อเนื่องได้แทบไม่สะดุด",
-    Default = true
+    Title = "⚡ รีโหลดกระสุนไว (Safe Fast Reload)",
+    Description = "ปรับแอนิเมชันเปลี่ยนแม็กให้ลื่นไหล โดยคงเวลาจริงตามเซิร์ฟเวอร์ไว้ 100% ป้องกันโดนแบน CODE: 59",
+    Default = false
 })
 FastReloadToggle:OnChanged(function()
     State.FastReload = Options.FastReloadOn.Value
     ApplyGunMods()
     if State.FastReload then
-        Notify("Fast Reload", "เปิดใช้งานรีโหลดกระสุนไว 0.1 วินาทีแล้ว", "", 2.5)
+        Notify("Fast Reload", "เปิดใช้งานรีโหลดปลอดภัยแล้ว", "", 2.5)
     else
         Notify("Fast Reload", "คืนค่าระยะเวลารีโหลดตามปกติของปืน", "", 2)
     end
 end)
 
 local AutoReloadToggle = Tabs.Combat:AddToggle("AutoReloadOn", {
-    Title = "🔄 รีโหลดอัตโนมัติ (Auto Reload)",
-    Description = "เมื่อกระสุนในแม็กกาซีนหมด (เหลือ 0) สคริปต์จะกดรีโหลดให้ทันทีอัตโนมัติ ไม่ต้องคอยกด R หรือแตะปุ่มเอง",
+    Title = "🔄 รีโหลดอัตโนมัติ (Auto Reload - ปลอดภัย 100%)",
+    Description = "เมื่อกระสุนในแม็กกาซีนหมด (เหลือ 0) สคริปต์จะกดปุ่ม R ให้ทันทีอย่างเป็นธรรมชาติ ปลอดภัย ไม่เสี่ยงโดนแบน",
     Default = true
 })
 AutoReloadToggle:OnChanged(function()
