@@ -6521,41 +6521,110 @@ end)
 --------------------------------------------------------------
 -- 9. ระบบตัวละคร (CHEATS: SPEED, JUMP, NOCLIP, FLY, INFJUMP, ESP)
 --------------------------------------------------------------
+local _noclipPiercedParts = {}
+local _noclipRayParams = RaycastParams.new()
+_noclipRayParams.FilterType = Enum.RaycastFilterType.Exclude
+_noclipRayParams.IgnoreWater = true
+
 local function RestoreCharacterCollisions()
     pcall(function()
         local char = LocalPlayer.Character
-        if not char then return end
-        for _, part in ipairs(char:GetDescendants()) do
-            if part:IsA("BasePart") then
-                local pName = part.Name
-                if pName == "Torso" or pName == "Head" or pName == "UpperTorso" or pName == "LowerTorso" then
-                    part.CanCollide = true
-                elseif pName == "HumanoidRootPart" then
-                    part.CanCollide = false
-                else
-                    part.CanCollide = false
+        if char then
+            for _, part in ipairs(char:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    local pName = part.Name
+                    if pName == "Torso" or pName == "Head" or pName == "UpperTorso" or pName == "LowerTorso" then
+                        part.CanCollide = true
+                    elseif pName == "HumanoidRootPart" then
+                        part.CanCollide = false
+                    else
+                        part.CanCollide = false
+                    end
                 end
             end
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            if hum then
+                hum:SetStateEnabled(Enum.HumanoidStateType.Climbing, true)
+                hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
+                hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, true)
+            end
         end
+
+        -- คืนค่า CanCollide ให้กำแพง/ประตูที่เคยถูกเปิดทะลุ
+        for part, origState in pairs(_noclipPiercedParts) do
+            if part and part.Parent and typeof(origState) == "boolean" then
+                pcall(function() part.CanCollide = origState end)
+            end
+        end
+        table.clear(_noclipPiercedParts)
     end)
 end
 
-local function ApplySmoothNoclip()
+local function ApplySmoothNoclip(dt)
+    dt = dt or 0.016
     local char = LocalPlayer.Character
     if not char then return end
-    -- ปลดล็อค CanCollide ทุก BasePart ในตัวละคร (รวมถึง Accessory, หมวก, เสื้อเกราะ, อาวุธในมือ ป้องกันเด้งกลับ 100%)
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hrp or not hum or hum.Health <= 0 then return end
+
+    -- 1. ปลดล็อค CanCollide ทุก BasePart ในตัวละคร (รวมถึง Accessory, หมวก, เสื้อเกราะ, อาวุธในมือ ป้องกันเด้งกลับ 100%)
     for _, part in ipairs(char:GetDescendants()) do
         if part:IsA("BasePart") and part.CanCollide then
             part.CanCollide = false
         end
     end
 
-    -- ป้องกัน Humanoid ติดสถานะปีนป่ายหรือติดขัดในกำแพงจนเกิดอาการเด้งกลับ (Anti-Bounce)
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if hum then
-        local st = hum:GetState()
-        if st == Enum.HumanoidStateType.Climbing or st == Enum.HumanoidStateType.StrafingNoPhysics then
-            hum:ChangeState(Enum.HumanoidStateType.Running)
+    -- 2. ป้องกัน Humanoid ติดสถานะปีนป่ายหรือติดขัดในกำแพงจนเกิดอาการเด้งกลับ (Anti-Bounce)
+    hum:SetStateEnabled(Enum.HumanoidStateType.Climbing, false)
+    hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+    hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+    local st = hum:GetState()
+    if st == Enum.HumanoidStateType.Climbing or st == Enum.HumanoidStateType.StrafingNoPhysics then
+        hum:ChangeState(Enum.HumanoidStateType.Running)
+    end
+
+    -- 3. ตรวจจับการเดินและการตัดแรงสะท้อนกลับ (Anti-Impulse & Wall Pierce)
+    local moveDir = hum.MoveDirection
+    if moveDir.Magnitude > 0.05 then
+        local horizDir = Vector3.new(moveDir.X, 0, moveDir.Z).Unit
+
+        -- ล้างแรงสะท้อนกลับ (หากความเร็วของตัวละครกำลังพุ่งสวนทางกับทิศทางที่ผู้เล่นกดเดิน ป้องกัน Rubberband เด้งกลับ)
+        local forwardDot = hrp.AssemblyLinearVelocity:Dot(horizDir)
+        if forwardDot < -0.5 then
+            hrp.AssemblyLinearVelocity = Vector3.new(0, hrp.AssemblyLinearVelocity.Y, 0)
+        end
+
+        -- 4. ยิงเรย์ตรวจจับกำแพง/ประตู/สิ่งกีดขวางตรงหน้า แล้วปลด CanCollide ฝั่งกำแพงแบบเจาะจง (Bypass Anti-Noclip & Physics Wall)
+        _noclipRayParams.FilterDescendantsInstances = {char}
+        local forwardRay = workspace:Raycast(hrp.Position, horizDir * 3.5, _noclipRayParams)
+        if forwardRay and forwardRay.Instance and forwardRay.Instance:IsA("BasePart") then
+            local hitPart = forwardRay.Instance
+            -- ตรวจสอบว่าไม่ใช่พื้นใต้ฝ่าเท้า (Y ต้องสูงกว่าระดับเท้าของผู้เล่น) เพื่อไม่ให้ตกแมพ
+            if hitPart.Position.Y > (hrp.Position.Y - 2.2) and hitPart.CanCollide then
+                if _noclipPiercedParts[hitPart] == nil then
+                    _noclipPiercedParts[hitPart] = hitPart.CanCollide
+                end
+                hitPart.CanCollide = false
+            end
+        end
+
+        -- 5. CFrame Phase Glide: ผลัก CFrame ก้าวผ่านกำแพงไปข้างหน้าอย่างนิ่มนวล ไม่ติดมุมเหลี่ยม
+        local speed = (State.Speed and State.SpeedValue) or hum.WalkSpeed
+        local stepDistance = speed * dt * 0.75
+        hrp.CFrame = hrp.CFrame + Vector3.new(horizDir.X * stepDistance, 0, horizDir.Z * stepDistance)
+    end
+
+    -- 6. คืนค่ากำแพงที่อยู่ห่างออกไปแล้ว เพื่อไม่ให้แมพพัง
+    for part, origState in pairs(_noclipPiercedParts) do
+        if part and part.Parent then
+            local dist = (hrp.Position - part.Position).Magnitude
+            if dist > 10 then
+                pcall(function() part.CanCollide = origState end)
+                _noclipPiercedParts[part] = nil
+            end
+        else
+            _noclipPiercedParts[part] = nil
         end
     end
 end
@@ -6569,14 +6638,21 @@ if Connections.NoclipRender then
     Connections.NoclipRender = nil
 end
 
-Connections.Noclip = RunService.Stepped:Connect(function()
+Connections.Noclip = RunService.Stepped:Connect(function(time, stepDt)
     if not State.Running or not State.Noclip then return end
-    ApplySmoothNoclip()
+    ApplySmoothNoclip(stepDt)
 end)
 
 Connections.NoclipRender = RunService.RenderStepped:Connect(function()
     if not State.Running or not State.Noclip then return end
-    ApplySmoothNoclip()
+    local char = LocalPlayer.Character
+    if char then
+        for _, part in ipairs(char:GetDescendants()) do
+            if part:IsA("BasePart") and part.CanCollide then
+                part.CanCollide = false
+            end
+        end
+    end
 end)
 
 Connections.InfJump = UserInputService.JumpRequest:Connect(function()
