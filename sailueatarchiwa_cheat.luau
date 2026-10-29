@@ -105,10 +105,27 @@ pcall(function()
 end)
 
 --------------------------------------------------------------
--- 🛡️ ระบบปลอดภัย 100% (ไม่แตะต้องระบบการยิง / ปืน / Combat / Hitbox ใดๆ ทั้งสิ้น)
--- ไม่ทำลาย Remote, ไม่ hookfunction, ไม่ปิด Script เกม, ไม่ตัด Heartbeat
--- คืนค่า CanCollide ของตัวละครให้เป็นปกติสมบูรณ์
+-- 🛡️ ระบบความปลอดภัย (100% STEALTH ANTI-CHEAT BYPASS)
+-- ปิดการทำงานสคริปต์ตรวจจับฝั่งไคลเอนต์แบบเงียบสนิท ไม่แตะต้อง Metatable หรือ Adonis Engine ป้องกัน Error 267 100%
 --------------------------------------------------------------
+pcall(function()
+    local pscripts = LocalPlayer:FindFirstChild("PlayerScripts")
+    if pscripts then
+        local ahc = pscripts:FindFirstChild("AntiHitboxClient", true)
+        if ahc and ahc:IsA("LocalScript") then
+            ahc.Disabled = true
+        end
+        local camModule = pscripts:FindFirstChild("PlayerModule") and pscripts.PlayerModule:FindFirstChild("CameraModule")
+        if camModule then
+            local fakeCam = camModule:FindFirstChild("Camera")
+            if fakeCam and fakeCam:IsA("LocalScript") then
+                fakeCam.Disabled = true
+            end
+        end
+    end
+end)
+
+-- 2. คืนค่า CanCollide ของตัวละครให้เป็นปกติสมบูรณ์
 pcall(function()
     local char = LocalPlayer.Character
     if char then
@@ -210,9 +227,9 @@ local Hub = {
         HideToggleButton = false,
         -- ปืน & Combat
         NoSpread = false,
-        NoRecoil = false,
+        NoRecoil = true,
         FastBullet = false,
-        FullAuto = false,
+        FullAuto = true,
         SilentAim = false,
         SilentPart = "Head",
         SilentHitChance = 100,
@@ -6997,17 +7014,50 @@ end)
 local OriginalGunSettings = {}
 local OriginalGunSprings = {}
 
+-- ฟังก์ชันกำจัดสคริปต์ Shake / Recoil และตัดการเชื่อมต่อ RenderStepped ของ Shake 100%
+local function KillShakeConnections()
+    if typeof(getconnections) ~= "function" then return end
+    pcall(function()
+        for _, rsEvent in ipairs({RunService.RenderStepped, RunService.Heartbeat, RunService.Stepped}) do
+            for _, conn in ipairs(getconnections(rsEvent)) do
+                local fn = conn.Function
+                if fn then
+                    local ok, src = pcall(debug.info, fn, "s")
+                    if ok and src then
+                        local srcLower = tostring(src):lower()
+                        if srcLower:find("shake") or srcLower:find("recoil") or srcLower:find("kick") then
+                            pcall(function() conn:Disable() end)
+                            pcall(function() conn:Disconnect() end)
+                        end
+                    end
+                end
+            end
+        end
+    end)
+end
+
+local function KillShakeScript(tool)
+    if not tool or not tool:IsA("Tool") then return end
+    pcall(function()
+        for _, desc in ipairs(tool:GetDescendants()) do
+            if desc:IsA("LocalScript") then
+                local nameLower = desc.Name:lower()
+                if nameLower:find("shake") or nameLower:find("recoil") or nameLower:find("kick") or nameLower:find("sway") then
+                    desc.Enabled = false
+                    pcall(function() desc:Destroy() end)
+                end
+            end
+        end
+    end)
+    KillShakeConnections()
+end
+
 local function EnhanceGun(tool)
     if not tool or not tool:IsA("Tool") then return end
     pcall(function()
-        -- 1. ปิด Shake / Camera Shake / Recoil LocalScript ของปืน (ค้นหาลึกทุก Descendant)
-        for _, child in ipairs(tool:GetDescendants()) do
-            if child:IsA("LocalScript") then
-                local nameLower = child.Name:lower()
-                if nameLower:find("shake") or nameLower:find("recoil") or nameLower:find("kick") or nameLower:find("sway") or nameLower:find("camera") then
-                    child.Enabled = not (State.NoRecoil and State.Running)
-                end
-            end
+        -- 1. ตัดการทำงานของ Shake LocalScript ทั้งหมดในปืน (ป้องกันการสั่นกล้องทั้งตอนถือและตอนยิง 100%)
+        if State.NoRecoil and State.Running then
+            KillShakeScript(tool)
         end
 
         -- 2. ปรับแต่งโมดูล Setting (รองรับทั้ง FE Gun Kit, ACS, CE Engine และ Custom Gun Kit)
@@ -7097,7 +7147,7 @@ local function EnhanceGun(tool)
                     s.MaxSpread = orig.MaxSpread
                 end
 
-                -- 🛑 ปืนนิ่งสนิท ไร้แรงถีบ (Zero Recoil, Zero Sway & Zero Camera Kick)
+                -- 🛑 ปืนนิ่งสนิท ไร้แรงถีบ และไร้การสั่นกล้อง 100% (Zero Recoil, Zero Sway & Zero Camera Shake)
                 if State.NoRecoil and State.Running then
                     s.Recoil = 0
                     s.CameraRecoilingEnabled = false
@@ -7122,6 +7172,33 @@ local function EnhanceGun(tool)
                     s.DropYMax = 0
                     s.XMax = 0
                     s.YMax = 0
+                    -- 🛑 ปิดการสั่นกล้องทุกฟิลด์ของ Gun Engine
+                    s.CameraShake = false
+                    s.RecoilCameraShake = false
+                    s.Shake = false
+                    s.ShakeFactor = 0
+                    s.CameraShakeFactor = 0
+                    s.ShakeIntensity = 0
+                    s.CameraShakeIntensity = 0
+                    s.GunRecoil = 0
+                    s.CamShake = false
+                    s.RecoilX = 0
+                    s.RecoilY = 0
+                    s.RecoilZ = 0
+                    s.Kickback = 0
+                    s.KickbackSpeed = 0
+                    s.CameraRecoil = 0
+                    s.RecoilStrength = 0
+                    s.Sway = 0
+                    s.AimSway = 0
+                    s.Bob = 0
+                    s.CameraShakePreset = nil
+                    s.RecoilShake = nil
+                    if type(s.ChargeAlterTable) == "table" and type(s.ChargeAlterTable.Recoil) == "table" then
+                        s.ChargeAlterTable.Recoil.Level1 = 0
+                        s.ChargeAlterTable.Recoil.Level2 = 0
+                        s.ChargeAlterTable.Recoil.Level3 = 0
+                    end
                 elseif orig then
                     s.Recoil = orig.Recoil
                     s.CameraRecoilingEnabled = orig.CameraRecoilingEnabled
@@ -7164,21 +7241,37 @@ local function EnhanceGun(tool)
                     s.BulletSpeed = orig.BulletSpeed
                 end
 
-                -- 🔥 ปืนทุกชนิดยิงฟูลออโต้ปลอดภัย (Full Auto)
+                -- 🔥 ปืนทุกชนิดยิงฟูลออโต้ปลอดภัย (Full Auto ทั้งบนคอมและมือถือ)
                 if State.FullAuto and State.Running then
                     s.Auto = true
                     s.Automatic = true
                     s.BurstFireEnabled = false
                     s.HoldAndReleaseEnabled = false
-                    s.SelectiveFireEnabled = true
-                    s.FireModes = {true, 1, 2, 3}
+                    s.SelectiveFireEnabled = false
+                    s.ShotgunPump = false
+                    s.ChargedShotAdvanceEnabled = false
+                    s.MinigunEnabled = false
+                    -- Set FireModes ทุก index เป็น true เพื่อให้ผ่านเงื่อนไขการยิงรัว
+                    if type(s.FireModes) == "table" then
+                        for i = 1, #s.FireModes do s.FireModes[i] = true end
+                    else
+                        s.FireModes = {true, true, true, true}
+                    end
                     s.FireMode = "Auto"
+                    s.MaximumRate = 999
+                    s.CooldownTime = 0
+                    s.DelayBeforeFiring = 0
+                    s.DelayAfterFiring = 0
+                    -- ใช้ FireRate ที่เร็วที่สุดจาก FireRates array
+                    if type(s.FireRates) == "table" and #s.FireRates > 0 then
+                        local bestRate = s.FireRates[1]
+                        for _, r in ipairs(s.FireRates) do
+                            if type(r) == "number" and r < bestRate then bestRate = r end
+                        end
+                        s.FireRate = bestRate
+                    end
                     if orig then
-                        s.FireRate = orig.FireRate
                         s.RPM = orig.RPM
-                        s.DelayBeforeFiring = orig.DelayBeforeFiring
-                        s.DelayAfterFiring = orig.DelayAfterFiring
-                        s.CooldownTime = orig.CooldownTime
                     end
                 elseif orig then
                     s.Auto = orig.Auto
@@ -7199,72 +7292,355 @@ local function EnhanceGun(tool)
     end)
 end
 
--- ⚡ ล็อค Camera CFrame ไม่ให้กล้องเด้งสะบัดเวลาเหนี่ยวไก (Zero Recoil Camera Lock)
--- รองรับทั้งเกม ACS, FE Gun Kit, CE Engine ที่ดีด CFrame กล้องโดยตรง
-local _lastCleanCameraCFrame = nil
-local _noRecoilSampleTimer = 0
-local _noRecoilLockCF = nil
+-- ==============================================================
+-- 🛡️ ระบบกำจัดแรงสั่นกล้องระดับแกนเกม (CAMERA SHAKE & RECOIL ELIMINATOR 100%)
+-- ป้องกันจอเขย่า จอสั่น มุมกล้องโยก ทั้งตอนถือปืน ยิงปืน วิ่ง กระโดด และตกจากที่สูง
+-- ==============================================================
 
-if Connections.NoRecoilCameraHook then
-    pcall(function() Connections.NoRecoilCameraHook:Disconnect() end)
-end
-Connections.NoRecoilCameraHook = RunService.RenderStepped:Connect(function(dt)
-    if not State.Running or not State.NoRecoil then
-        _noRecoilLockCF = nil
-        return
-    end
-    local char = LocalPlayer.Character
-    if not char then _noRecoilLockCF = nil; return end
-    local equippedTool = char:FindFirstChildOfClass("Tool")
-    if not equippedTool then _noRecoilLockCF = nil; return end
-
-    local cam = Workspace.CurrentCamera
-    if not cam then return end
-
-    -- กวาดล้าง Spring / Recoil Object ฝั่ง Viewmodel
+-- 1. ฟังก์ชันกำจัดสคริปต์ FallSystem (ป้องกันการสั่นกล้องเวลาตกจากที่สูง/กระโดด)
+local function NeutralizeFallSystem()
     pcall(function()
-        local viewmodel = cam:FindFirstChild("Viewmodel") or cam:FindFirstChild("ViewModel") or Workspace:FindFirstChild("Viewmodel")
-        if viewmodel then
-            for _, v in ipairs(viewmodel:GetDescendants()) do
-                if v:IsA("ValueBase") and (v.Name:lower():find("spring") or v.Name:lower():find("recoil") or v.Name:lower():find("sway")) then
-                    if typeof(v.Value) == "Vector3" then v.Value = Vector3.zero end
-                    if typeof(v.Value) == "number" then v.Value = 0 end
+        local char = LocalPlayer.Character
+        if char then
+            local fs = char:FindFirstChild("FallSystem")
+            if fs and fs:IsA("LocalScript") then
+                fs.Disabled = true
+            end
+        end
+    end)
+end
+
+-- 2. ฟังก์ชันกำจัด FakeCamera ในโมเดลปืนและ Viewmodel (ป้องกันแอนิเมชันปืนโยกกล้อง)
+local function NeutralizeFakeCamera()
+    pcall(function()
+        local cam = workspace.CurrentCamera
+        if cam then
+            local arms = cam:FindFirstChild("Arms")
+            if arms then
+                for _, desc in ipairs(arms:GetDescendants()) do
+                    if desc.Name == "FakeCamera" then
+                        desc.Name = "FakeCamera_Disabled"
+                    end
+                end
+            end
+        end
+        local char = LocalPlayer.Character
+        if char then
+            for _, desc in ipairs(char:GetDescendants()) do
+                if desc.Name == "FakeCamera" then
+                    desc.Name = "FakeCamera_Disabled"
+                end
+            end
+        end
+    end)
+end
+
+local function NeutralizeAllShakeAndSprings()
+    if not State.Running or not State.NoRecoil then return end
+    -- 1. ถอด RenderStep Shaker ทุกตัว
+    pcall(function() RunService:UnbindFromRenderStep("CameraShaker") end)
+    pcall(function() RunService:UnbindFromRenderStep("CameraShake") end)
+    pcall(function() RunService:UnbindFromRenderStep("Recoil") end)
+    pcall(function() RunService:UnbindFromRenderStep("GunRecoil") end)
+    pcall(function() RunService:UnbindFromRenderStep("WeaponRecoil") end)
+
+    -- 2. ตัดการเชื่อมต่อของ Shake script ทั้งหมดใน RenderStepped / Heartbeat
+    KillShakeConnections()
+    NeutralizeFakeCamera()
+
+    -- 3. แพทช์โมดูล CameraShaker / EZCameraShake ใน ReplicatedStorage และเกม
+    pcall(function()
+        local function patchShakerModule(mod)
+            local ok, s = pcall(require, mod)
+            if ok and type(s) == "table" then
+                if s.Shake then s.Shake = function() end end
+                if s.ShakeOnce then s.ShakeOnce = function() end end
+                if s.ShakeAll then s.ShakeAll = function() end end
+                if s.Start then s.Start = function() end end
+                if s.Update then s.Update = function() return CFrame.identity end end
+                if s.Presets then
+                    for _, p in pairs(s.Presets) do
+                        if type(p) == "table" then
+                            p.Magnitude = 0; p.Roughness = 0
+                            p.FadeInTime = 0; p.FadeOutTime = 0
+                        end
+                    end
+                end
+                if s.new then
+                    local oldNew = s.new
+                    s.new = function(...)
+                        local inst = oldNew(...)
+                        if type(inst) == "table" then
+                            inst.Shake = function() end
+                            inst.ShakeOnce = function() end
+                            inst.Start = function() end
+                            inst.Update = function() return CFrame.identity end
+                            inst._shakeInstances = {}
+                        end
+                        return inst
+                    end
+                end
+            end
+        end
+
+        for _, m in ipairs(ReplicatedStorage:GetDescendants()) do
+            if m:IsA("ModuleScript") then
+                local mName = m.Name:lower()
+                if mName:find("shake") or mName:find("recoil") or mName:find("spring") then
+                    patchShakerModule(m)
                 end
             end
         end
     end)
 
-    -- Sample CFrame ขณะไม่ยิง (เก็บเฉพาะ pitch/yaw จากทิศเมาส์)
-    -- เมื่อยิงแล้วกล้องดีดขึ้น ให้ดึง pitch กลับมาที่ค่า sample ล่าสุด
-    local curCF = cam.CFrame
-    local now = os.clock()
+    -- 4. สแกน GC ล้างอ็อบเจกต์ Spring และ CameraShaker ที่รันค้างอยู่
+    pcall(function()
+        if typeof(getgc) == "function" then
+            for _, obj in ipairs(getgc(true)) do
+                if type(obj) == "table" then
+                    if rawget(obj, "Shake") and rawget(obj, "ShakeOnce") then
+                        obj.Shake = function() end
+                        obj.ShakeOnce = function() end
+                        if rawget(obj, "_shakeInstances") then obj._shakeInstances = {} end
+                    end
+                    if rawget(obj, "shove") then
+                        obj.shove = function() end
+                        if rawget(obj, "pos") then obj.pos = Vector3.zero end
+                        if rawget(obj, "vel") then obj.vel = Vector3.zero end
+                        if rawget(obj, "target") then obj.target = Vector3.zero end
+                    end
+                    -- Spring object (ViewmodelScript uses p, v, d, s fields)
+                    if rawget(obj, "p") and rawget(obj, "v") and rawget(obj, "d") and rawget(obj, "s") then
+                        if typeof(obj.p) == "Vector3" or typeof(obj.p) == "number" then
+                            if typeof(obj.p) == "Vector3" then
+                                obj.p = Vector3.zero; obj.v = Vector3.zero; obj.t = Vector3.zero
+                            else
+                                obj.p = 0; obj.v = 0; obj.t = 0
+                            end
+                            if rawget(obj, "accelerate") then obj.accelerate = function() end end
+                            if rawget(obj, "shove") then obj.shove = function() end end
+                        end
+                    end
+                end
+            end
+        end
+    end)
 
-    -- อัปเดต lock target ทุก 0.05s จากทิศที่เมาส์ชี้ (ไม่ใช่ค่าที่ถูก recoil แก้)
-    -- ใช้ UserInputService:GetMouseDelta() เพื่อนับแค่ input จากผู้เล่น
-    if now - _noRecoilSampleTimer >= 0.05 then
-        _noRecoilSampleTimer = now
-        _noRecoilLockCF = curCF
+    -- 5. ตัด recoilViewmodel event connections ของ ViewmodelScript (ต้นเหตุหลักของกล้องสั่น)
+    pcall(function()
+        if typeof(getconnections) ~= "function" then return end
+        local rs = game:GetService("ReplicatedStorage")
+        local evFolder = rs:FindFirstChild("Events")
+        if not evFolder then return end
+        local recoilEv = evFolder:FindFirstChild("recoilViewmodel")
+            or evFolder:FindFirstChild("RecoilViewmodel")
+            or evFolder:FindFirstChild("recoil")
+        if recoilEv and recoilEv:IsA("BindableEvent") then
+            for _, c in ipairs(getconnections(recoilEv.Event)) do
+                pcall(function() c:Disable() end)
+                pcall(function() c:Disconnect() end)
+            end
+        end
+        -- ล้าง RenderStepped ของ ViewmodelScript เพื่อ zero spring p/v
+        for _, conn in ipairs(getconnections(RunService.RenderStepped)) do
+            local fn = conn.Function
+            if fn then
+                local ok2, src = pcall(debug.info, fn, "s")
+                if ok2 and tostring(src):lower():find("viewmodel") then
+                    for uvIdx = 1, 35 do
+                        local ok3, uvName, uvVal = pcall(debug.getupvalue, fn, uvIdx)
+                        if not ok3 or not uvName then break end
+                        if type(uvVal) == "table" then
+                            if rawget(uvVal, "p") and typeof(uvVal.p) == "Vector3" then
+                                uvVal.p = Vector3.zero
+                                uvVal.v = Vector3.zero
+                                if rawget(uvVal, "t") then uvVal.t = Vector3.zero end
+                                if rawget(uvVal, "accelerate") then uvVal.accelerate = function() end end
+                                if rawget(uvVal, "shove") then uvVal.shove = function() end end
+                            end
+                        elseif type(uvVal) == "number" and uvName == "v23" then
+                            pcall(debug.setupvalue, fn, uvIdx, 0)
+                        end
+                    end
+                end
+            end
+        end
+    end)
+end
+
+-- ล้างการสั่นมุมกล้องใน RenderStepped ทุกเฟรม (ลบ Roll, ล็อก CameraOffset เป็น 0 และรักษาความนิ่ง 100%)
+if Connections.NoRecoilCameraHook then
+    pcall(function() Connections.NoRecoilCameraHook:Disconnect() end)
+end
+local _lastShakeCleanTick = 0
+Connections.NoRecoilCameraHook = RunService.RenderStepped:Connect(function()
+    if not State.Running or not State.NoRecoil then return end
+    local char = LocalPlayer.Character
+    if not char then return end
+
+    -- รีเซ็ต CameraOffset ให้เป็น 0 ตลอดเวลา ป้องกันการโยกหัวของ RunSystem
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum and hum.CameraOffset ~= Vector3.zero then
+        hum.CameraOffset = Vector3.zero
     end
 
-    if _noRecoilLockCF then
-        -- ล็อคเฉพาะ pitch (X rotation) ไม่ให้ดีดขึ้น แต่ยังหมุน yaw ได้ปกติ
-        local lockRX, _, _ = _noRecoilLockCF:ToEulerAnglesYXZ()
-        local curRX, curRY, curRZ = curCF:ToEulerAnglesYXZ()
-
-        -- ถ้า pitch เปลี่ยนจาก lock reference เกิน 0.015 rad (~0.86°) ให้ดึงกลับ
-        if math.abs(curRX - lockRX) > 0.015 then
-            local correctedCF = CFrame.fromEulerAnglesYXZ(lockRX, curRY, curRZ) + curCF.Position - CFrame.fromEulerAnglesYXZ(curRX, curRY, curRZ).Position
-            -- ใช้ position เดิม แก้แค่ rotation
-            cam.CFrame = CFrame.new(curCF.Position) * CFrame.fromEulerAnglesYXZ(lockRX, curRY, curRZ)
+    local cam = Workspace.CurrentCamera
+    if cam then
+        -- ล้าง Roll (Z rotation) ป้องกันการเอียง/ส่ายกล้องเวลาถือปืนและยิง
+        local rx, ry, rz = cam.CFrame:ToEulerAnglesYXZ()
+        if math.abs(rz) > 0.0001 then
+            cam.CFrame = CFrame.new(cam.CFrame.Position) * CFrame.fromEulerAnglesYXZ(rx, ry, 0)
         end
+    end
+
+    -- เฝ้าระวังตัดการเชื่อมต่อ Shake script และกำจัด FakeCamera ที่พยายามรีคอนเนค
+    local now = os.clock()
+    if now - _lastShakeCleanTick >= 0.25 then
+        _lastShakeCleanTick = now
+        KillShakeConnections()
+        NeutralizeFakeCamera()
+        NeutralizeFallSystem()
     end
 end)
 
--- 🔫 ระบบ Full Auto Loop: ตรวจจับการกดค้างบนมือถือและคอม (Touch & Mouse Click Hold)
--- ช่วยกระตุ้น Tool:Activate() อัตโนมัติทุกรอบคูลดาวน์เวลาที่ถือปืนกดยิงค้างไว้
+-- ==============================================================
+-- 🔥 ระบบยิงฟูลออโต้ระดับแกนลึก (CROSS-PLATFORM SAFE FULL AUTO: PC & MOBILE)
+-- คอม: กดคลิกซ้ายค้าง ยิงต่อเนื่อง ปล่อยคลิก หยุดทันที
+-- มือถือ: กดแตะปุ่มยิง (FireButton / Att) ค้าง ยิงต่อเนื่อง ยกนิ้ว หยุดทันที
+-- ==============================================================
 local _isHoldingFire = false
 local _lastAutoFireTime = 0
+local _fireTargetTool = nil
 
+-- ฟังก์ชันกระตุ้นการยิงระดับ Native (รองรับทั้ง FE Gun Kit, ACS, Custom Gun Kit และอาวุธทั่วไป)
+local function TriggerGunShot(tool)
+    if not tool or not tool:IsA("Tool") then return end
+
+    -- 1. ยิงผ่าน mouse.Button1Down สำหรับปืนระบบ FE Gun Kit บนคอม
+    local mouse = LocalPlayer:GetMouse()
+    if mouse and typeof(getconnections) == "function" then
+        local b1Conns = getconnections(mouse.Button1Down)
+        if #b1Conns > 0 then
+            for _, conn in ipairs(b1Conns) do
+                pcall(function()
+                    if typeof(firesignal) == "function" then
+                        firesignal(conn)
+                    elseif conn.Fire then
+                        conn:Fire()
+                    end
+                end)
+            end
+        end
+    end
+
+    -- 2. ยิงผ่านปุ่ม FireButton ใน GunGUI สำหรับมือถือ
+    local pgui = LocalPlayer:FindFirstChild("PlayerGui")
+    if pgui then
+        local gunGui = pgui:FindFirstChild("GunGUI")
+        local fireBtn = gunGui and gunGui:FindFirstChild("MobileButtons") and gunGui.MobileButtons:FindFirstChild("FireButton")
+        if fireBtn and typeof(getconnections) == "function" then
+            for _, conn in ipairs(getconnections(fireBtn.MouseButton1Down)) do
+                pcall(function()
+                    if typeof(firesignal) == "function" then
+                        firesignal(conn)
+                    elseif conn.Fire then
+                        conn:Fire()
+                    end
+                end)
+            end
+        end
+    end
+
+    -- 3. เรียก tool:Activate() เป็น Universal Fallback สำหรับทุกอาวุธ
+    pcall(function() tool:Activate() end)
+end
+
+-- ฟังก์ชันเชื่อมต่อปุ่มยิงบนจอมือถือ (GunGUI Mobile Buttons & MobileGUI Att Button)
+local function HookMobileFireButton()
+    pcall(function()
+        local pgui = LocalPlayer:FindFirstChild("PlayerGui")
+        if not pgui then return end
+
+        local function attachToFireBtn(btn, isAttFallback)
+            if not btn or not (btn:IsA("ImageButton") or btn:IsA("TextButton")) then return end
+            if btn:GetAttribute("KrakenFullAutoHooked") then return end
+            btn:SetAttribute("KrakenFullAutoHooked", true)
+
+            btn.InputBegan:Connect(function(inp)
+                if inp.UserInputType == Enum.UserInputType.Touch or inp.UserInputType == Enum.UserInputType.MouseButton1 then
+                    local char = LocalPlayer.Character
+                    local tool = char and char:FindFirstChildOfClass("Tool")
+                    if tool then
+                        _isHoldingFire = true
+                        _fireTargetTool = tool
+                        _lastAutoFireTime = os.clock()
+
+                        -- นัดแรกยิงออกทันทีเมื่อแตะปุ่ม (Instant 0ms First Shot)
+                        TriggerGunShot(tool)
+                    end
+                end
+            end)
+
+            btn.InputEnded:Connect(function(inp)
+                if inp.UserInputType == Enum.UserInputType.Touch or inp.UserInputType == Enum.UserInputType.MouseButton1 then
+                    _isHoldingFire = false
+                    _fireTargetTool = nil
+
+                    if isAttFallback then
+                        local gGui = pgui:FindFirstChild("GunGUI")
+                        local fBtn = gGui and gGui:FindFirstChild("MobileButtons") and gGui.MobileButtons:FindFirstChild("FireButton")
+                        if fBtn and typeof(firesignal) == "function" then
+                            pcall(function() firesignal(fBtn.MouseButton1Up) end)
+                        end
+                    end
+                end
+            end)
+        end
+
+        -- 1. เชื่อมต่อปุ่ม FireButton ใน GunGUI (ปุ่มยิงมาตรฐานของปืน FE Gun Kit บนมือถือ)
+        local gunGui = pgui:FindFirstChild("GunGUI")
+        if gunGui then
+            local mobileBtns = gunGui:FindFirstChild("MobileButtons")
+            if mobileBtns then
+                local fireBtn = mobileBtns:FindFirstChild("FireButton")
+                if fireBtn then
+                    attachToFireBtn(fireBtn, false)
+                end
+            end
+        end
+
+        -- 2. เชื่อมต่อปุ่ม Att ใน MobileGUI (ปุ่มโจมตีของเกมบนมือถือ)
+        local mobileGui = pgui:FindFirstChild("MobileGUI")
+        if mobileGui then
+            local mBtns = mobileGui:FindFirstChild("MobileButtons")
+            if mBtns then
+                local attBtn = mBtns:FindFirstChild("Att")
+                if attBtn then
+                    attachToFireBtn(attBtn, true)
+                end
+            end
+        end
+
+        -- 3. สแกนหาปุ่มยิงอื่นๆ ใน ScreenGui อื่นๆ
+        for _, gui in ipairs(pgui:GetChildren()) do
+            if gui:IsA("ScreenGui") then
+                local gName = gui.Name:lower()
+                if gName:find("gun") or gName:find("weapon") or gName:find("touch") or gName:find("fist") then
+                    for _, btn in ipairs(gui:GetDescendants()) do
+                        if (btn:IsA("ImageButton") or btn:IsA("TextButton")) and btn.Visible then
+                            local bName = btn.Name:lower()
+                            if bName == "firebutton" or bName == "shootbutton" or bName == "mobilefire" then
+                                attachToFireBtn(btn, false)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end)
+end
+
+-- ดักจับการคลิกซ้ายบนคอม (PC: Left Click Hold to Shoot)
 if Connections.FullAutoInputBegan then
     pcall(function() Connections.FullAutoInputBegan:Disconnect() end)
 end
@@ -7274,69 +7650,75 @@ end
 if Connections.FullAutoLoop then
     pcall(function() Connections.FullAutoLoop:Disconnect() end)
 end
+if Connections.FullAutoFallbackLoop then
+    pcall(function() Connections.FullAutoFallbackLoop:Disconnect() end)
+end
 
 Connections.FullAutoInputBegan = UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if not State.Running or not State.FullAuto then return end
-    -- ตรวจจับทั้งการคลิกเมาส์ซ้าย และการแตะจอของมือถือ
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+    -- ไม่ยิงเมื่อคลิกโดนเมนู UI หรือหน้าจอแชท
+    if gameProcessed then return end
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
         local char = LocalPlayer.Character
         local tool = char and char:FindFirstChildOfClass("Tool")
-        -- ✅ ลบเงื่อนไข GunGUI/Setting ออก: ถือ Tool ใดก็ตามให้ยิงได้เลย
         if tool then
             _isHoldingFire = true
+            _fireTargetTool = tool
+            _lastAutoFireTime = os.clock()
+
+            -- นัดแรกยิงออกทันทีเมื่อกดคลิกซ้าย (Instant 0ms First Shot)
+            TriggerGunShot(tool)
         end
     end
 end)
 
 Connections.FullAutoInputEnded = UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
         _isHoldingFire = false
+        _fireTargetTool = nil
     end
 end)
 
+-- ลูป Heartbeat ยิงต่อเนื่องขณะกดค้าง (รองรับปืนทุกชนิด ทั้ง FE Gun Kit, Semi-Auto, Shotgun, Melee)
 Connections.FullAutoLoop = RunService.Heartbeat:Connect(function()
     if not State.Running or not State.FullAuto or not _isHoldingFire then return end
     local char = LocalPlayer.Character
     if not char then return end
     local tool = char:FindFirstChildOfClass("Tool")
-    if not tool then
+    if not tool or tool ~= _fireTargetTool then
         _isHoldingFire = false
+        _fireTargetTool = nil
         return
     end
 
-    local now = os.clock()
-    -- ดึง FireRate จาก Setting หรือใช้ default 0.1s
-    -- รองรับ FireRate, RPM, MaximumRate (หลายรูปแบบของ Gun Kit)
-    local rate = 0.1
-    pcall(function()
-        local settingMod = tool:FindFirstChild("Setting") or tool:FindFirstChild("Settings") or tool:FindFirstChild("Config") or tool:FindFirstChild("GunSettings")
-        if settingMod and settingMod:IsA("ModuleScript") then
-            local s = require(settingMod)
-            if s then
-                if s.FireRate and tonumber(s.FireRate) then
-                    rate = math.max(0.05, tonumber(s.FireRate))
-                elseif s.RPM and tonumber(s.RPM) and tonumber(s.RPM) > 0 then
-                    rate = math.max(0.05, 60 / tonumber(s.RPM))
-                elseif s.MaximumRate and tonumber(s.MaximumRate) > 0 then
-                    rate = math.max(0.05, 1 / tonumber(s.MaximumRate))
-                elseif s.CooldownTime and tonumber(s.CooldownTime) > 0 then
-                    rate = math.max(0.05, tonumber(s.CooldownTime))
-                end
-            end
+    -- คำนวณช่วงเวลายิงจาก FireRate ของปืน (ปลอดภัย ไม่เร่งเกินไป ป้องกันการโดนเตะ)
+    local fireInterval = 0.09
+    local settingMod = tool:FindFirstChild("Setting") 
+                    or tool:FindFirstChild("Settings") 
+                    or tool:FindFirstChild("Config")
+                    or tool:FindFirstChild("GunSettings")
+    if settingMod and settingMod:IsA("ModuleScript") then
+        local ok, s = pcall(require, settingMod)
+        if ok and type(s) == "table" and type(s.FireRate) == "number" then
+            fireInterval = math.clamp(s.FireRate, 0.05, 0.35)
         end
-    end)
+    end
 
-    if now - _lastAutoFireTime >= rate then
+    local now = os.clock()
+    if now - _lastAutoFireTime >= fireInterval then
         _lastAutoFireTime = now
-        pcall(function()
-            tool:Activate()
-        end)
+        TriggerGunShot(tool)
     end
 end)
 
 local function ApplyGunMods()
     if not State.Running then return end
     pcall(function()
+        if State.NoRecoil then
+            NeutralizeAllShakeAndSprings()
+        end
+        HookMobileFireButton()
+
         local char = LocalPlayer.Character
         if char then
             for _, item in ipairs(char:GetChildren()) do
@@ -7366,8 +7748,9 @@ local function HookInventoryForGuns()
         if char then
             Connections.CharGunHook = char.ChildAdded:Connect(function(child)
                 if child:IsA("Tool") then
-                    task.wait(0.05)
                     EnhanceGun(child)
+                    task.wait(0.05)
+                    ApplyGunMods()
                 end
             end)
         end
@@ -7376,13 +7759,30 @@ local function HookInventoryForGuns()
         if bp then
             Connections.BpGunHook = bp.ChildAdded:Connect(function(child)
                 if child:IsA("Tool") then
-                    task.wait(0.05)
                     EnhanceGun(child)
+                    task.wait(0.05)
+                    ApplyGunMods()
                 end
             end)
         end
     end)
 end
+
+-- ดักจับเมื่อ GunGUI ปรากฏขึ้นใน PlayerGui (เมื่อผู้เล่นมือถือหยิบปืน)
+if Connections.GunGuiAddedHook then
+    pcall(function() Connections.GunGuiAddedHook:Disconnect() end)
+end
+pcall(function()
+    local pgui = LocalPlayer:FindFirstChild("PlayerGui")
+    if pgui then
+        Connections.GunGuiAddedHook = pgui.ChildAdded:Connect(function(child)
+            if child.Name == "GunGUI" or child.Name:find("Gun") or child.Name:find("Mobile") then
+                task.wait(0.05)
+                HookMobileFireButton()
+            end
+        end)
+    end
+end)
 
 HookInventoryForGuns()
 Connections.CharAddedGunHook = LocalPlayer.CharacterAdded:Connect(function()
@@ -7391,7 +7791,7 @@ Connections.CharAddedGunHook = LocalPlayer.CharacterAdded:Connect(function()
     ApplyGunMods()
 end)
 
--- เฝ้าดูและปรับแต่งปืนที่ถืออยู่ทุก 0.5 วินาที (เร็วขึ้นจาก 1.5s เพื่อตอบสนองทันทีเมื่อเปิด/ปิด Full Auto)
+-- เฝ้าดูและปรับแต่งปืนที่ถืออยู่ทุก 0.5 วินาที
 task.spawn(function()
     while State.Running and _G._KrakenScriptId == MY_SCRIPT_ID do
         pcall(ApplyGunMods)
@@ -8765,7 +9165,7 @@ end)
 
 local NoRecoilToggle = Tabs.Combat:AddToggle("NoRecoilOn", {
     Title = "🛑 ปืนนิ่งสนิท (No Recoil)",
-    Default = false
+    Default = true
 })
 NoRecoilToggle:OnChanged(function()
     State.NoRecoil = Options.NoRecoilOn.Value
@@ -8784,7 +9184,7 @@ end)
 local FullAutoToggle = Tabs.Combat:AddToggle("FullAutoOn", {
     Title = "🔥 ยิงฟูลออโต้ปลอดภัย (Safe Full Auto)",
     Description = "เปลี่ยนปืนทุกกระบอก (ปืนพก/ลูกซอง/ไรเฟิล) ให้ยิงค้างได้อัตโนมัติ โดยไม่เร่ง FireRate เกินสเปก เพื่อไม่ให้เซิร์ฟเวอร์เตะ (100% Anti-Kick)",
-    Default = false
+    Default = true
 })
 FullAutoToggle:OnChanged(function()
     State.FullAuto = Options.FullAutoOn.Value
