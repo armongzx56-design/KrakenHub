@@ -685,13 +685,6 @@ Hub.Connections.CoreEnforcer = RunService.RenderStepped:Connect(function(dt)
     if Hub.Settings.HitboxExpander then
         UpdateHitboxes()
     end
-
-    -- Maintain Tab Icon Colors & Window/Section Borders
-    if (os.clock() - (_lastTabIconCheck or 0) >= 0.5) then
-        _lastTabIconCheck = os.clock()
-        if Hub.ApplyTabIconColors then Hub.ApplyTabIconColors() end
-        if Hub.ApplyBorders then Hub.ApplyBorders() end
-    end
 end)
 
 -- ================================================
@@ -1284,40 +1277,74 @@ local function InitUI()
     })
     Hub.Window = Window
 
-    -- 🌟 Glowing Neon Blue Window Border & Section Borders (ขอบเรืองแสงสีน้ำเงินและขอบการ์ด)
+    -- 🌟 Rock-Solid Neon Blue Window Border & Section Borders (กรอบสีฟ้านีออนค้างถาวร ไม่กระพริบ)
+    local _windowBorderHooked = false
     local function ApplyWindowBorder()
         pcall(function()
             local base = (targetGuiParent and targetGuiParent:FindFirstChild("Base", true))
                       or (CoreGui and CoreGui:FindFirstChild("Base", true))
             if base then
                 base.ClipsDescendants = false
-                local stroke = base:FindFirstChild("BaseUIStroke") or base:FindFirstChildOfClass("UIStroke")
-                if not stroke then
-                    stroke = Instance.new("UIStroke")
-                    stroke.Name = "BaseUIStroke"
-                    stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-                    stroke.Parent = base
-                end
-                stroke.Color = Color3.fromRGB(0, 170, 255)
-                stroke.Thickness = 2.0
-                stroke.Transparency = 0
-                stroke.Enabled = true
 
-                -- Make all inner section & element card borders clearly visible and themed
-                for _, desc in ipairs(base:GetDescendants()) do
-                    if desc:IsA("UIStroke") and desc ~= stroke then
-                        if desc.Name == "SectionUIStroke" then
-                            desc.Color = Color3.fromRGB(0, 160, 255)
-                            desc.Transparency = 0.55
-                            desc.Thickness = 1.2
-                            desc.Enabled = true
-                        elseif desc.Transparency > 0.75 then
-                            desc.Color = Color3.fromRGB(70, 110, 160)
-                            desc.Transparency = 0.5
-                            desc.Thickness = 1.0
-                            desc.Enabled = true
-                        end
+                -- 1. สร้างกรอบ Overlay ชั้นบนสุด (ZIndex 9999) ลอยครอบหน้าต่างไว้ถาวร ไม่มีวันกระพริบหรือโดนบดบัง
+                local overlay = base:FindFirstChild("KrakenBorderOverlay")
+                if not overlay then
+                    overlay = Instance.new("Frame")
+                    overlay.Name = "KrakenBorderOverlay"
+                    overlay.BackgroundTransparency = 1
+                    overlay.BorderSizePixel = 0
+                    overlay.Size = UDim2.fromScale(1, 1)
+                    overlay.Position = UDim2.fromScale(0, 0)
+                    overlay.ZIndex = 9999
+                    overlay.Parent = base
+
+                    local corner = base:FindFirstChildOfClass("UICorner")
+                    if corner then
+                        local oc = Instance.new("UICorner")
+                        oc.CornerRadius = corner.CornerRadius
+                        oc.Parent = overlay
                     end
+
+                    local stroke = Instance.new("UIStroke")
+                    stroke.Name = "WindowStroke"
+                    stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+                    stroke.Color = Color3.fromRGB(0, 170, 255)
+                    stroke.Thickness = 2.0
+                    stroke.Transparency = 0
+                    stroke.Parent = overlay
+                else
+                    local s = overlay:FindFirstChild("WindowStroke") or overlay:FindFirstChildOfClass("UIStroke")
+                    if s then
+                        s.Color = Color3.fromRGB(0, 170, 255)
+                        s.Thickness = 2.0
+                        s.Transparency = 0
+                        s.Enabled = true
+                    end
+                end
+
+                -- 2. ตั้งค่ากรอบ SectionUIStroke เฉพาะกล่องเนื้อหา ไม่แตะต้อง Tab หรือปุ่มอื่นๆ เพื่อตัดปัญหากระพริบ
+                local function StyleSection(secStroke)
+                    if secStroke and secStroke:IsA("UIStroke") and secStroke.Name == "SectionUIStroke" then
+                        secStroke.Color = Color3.fromRGB(0, 160, 255)
+                        secStroke.Transparency = 0.6
+                        secStroke.Thickness = 1.0
+                        secStroke.Enabled = true
+                    end
+                end
+
+                for _, desc in ipairs(base:GetDescendants()) do
+                    if desc:IsA("UIStroke") and desc.Name == "SectionUIStroke" then
+                        StyleSection(desc)
+                    end
+                end
+
+                if not _windowBorderHooked then
+                    _windowBorderHooked = true
+                    base.DescendantAdded:Connect(function(desc)
+                        if desc:IsA("UIStroke") and desc.Name == "SectionUIStroke" then
+                            task.defer(StyleSection, desc)
+                        end
+                    end)
                 end
             end
         end)
@@ -1835,13 +1862,9 @@ local function InitUI()
                                     targetColor = GetColorForTabText(nameLabel.Text)
                                 end
 
-                                -- Keep icons vivid and never faded to 50% opacity
-                                if imgLabel.ImageTransparency > 0.15 then
-                                    imgLabel.ImageTransparency = 0.08
-                                end
                                 imgLabel.ImageColor3 = targetColor
 
-                                -- Attach real-time property lock if not already hooked
+                                -- Lock ImageColor3 permanently without fighting MacLib's transparency tween
                                 if not _hookedTabs[imgLabel] then
                                     _hookedTabs[imgLabel] = true
                                     local isApplying = false
@@ -1853,20 +1876,6 @@ local function InitUI()
                                             imgLabel.ImageColor3 = col
                                         end
                                         isApplying = false
-                                    end)
-                                    imgLabel:GetPropertyChangedSignal("ImageTransparency"):Connect(function()
-                                        if isApplying then return end
-                                        if imgLabel.ImageTransparency > 0.15 then
-                                            isApplying = true
-                                            imgLabel.ImageTransparency = 0.08
-                                            isApplying = false
-                                        end
-                                    end)
-                                    tabSwitcher.MouseButton1Click:Connect(function()
-                                        task.defer(ApplyTabIconColors)
-                                    end)
-                                    tabSwitcher.MouseEnter:Connect(function()
-                                        task.defer(ApplyTabIconColors)
                                     end)
                                 end
                             end
