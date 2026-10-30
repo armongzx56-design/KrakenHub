@@ -686,10 +686,11 @@ Hub.Connections.CoreEnforcer = RunService.RenderStepped:Connect(function(dt)
         UpdateHitboxes()
     end
 
-    -- Maintain Tab Icon Colors
-    if Hub.ApplyTabIconColors and (os.clock() - (_lastTabIconCheck or 0) >= 1.5) then
+    -- Maintain Tab Icon Colors & Window/Section Borders
+    if (os.clock() - (_lastTabIconCheck or 0) >= 0.5) then
         _lastTabIconCheck = os.clock()
-        Hub.ApplyTabIconColors()
+        if Hub.ApplyTabIconColors then Hub.ApplyTabIconColors() end
+        if Hub.ApplyBorders then Hub.ApplyBorders() end
     end
 end)
 
@@ -804,7 +805,7 @@ local respawnKeyConn = UserInputService.InputBegan:Connect(function(input, gpe)
         if Hub.Fluent then
             Hub.Fluent:Notify({
                 Title = "KrakenHub",
-                Content = "เกิดใหม่ทันที (Fast Respawn Triggered)",
+                Content = "เกิดใหม่ทันทีเรียบร้อยแล้ว",
                 Duration = 2
             })
         end
@@ -1118,7 +1119,7 @@ local function UpdateSafeESP()
             title.TextSize = 13
             title.TextColor3 = Color3.fromRGB(0, 230, 255)
             title.TextStrokeTransparency = 0.2
-            title.Text = "💎 " .. safe.Name:gsub("MilitaryCase_", "")
+            title.Text = "💎 ตู้เซฟทหาร: " .. safe.Name:gsub("MilitaryCase_", "")
 
             local sub = Instance.new("TextLabel", bb)
             sub.Size = UDim2.new(1, 0, 0, 16)
@@ -1128,7 +1129,7 @@ local function UpdateSafeESP()
             sub.TextSize = 11
             sub.TextColor3 = Color3.fromRGB(255, 215, 0)
             sub.TextStrokeTransparency = 0.2
-            sub.Text = "$5,000 - $50,000"
+            sub.Text = "เงินรางวัล: $5,000 - $50,000"
 
             bb.Parent = part
             table.insert(Hub.SafeESP, bb)
@@ -1274,7 +1275,7 @@ local function InitUI()
     -- 🪟 4. CREATE MAIN WINDOW
     local Window = MacLib:Window({
         Title = "KrakenHub",
-        Subtitle = "Urban Reload | v1.0",
+        Subtitle = "รีโหลดในเมือง (Urban Reload) | ภาษาไทย",
         Size = GetOptimalWindowSize(),
         DragStyle = 2,
         ShowUserInfo = true,
@@ -1283,12 +1284,13 @@ local function InitUI()
     })
     Hub.Window = Window
 
-    -- 🌟 Glowing Neon Blue Window Border (ขอบเรืองแสงสีน้ำเงิน)
+    -- 🌟 Glowing Neon Blue Window Border & Section Borders (ขอบเรืองแสงสีน้ำเงินและขอบการ์ด)
     local function ApplyWindowBorder()
         pcall(function()
             local base = (targetGuiParent and targetGuiParent:FindFirstChild("Base", true))
                       or (CoreGui and CoreGui:FindFirstChild("Base", true))
             if base then
+                base.ClipsDescendants = false
                 local stroke = base:FindFirstChild("BaseUIStroke") or base:FindFirstChildOfClass("UIStroke")
                 if not stroke then
                     stroke = Instance.new("UIStroke")
@@ -1296,12 +1298,31 @@ local function InitUI()
                     stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
                     stroke.Parent = base
                 end
-                stroke.Color = Color3.fromRGB(0, 160, 255)
-                stroke.Thickness = 1.8
+                stroke.Color = Color3.fromRGB(0, 170, 255)
+                stroke.Thickness = 2.0
                 stroke.Transparency = 0
+                stroke.Enabled = true
+
+                -- Make all inner section & element card borders clearly visible and themed
+                for _, desc in ipairs(base:GetDescendants()) do
+                    if desc:IsA("UIStroke") and desc ~= stroke then
+                        if desc.Name == "SectionUIStroke" then
+                            desc.Color = Color3.fromRGB(0, 160, 255)
+                            desc.Transparency = 0.55
+                            desc.Thickness = 1.2
+                            desc.Enabled = true
+                        elseif desc.Transparency > 0.75 then
+                            desc.Color = Color3.fromRGB(70, 110, 160)
+                            desc.Transparency = 0.5
+                            desc.Thickness = 1.0
+                            desc.Enabled = true
+                        end
+                    end
+                end
             end
         end)
     end
+    Hub.ApplyBorders = ApplyWindowBorder
 
     -- ✨ Sidebar Title Light Sweep / Sheen Engine (แสงปาดตัวหนังสือ KrakenHub วนลูปเนียนๆ)
     local function ApplyTitleShimmer()
@@ -1402,7 +1423,7 @@ local function InitUI()
 
         local stroke = Instance.new("UIStroke")
         stroke.Color = Color3.fromHSV(0, 1, 1)
-        stroke.Thickness = 1.2
+        stroke.Thickness = 2.0
         stroke.Transparency = 0
         stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
         stroke.Parent = mainBtn
@@ -1532,10 +1553,10 @@ local function InitUI()
         end)
 
         mainBtn.MouseEnter:Connect(function()
-            TweenService:Create(stroke, TweenInfo.new(0.2), { Thickness = 1.8 }):Play()
+            TweenService:Create(stroke, TweenInfo.new(0.2), { Thickness = 2.6 }):Play()
         end)
         mainBtn.MouseLeave:Connect(function()
-            TweenService:Create(stroke, TweenInfo.new(0.2), { Thickness = 1.2 }):Play()
+            TweenService:Create(stroke, TweenInfo.new(0.2), { Thickness = 2.0 }):Play()
         end)
 
         local okP = pcall(function() screenGui.Parent = targetGuiParent end)
@@ -1774,13 +1795,29 @@ local function InitUI()
     -- 🎨 Vibrant Themed Tab Icons Engine (ใส่สีสดใสในตัวไอค่อนแต่ละหมวด)
     local TabColors = {
         ["ต่อสู้"] = Color3.fromRGB(255, 65, 65),       -- Crimson Red (Combat)
+        ["Combat"] = Color3.fromRGB(255, 65, 65),
         ["มองทะลุ"] = Color3.fromRGB(0, 220, 255),      -- Neon Cyan (Visuals)
+        ["Visuals"] = Color3.fromRGB(0, 220, 255),
         ["เคลื่อนที่"] = Color3.fromRGB(255, 185, 35),   -- Amber Gold (Movement)
+        ["Movement"] = Color3.fromRGB(255, 185, 35),
         ["ฟาร์ม & โลก"] = Color3.fromRGB(50, 225, 110), -- Emerald Green (World)
+        ["ฟาร์มและโลก"] = Color3.fromRGB(50, 225, 110),
+        ["World"] = Color3.fromRGB(50, 225, 110),
         ["วาร์ป"] = Color3.fromRGB(185, 95, 255),       -- Electric Purple (Teleport)
+        ["Teleport"] = Color3.fromRGB(185, 95, 255),
         ["ตั้งค่า"] = Color3.fromRGB(0, 160, 255),      -- Electric Blue (Settings)
+        ["Settings"] = Color3.fromRGB(0, 160, 255),
     }
 
+    local function GetColorForTabText(txt)
+        if not txt then return Color3.fromRGB(0, 160, 255) end
+        for k, col in pairs(TabColors) do
+            if txt:find(k) then return col end
+        end
+        return Color3.fromRGB(0, 160, 255)
+    end
+
+    local _hookedTabs = {}
     local function ApplyTabIconColors()
         pcall(function()
             local base = (targetGuiParent and targetGuiParent:FindFirstChild("Base", true))
@@ -1795,9 +1832,43 @@ local function InitUI()
                             if nameLabel and imgLabel then
                                 local targetColor = Color3.fromRGB(0, 160, 255)
                                 if Hub.Settings.IconTheme ~= "ElectricBlue" then
-                                    targetColor = TabColors[nameLabel.Text] or Color3.fromRGB(0, 160, 255)
+                                    targetColor = GetColorForTabText(nameLabel.Text)
+                                end
+
+                                -- Keep icons vivid and never faded to 50% opacity
+                                if imgLabel.ImageTransparency > 0.15 then
+                                    imgLabel.ImageTransparency = 0.08
                                 end
                                 imgLabel.ImageColor3 = targetColor
+
+                                -- Attach real-time property lock if not already hooked
+                                if not _hookedTabs[imgLabel] then
+                                    _hookedTabs[imgLabel] = true
+                                    local isApplying = false
+                                    imgLabel:GetPropertyChangedSignal("ImageColor3"):Connect(function()
+                                        if isApplying then return end
+                                        isApplying = true
+                                        local col = (Hub.Settings.IconTheme == "ElectricBlue") and Color3.fromRGB(0, 160, 255) or GetColorForTabText(nameLabel.Text)
+                                        if imgLabel.ImageColor3 ~= col then
+                                            imgLabel.ImageColor3 = col
+                                        end
+                                        isApplying = false
+                                    end)
+                                    imgLabel:GetPropertyChangedSignal("ImageTransparency"):Connect(function()
+                                        if isApplying then return end
+                                        if imgLabel.ImageTransparency > 0.15 then
+                                            isApplying = true
+                                            imgLabel.ImageTransparency = 0.08
+                                            isApplying = false
+                                        end
+                                    end)
+                                    tabSwitcher.MouseButton1Click:Connect(function()
+                                        task.defer(ApplyTabIconColors)
+                                    end)
+                                    tabSwitcher.MouseEnter:Connect(function()
+                                        task.defer(ApplyTabIconColors)
+                                    end)
+                                end
                             end
                         end
                     end
@@ -1841,13 +1912,13 @@ local function InitUI()
     Hub.Fluent = Fluent
 
     -- ================================================
-    -- 🎯 COMBAT TAB
+    -- 🎯 COMBAT TAB (หมวดต่อสู้)
     -- ================================================
-    Tabs.Combat:AddSection("Camera Aimbot")
+    Tabs.Combat:AddSection("ระบบช่วยเล็ง (Aimbot)")
 
     local HeadLock100Toggle = Tabs.Combat:AddToggle("HeadLock100Toggle", {
-        Title = "100% Head Lock & Bullet Tracking (ล็อคหัว 100% กระสุนตามหัว)",
-        Description = "ล็อคเป้าหัวทันที 100% + กระสุนตรงเข้าหัวทุกนัด (No Recoil + No Spread + Head Hitbox 14 studs)",
+        Title = "ล็อคหัว 100% & กระสุนตามหัว (Head Lock 100%)",
+        Description = "ล็อคเป้าหัวทันที 100% + กระสุนตรงเข้าหัวทุกนัด (ไร้แรงดีด + ปืนไม่ส่าย + ขยายหัว 14 studs)",
         Default = true
     })
     HeadLock100Toggle:OnChanged(function(v)
@@ -1863,17 +1934,17 @@ local function InitUI()
             ApplyWeaponMods()
             if Options.AimToggle then Options.AimToggle:SetValue(true) end
             if Options.SmoothSlider then Options.SmoothSlider:SetValue(0) end
-            if Options.BoneDrop then Options.BoneDrop:SetValue("Head") end
+            if Options.BoneDrop then Options.BoneDrop:SetValue("ส่วนหัว (Head - แนะนำ)") end
             if Options.NoRecoilToggle then Options.NoRecoilToggle:SetValue(true) end
             if Options.NoSpreadToggle then Options.NoSpreadToggle:SetValue(true) end
             if Options.HitboxToggle then Options.HitboxToggle:SetValue(true) end
-            if Options.HitboxTargetDrop then Options.HitboxTargetDrop:SetValue("Head") end
+            if Options.HitboxTargetDrop then Options.HitboxTargetDrop:SetValue("ส่วนหัว (Head - แนะนำ)") end
             if Options.HitboxSizeSlider then Options.HitboxSizeSlider:SetValue(14) end
         end
     end)
 
     local AimToggle = Tabs.Combat:AddToggle("AimToggle", {
-        Title = "Aimbot Enabled",
+        Title = "เปิดใช้งานระบบช่วยเล็ง (Aimbot)",
         Description = "ล็อคเป้าหมายที่อยู่ใกล้เคอร์เซอร์อัตโนมัติ (คลิกขวาเล็ง หรือ คลิกซ้ายยิง)",
         Default = Hub.Settings.Aimbot
     })
@@ -1882,17 +1953,17 @@ local function InitUI()
     end)
 
     local TriggerDrop = Tabs.Combat:AddDropdown("TriggerDrop", {
-        Title = "Aimbot Trigger (จังหวะการล็อคหัว)",
-        Description = "เลือกว่าจะให้ล็อคหัวตอนไหน (แนะนำ: ทั้งตอนเล็งและตอนกดยิง)",
-        Values = {"Aim OR Shoot (คลิกขวาเล็ง หรือ คลิกซ้ายยิง)", "Right Click Only (คลิกขวาเล็งเท่านั้น)", "Left Click Only (คลิกซ้ายยิงเท่านั้น)", "Custom Keybind (ปุ่มคีย์ลัด)"},
-        Default = "Aim OR Shoot (คลิกขวาเล็ง หรือ คลิกซ้ายยิง)"
+        Title = "จังหวะการล็อคหัว (Aimbot Trigger)",
+        Description = "เลือกว่าจะให้ล็อคหัวตอนไหน (แนะนำ: ทั้งตอนเล็งและตอนยิง)",
+        Values = {"ทั้งตอนเล็งและตอนยิง (แนะนำ)", "ตอนคลิกขวาเล็งเท่านั้น", "ตอนคลิกซ้ายยิงเท่านั้น", "ปุ่มคีย์ลัดกำหนดเอง"},
+        Default = "ทั้งตอนเล็งและตอนยิง (แนะนำ)"
     })
     TriggerDrop:OnChanged(function(v)
-        if v:find("Aim OR Shoot") then
+        if v:find("ทั้งตอนเล็ง") or v:find("Aim OR Shoot") then
             Hub.Settings.AimbotTriggerMode = "Aim OR Shoot"
-        elseif v:find("Right Click") then
+        elseif v:find("เล็งเท่านั้น") or v:find("Right Click") then
             Hub.Settings.AimbotTriggerMode = "Right Click"
-        elseif v:find("Left Click") then
+        elseif v:find("ยิงเท่านั้น") or v:find("Left Click") then
             Hub.Settings.AimbotTriggerMode = "Left Click"
         else
             Hub.Settings.AimbotTriggerMode = "Keybind"
@@ -1900,7 +1971,7 @@ local function InitUI()
     end)
 
     local RedDmgToggle = Tabs.Combat:AddToggle("RedDmgToggle", {
-        Title = "Force Red Damage Numbers (ดาเมจสีแดง 100%)",
+        Title = "บังคับตัวเลขดาเมจสีแดง 100% (Red Damage Numbers)",
         Description = "บังคับให้ตัวเลขดาเมจและเป้าเล็งเป็นสีแดงสดทุกนัดที่ยิงเข้าหัว",
         Default = Hub.Settings.RedDamageNumbers
     })
@@ -1909,8 +1980,8 @@ local function InitUI()
     end)
 
     local FOVSlider = Tabs.Combat:AddSlider("FOVSlider", {
-        Title = "FOV Radius",
-        Description = "รัศมีวงกลมการตรวจจับเป้าหมาย (แนะนำ 200 ตาม ssss.txt)",
+        Title = "ขนาดวงกลมช่วยเล็ง (FOV Radius)",
+        Description = "รัศมีวงกลมการตรวจจับเป้าหมาย (แนะนำ 200)",
         Default = Hub.Settings.AimbotFOV,
         Min = 50,
         Max = 600,
@@ -1922,8 +1993,8 @@ local function InitUI()
     end)
 
     local SmoothSlider = Tabs.Combat:AddSlider("SmoothSlider", {
-        Title = "Smoothing (ความนุ่มนวล)",
-        Description = "0 = เล็งทันที 100% (Instant Head Lock) | 0.05 - 0.25 = นุ่มเนียนเหมือนคนเล่น",
+        Title = "ความนุ่มนวลการเล็ง (Smoothing)",
+        Description = "0 = ล็อคหัวทันที 100% (ล็อคโหด) | 0.05 - 0.25 = นุ่มเนียนเหมือนคนเล่นจริง",
         Default = Hub.Settings.AimbotSmoothing,
         Min = 0,
         Max = 0.95,
@@ -1934,32 +2005,39 @@ local function InitUI()
     end)
 
     local BoneDrop = Tabs.Combat:AddDropdown("BoneDrop", {
-        Title = "Target Bone (ตำแหน่งเล็ง)",
-        Values = {"Head", "UpperTorso", "HumanoidRootPart"},
-        Default = Hub.Settings.AimbotBone
+        Title = "ตำแหน่งที่ต้องการเล็ง (Target Bone)",
+        Description = "เลือกชิ้นส่วนร่างกายของเป้าหมายที่จะล็อค",
+        Values = {"ส่วนหัว (Head - แนะนำ)", "ลำตัวส่วนบน (UpperTorso)", "กลางตัว (HumanoidRootPart)"},
+        Default = "ส่วนหัว (Head - แนะนำ)"
     })
     BoneDrop:OnChanged(function(v)
-        Hub.Settings.AimbotBone = v
+        if v:find("ส่วนหัว") or v:find("Head") then
+            Hub.Settings.AimbotBone = "Head"
+        elseif v:find("ลำตัว") or v:find("UpperTorso") then
+            Hub.Settings.AimbotBone = "UpperTorso"
+        else
+            Hub.Settings.AimbotBone = "HumanoidRootPart"
+        end
     end)
 
     local PriorityDrop = Tabs.Combat:AddDropdown("PriorityDrop", {
-        Title = "Target Priority (ลำดับการล็อค)",
+        Title = "ลำดับความสำคัญเป้าหมาย (Target Priority)",
         Description = "เลือกว่าจะล็อคศัตรูที่อยู่ใกล้ตัวเราสุด หรือใกล้กลางเป้าเล็งสุด",
-        Values = {"Distance (ศัตรูใกล้ตัวสุด - แนะนำ)", "Smart (ผสมผสาน ใกล้ตัว+กึ่งกลาง)", "Crosshair (ใกล้กึ่งกลางจอ)"},
-        Default = "Distance (ศัตรูใกล้ตัวสุด - แนะนำ)"
+        Values = {"ศัตรูที่ใกล้ตัวเราที่สุด (แนะนำ)", "ผสมผสาน (ใกล้ตัว + กลางจอ)", "ศัตรูที่ใกล้กึ่งกลางเป้าเล็งที่สุด"},
+        Default = "ศัตรูที่ใกล้ตัวเราที่สุด (แนะนำ)"
     })
     PriorityDrop:OnChanged(function(v)
-        if v:find("Distance") then
+        if v:find("ใกล้ตัวเราที่สุด") or v:find("Distance") then
             Hub.Settings.AimbotPriority = "Distance"
-        elseif v:find("Crosshair") then
+        elseif v:find("กึ่งกลาง") or v:find("Crosshair") then
             Hub.Settings.AimbotPriority = "Crosshair"
-        elseif v:find("Smart") then
+        elseif v:find("ผสมผสาน") or v:find("Smart") then
             Hub.Settings.AimbotPriority = "Smart"
         end
     end)
 
     local MaxDistSlider = Tabs.Combat:AddSlider("MaxDistSlider", {
-        Title = "Max Distance (ระยะล็อคสูงสุด)",
+        Title = "ระยะล็อคเป้าหมายสูงสุด (Max Distance)",
         Description = "ไม่ล็อคศัตรูที่อยู่ไกลเกินระยะนี้ (Studs)",
         Default = Hub.Settings.AimbotMaxDist,
         Min = 50,
@@ -1971,7 +2049,7 @@ local function InitUI()
     end)
 
     local WallCheckToggle = Tabs.Combat:AddToggle("WallCheckToggle", {
-        Title = "Wall Check (เช็คสิ่งกีดขวาง)",
+        Title = "เช็คสิ่งกีดขวาง (Wall Check)",
         Description = "ไม่ล็อคศัตรูที่แอบอยู่หลังกำแพงหรือสิ่งปลูกสร้าง",
         Default = Hub.Settings.AimbotWallCheck
     })
@@ -1980,7 +2058,7 @@ local function InitUI()
     end)
 
     local SafeZoneToggle = Tabs.Combat:AddToggle("SafeZoneToggle", {
-        Title = "Ignore SafeZone (ข้ามคนในเซฟโซน/ร้านปืน)",
+        Title = "ข้ามคนในเซฟโซน (Ignore SafeZone)",
         Description = "ไม่ล็อคศัตรูที่อยู่ในพื้นที่ปลอดภัยหรือเปิด PvPSafe",
         Default = Hub.Settings.AimbotIgnoreSafeZone
     })
@@ -1989,8 +2067,8 @@ local function InitUI()
     end)
 
     local ShieldToggle = Tabs.Combat:AddToggle("ShieldToggle", {
-        Title = "Ignore Spawn Shield (ข้ามคนเกิดใหม่มีเกราะ)",
-        Description = "ไม่ล็อคศัตรูที่มีเกราะกันดาเมจตอนเพิ่งเกิด",
+        Title = "ข้ามคนเกิดใหม่มีเกราะ (Ignore Spawn Shield)",
+        Description = "ไม่ล็อคศัตรูที่มีเกราะกันดาเมจตอนเพิ่งเกิดใหม่",
         Default = Hub.Settings.AimbotIgnoreShield
     })
     ShieldToggle:OnChanged(function(v)
@@ -1998,7 +2076,7 @@ local function InitUI()
     end)
 
     local DownedToggle = Tabs.Combat:AddToggle("DownedToggle", {
-        Title = "Ignore Downed (ข้ามศัตรูที่ล้มแล้ว)",
+        Title = "ข้ามศัตรูที่ล้มคลาน (Ignore Downed)",
         Description = "ไม่ล็อคคนที่ถูกยิงล้มคลาน เพื่อโฟกัสยิงคนที่ยังยืนยิงเรา",
         Default = Hub.Settings.AimbotIgnoreDowned
     })
@@ -2007,7 +2085,7 @@ local function InitUI()
     end)
 
     Tabs.Combat:AddKeybind("AimbotKeybind", {
-        Title = "Aimbot Keybind (ปุ่มเล็งล็อคหัว)",
+        Title = "ปุ่มคีย์ลัดช่วยเล็ง (Aimbot Keybind)",
         Mode = "Hold",
         Default = Hub.Settings.AimbotKey or Enum.UserInputType.MouseButton2,
         Callback = function(key)
@@ -2015,11 +2093,11 @@ local function InitUI()
         end
     })
 
-    Tabs.Combat:AddSection("Hitbox Expander")
+    Tabs.Combat:AddSection("ขยายฮิตบ็อกซ์ (Hitbox Expander)")
 
     local HitboxToggle = Tabs.Combat:AddToggle("HitboxToggle", {
-        Title = "Hitbox Expander (ขยายเป้าหมาย)",
-        Description = "ขยายขนาด Hitbox ใน Workspace.ClientHitboxes ยิงโดนหัวง่าย 100%",
+        Title = "เปิดขยายฮิตบ็อกซ์ (Hitbox Expander)",
+        Description = "ขยายขนาด Hitbox ศัตรู ยิงโดนหัวง่าย 100% แม้ยิงไม่ตรงเป้า",
         Default = Hub.Settings.HitboxExpander
     })
     HitboxToggle:OnChanged(function(v)
@@ -2038,8 +2116,8 @@ local function InitUI()
     end)
 
     local HitboxSizeSlider = Tabs.Combat:AddSlider("HitboxSizeSlider", {
-        Title = "Hitbox Size (ขนาด)",
-        Description = "ขนาดของ Hitbox ที่ต้องการขยาย",
+        Title = "ขนาดฮิตบ็อกซ์ (Hitbox Size)",
+        Description = "ขนาดของกล่องเป้าหมายที่ต้องการขยาย (Studs)",
         Default = Hub.Settings.HitboxSize,
         Min = 2,
         Max = 20,
@@ -2050,16 +2128,23 @@ local function InitUI()
     end)
 
     local HitboxTargetDrop = Tabs.Combat:AddDropdown("HitboxTargetDrop", {
-        Title = "Hitbox Target Part",
-        Values = {"Head", "UpperTorso", "All"},
-        Default = Hub.Settings.HitboxTarget
+        Title = "ส่วนที่ต้องการขยาย (Target Part)",
+        Description = "เลือกส่วนของร่างกายศัตรูที่ต้องการขยายขนาด",
+        Values = {"ส่วนหัว (Head - แนะนำ)", "ลำตัวส่วนบน (UpperTorso)", "ทุกส่วน (All Parts)"},
+        Default = "ส่วนหัว (Head - แนะนำ)"
     })
     HitboxTargetDrop:OnChanged(function(v)
-        Hub.Settings.HitboxTarget = v
+        if v:find("ส่วนหัว") or v:find("Head") then
+            Hub.Settings.HitboxTarget = "Head"
+        elseif v:find("ลำตัว") or v:find("UpperTorso") then
+            Hub.Settings.HitboxTarget = "UpperTorso"
+        else
+            Hub.Settings.HitboxTarget = "All"
+        end
     end)
 
     local HitboxVisToggle = Tabs.Combat:AddToggle("HitboxVisToggle", {
-        Title = "Show Hitboxes (แสดงกล่องสีแดง)",
+        Title = "แสดงกล่องฮิตบ็อกซ์เรืองแสง (Show Hitboxes)",
         Description = "แสดงกล่องเรืองแสงของ Hitbox ศัตรูบนหน้าจอ",
         Default = Hub.Settings.HitboxVisible
     })
@@ -2067,11 +2152,11 @@ local function InitUI()
         Hub.Settings.HitboxVisible = v
     end)
 
-    Tabs.Combat:AddSection("Weapon Modifications")
+    Tabs.Combat:AddSection("ปรับแต่งปืน (Weapon Modifications)")
 
     local NoRecoilToggle = Tabs.Combat:AddToggle("NoRecoilToggle", {
-        Title = "No Recoil (ปืนไม่ดีด 100%)",
-        Description = "เซ็ท RecoilPitch & RecoilYaw เป็น 0 ตามสูตร ssss.txt",
+        Title = "ปืนไร้แรงดีด 100% (No Recoil)",
+        Description = "ปิดแรงดีดปืนทุกทิศทาง ยิงนิ่งสนิท 100% ปืนไม่กระดก",
         Default = Hub.Settings.NoRecoil
     })
     NoRecoilToggle:OnChanged(function(v)
@@ -2080,8 +2165,8 @@ local function InitUI()
     end)
 
     local NoSpreadToggle = Tabs.Combat:AddToggle("NoSpreadToggle", {
-        Title = "No Spread (กระสุนตรง 100%)",
-        Description = "เซ็ท Spread & BloomScale เป็น 0 กระสุนเกาะกลุ่มจุดเดียว",
+        Title = "กระสุนตรงเป้า 100% (No Spread)",
+        Description = "ปิดการกระจายของกระสุน กระสุนเกาะกลุ่มจุดเดียวทุกนัด",
         Default = Hub.Settings.NoSpread
     })
     NoSpreadToggle:OnChanged(function(v)
@@ -2090,8 +2175,8 @@ local function InitUI()
     end)
 
     local FullAutoToggle = Tabs.Combat:AddToggle("FullAutoToggle", {
-        Title = "Full Auto (ปืนทุกกระบอกยิงรัว)",
-        Description = "เปลี่ยนโหมดยิงของปืนทุกชนิด (M9/ลูกซอง) ให้ยิงออโต้ค้างได้",
+        Title = "ยิงออโต้ทุกปืน (Full Auto)",
+        Description = "เปลี่ยนโหมดยิงของปืนทุกชนิด (M9/ลูกซอง) ให้กดยิงค้างรัวได้",
         Default = Hub.Settings.FullAuto
     })
     FullAutoToggle:OnChanged(function(v)
@@ -2100,8 +2185,8 @@ local function InitUI()
     end)
 
     local RapidToggle = Tabs.Combat:AddToggle("RapidToggle", {
-        Title = "Rapid Fire (ยิงเร็วขึ้น)",
-        Description = "เพิ่มอัตราลั่นกระสุน (RPM) ยิงออกไวกว่าปกติ",
+        Title = "เพิ่มความเร็วลั่นกระสุน (Rapid Fire)",
+        Description = "เพิ่มอัตราลั่นกระสุน (RPM) ยิงกระสุนออกไวกว่าปกติ",
         Default = Hub.Settings.RapidFire
     })
     RapidToggle:OnChanged(function(v)
@@ -2110,8 +2195,8 @@ local function InitUI()
     end)
 
     local InstantReloadToggle = Tabs.Combat:AddToggle("InstantReloadToggle", {
-        Title = "Instant Reload (รีโหลด 0.05s)",
-        Description = "ลดเวลาบรรจุกระสุนลงจนเกือบเป็น 0",
+        Title = "รีโหลดกระสุนทันที (Instant Reload)",
+        Description = "ลดเวลาบรรจุกระสุนลงเหลือ 0.05 วินาที รีโหลดแทบจะทันที",
         Default = Hub.Settings.InstantReload
     })
     InstantReloadToggle:OnChanged(function(v)
@@ -2123,13 +2208,13 @@ local function InitUI()
     ApplyWeaponMods()
 
     -- ================================================
-    -- 👁️ VISUALS TAB
+    -- 👁️ VISUALS TAB (หมวดมองทะลุ)
     -- ================================================
-    Tabs.Visuals:AddSection("Player ESP")
+    Tabs.Visuals:AddSection("มองทะลุผู้เล่น (Player ESP)")
 
     local ESPMainToggle = Tabs.Visuals:AddToggle("ESPMainToggle", {
-        Title = "Enable Player ESP",
-        Description = "เปิด/ปิดระบบมองทะลุผู้เล่นทั้งหมด",
+        Title = "เปิดระบบมองทะลุผู้เล่น (Enable Player ESP)",
+        Description = "เปิด/ปิดระบบมองทะลุผู้เล่นทั้งหมดในเซิร์ฟเวอร์",
         Default = Hub.Settings.PlayerESP
     })
     ESPMainToggle:OnChanged(function(v)
@@ -2137,19 +2222,22 @@ local function InitUI()
     end)
 
     local ESPBoxToggle = Tabs.Visuals:AddToggle("ESPBoxToggle", {
-        Title = "2D Box (กรอบสี่เหลี่ยม)",
+        Title = "กรอบสี่เหลี่ยมตัวละคร (2D Box)",
+        Description = "แสดงกรอบสี่เหลี่ยมรอบตัวผู้เล่นศัตรู",
         Default = Hub.Settings.ESPBox
     })
     ESPBoxToggle:OnChanged(function(v) Hub.Settings.ESPBox = v end)
 
     local ESPNameToggle = Tabs.Visuals:AddToggle("ESPNameToggle", {
-        Title = "Player Names (ชื่อผู้เล่น)",
+        Title = "แสดงชื่อผู้เล่น (Player Names)",
+        Description = "แสดงชื่อและไอดีของผู้เล่น",
         Default = Hub.Settings.ESPName
     })
     ESPNameToggle:OnChanged(function(v) Hub.Settings.ESPName = v end)
 
     local ESPFontDrop = Tabs.Visuals:AddDropdown("ESPFontDrop", {
-        Title = "ESP Font (ฟอนต์ตัวอักษร)",
+        Title = "ฟอนต์ตัวอักษร (ESP Font)",
+        Description = "เลือกรูปแบบฟอนต์ของการมองทะลุ",
         Values = {"UI (คมชัดอ่านง่ายสุด)", "System (ฟอนต์ระบบ)", "Plex (โมเดิร์น)", "Monospace (ตัวพิมพ์ดีด)"},
         Default = "UI (คมชัดอ่านง่ายสุด)"
     })
@@ -2166,23 +2254,24 @@ local function InitUI()
     end)
 
     local ESPNameModeDrop = Tabs.Visuals:AddDropdown("ESPNameModeDrop", {
-        Title = "Name Format (รูปแบบชื่อผู้เล่น)",
-        Values = {"DisplayName (ชื่อเล่น - อ่านง่ายสุด)", "Username (ไอดีเกม)", "Both (ชื่อเล่น + ไอดี)"},
-        Default = "DisplayName (ชื่อเล่น - อ่านง่ายสุด)"
+        Title = "รูปแบบแสดงชื่อ (Name Format)",
+        Description = "เลือกรูปแบบการแสดงชื่อผู้เล่น",
+        Values = {"ชื่อเล่น (DisplayName - อ่านง่ายสุด)", "ไอดีเกม (Username)", "แสดงทั้งสองอย่าง (Both)"},
+        Default = "ชื่อเล่น (DisplayName - อ่านง่ายสุด)"
     })
     ESPNameModeDrop:OnChanged(function(v)
-        if v:find("DisplayName") then
+        if v:find("ชื่อเล่น") or v:find("DisplayName") then
             Hub.Settings.ESPNameMode = "DisplayName"
-        elseif v:find("Username") then
+        elseif v:find("ไอดีเกม") or v:find("Username") then
             Hub.Settings.ESPNameMode = "Username"
-        elseif v:find("Both") then
+        elseif v:find("ทั้งสองอย่าง") or v:find("Both") then
             Hub.Settings.ESPNameMode = "Both"
         end
     end)
 
     local ESPFontSizeSlider = Tabs.Visuals:AddSlider("ESPFontSizeSlider", {
-        Title = "ESP Font Size (ขนาดตัวอักษรชื่อ)",
-        Description = "ปรับขนาดตัวอักษรชื่อและข้อมูลให้ใหญ่/เล็กลงตามชอบ",
+        Title = "ขนาดตัวอักษร (Font Size)",
+        Description = "ปรับขนาดตัวหนังสือชื่อและข้อมูลผู้เล่น",
         Default = Hub.Settings.ESPFontSize,
         Min = 11,
         Max = 22,
@@ -2193,33 +2282,37 @@ local function InitUI()
     end)
 
     local ESPHealthToggle = Tabs.Visuals:AddToggle("ESPHealthToggle", {
-        Title = "Health Display (หลอดเลือด)",
+        Title = "แสดงหลอดเลือดและพลังชีวิต (Health Bar)",
+        Description = "แสดงแถบเลือดและตัวเลข HP ของผู้เล่น",
         Default = Hub.Settings.ESPHealth
     })
     ESPHealthToggle:OnChanged(function(v) Hub.Settings.ESPHealth = v end)
 
     local ESPDistToggle = Tabs.Visuals:AddToggle("ESPDistToggle", {
-        Title = "Distance (ระยะทาง)",
+        Title = "แสดงระยะห่าง (Distance)",
+        Description = "แสดงระยะทางระหว่างเรากับผู้เล่น (เมตร/Studs)",
         Default = Hub.Settings.ESPDistance
     })
     ESPDistToggle:OnChanged(function(v) Hub.Settings.ESPDistance = v end)
 
     local ESPWeaponToggle = Tabs.Visuals:AddToggle("ESPWeaponToggle", {
-        Title = "Equipped Weapon (ชื่อปืนที่ถือ)",
+        Title = "แสดงชื่อปืนที่ถือ (Equipped Weapon)",
+        Description = "แสดงชื่ออาวุธปืนที่ผู้เล่นกำลังถืออยู่ในมือ",
         Default = Hub.Settings.ESPWeapon
     })
     ESPWeaponToggle:OnChanged(function(v) Hub.Settings.ESPWeapon = v end)
 
     local ESPTracerToggle = Tabs.Visuals:AddToggle("ESPTracerToggle", {
-        Title = "Tracers (เส้นนำสายตา)",
+        Title = "เส้นนำสายตา (Tracers)",
+        Description = "ลากเส้นนำสายตาจากกลางจอด้านล่างไปยังตัวผู้เล่น",
         Default = Hub.Settings.ESPTracers
     })
     ESPTracerToggle:OnChanged(function(v) Hub.Settings.ESPTracers = v end)
 
-    Tabs.Visuals:AddSection("World Objects ESP")
+    Tabs.Visuals:AddSection("มองทะลุตู้เซฟและสิ่งของ (World Objects ESP)")
 
     local SafeESPToggle = Tabs.Visuals:AddToggle("SafeESPToggle", {
-        Title = "Safe / Military Case ESP",
+        Title = "มองทะลุตู้เซฟทหาร (Military Safe ESP)",
         Description = "แสดงตู้เซฟเงิน $5,000 - $50,000 ทั้ง 4 จุดในแมพ",
         Default = Hub.Settings.SafeESP
     })
@@ -2232,13 +2325,13 @@ local function InitUI()
     UpdateSafeESP()
 
     -- ================================================
-    -- MOVEMENT TAB
+    -- 🏃 MOVEMENT TAB (หมวดเคลื่อนที่)
     -- ================================================
-    Tabs.Movement:AddSection("Auto Respawn & Fast Reset")
+    Tabs.Movement:AddSection("เกิดใหม่อัตโนมัติ & รีเซ็ตด่วน (Auto Respawn & Fast Reset)")
 
     local AutoRespawnToggle = Tabs.Movement:AddToggle("AutoRespawnToggle", {
-        Title = "Auto Respawn (กดเกิดใหม่อัตโนมัติด้วยปุ่ม X)",
-        Description = "กดปุ่ม X หรือเมื่อล้มคลาน/เลือดหมด จะเกิดใหม่และรีเซ็ตทันทีไม่ต้องรอ",
+        Title = "เกิดใหม่อัตโนมัติ (Auto Respawn - ปุ่ม X)",
+        Description = "กดปุ่ม X หรือเมื่อถูกยิงล้มคลาน/เลือดหมด จะเกิดใหม่และรีเซ็ตทันทีไม่ต้องรอคูลดาวน์",
         Default = Hub.Settings.AutoRespawn
     })
     AutoRespawnToggle:OnChanged(function(v)
@@ -2246,7 +2339,7 @@ local function InitUI()
     end)
 
     local RespawnKeybind = Tabs.Movement:AddKeybind("RespawnKeybind", {
-        Title = "Respawn Key",
+        Title = "ปุ่มคีย์ลัดเกิดใหม่ (Respawn Key)",
         Default = Hub.Settings.RespawnKey,
         Callback = function(key)
             Hub.Settings.RespawnKey = key
@@ -2254,7 +2347,7 @@ local function InitUI()
     })
 
     Tabs.Movement:AddButton({
-        Title = "Force Respawn Now (กดเกิดใหม่ทันที)",
+        Title = "กดเกิดใหม่ทันที (Force Respawn Now)",
         Description = "รีเซ็ตตัวละครและข้ามคูลดาวน์เกิดใหม่ทันที 1 ครั้ง",
         Callback = function()
             if Hub.ForceRespawnPlayer then
@@ -2263,11 +2356,11 @@ local function InitUI()
         end
     })
 
-    Tabs.Movement:AddSection("Movement Speed & Stamina")
+    Tabs.Movement:AddSection("ความเร็ว & สเตมิน่า (Speed & Stamina)")
 
     local SpeedToggle = Tabs.Movement:AddToggle("SpeedToggle", {
-        Title = "Speed Multiplier (เร่งความเร็ววิ่ง)",
-        Description = "ปรับความเร็ววิ่งผ่าน Native Config & Humanoid",
+        Title = "เปิดใช้งานเพิ่มความเร็ววิ่ง (Speed Hack)",
+        Description = "ปรับความเร็วการวิ่งผ่านระบบ Native Config & Humanoid",
         Default = Hub.Settings.SpeedHack
     })
     SpeedToggle:OnChanged(function(v)
@@ -2285,7 +2378,8 @@ local function InitUI()
     end)
 
     local SpeedSlider = Tabs.Movement:AddSlider("SpeedSlider", {
-        Title = "WalkSpeed Value",
+        Title = "ระดับความเร็ววิ่ง (WalkSpeed Value)",
+        Description = "ตั้งค่าความเร็วในการเดินและวิ่ง",
         Default = Hub.Settings.SpeedValue,
         Min = 18,
         Max = 65,
@@ -2296,8 +2390,8 @@ local function InitUI()
     end)
 
     local InfStaminaToggle = Tabs.Movement:AddToggle("InfStaminaToggle", {
-        Title = "Infinite Stamina (วิ่งไม่เหนื่อย 100%)",
-        Description = "ล็อค Stamina = 150 และ Exhausted = false",
+        Title = "สเตมิน่าไม่จำกัด (Infinite Stamina)",
+        Description = "วิ่งได้ตลอดเวลา ไม่เหนื่อย ไม่หมดแรง ล็อค Stamina เต็ม 100%",
         Default = Hub.Settings.InfiniteStamina
     })
     InfStaminaToggle:OnChanged(function(v)
@@ -2305,19 +2399,22 @@ local function InitUI()
     end)
 
     local InfJumpToggle = Tabs.Movement:AddToggle("InfJumpToggle", {
-        Title = "Infinite Jump (กระโดดลอยกลางอากาศ)",
+        Title = "กระโดดได้ไม่จำกัด (Infinite Jump)",
+        Description = "สามารถกระโดดซ้ำกลางอากาศได้ต่อเนื่องไม่จำกัดครั้ง",
         Default = Hub.Settings.InfJump
     })
     InfJumpToggle:OnChanged(function(v) Hub.Settings.InfJump = v end)
 
     local NoclipToggle = Tabs.Movement:AddToggle("NoclipToggle", {
-        Title = "Noclip (เดินทะลุกำแพง)",
+        Title = "เดินทะลุกำแพง (Noclip)",
+        Description = "ปิดการชนของตัวละคร เดินทะลุสิ่งกีดขวางและกำแพงได้",
         Default = Hub.Settings.Noclip
     })
     NoclipToggle:OnChanged(function(v) Hub.Settings.Noclip = v end)
 
     local FlyToggle = Tabs.Movement:AddToggle("FlyToggle", {
-        Title = "Fly (บินอิสระ WASD + Space/Shift)",
+        Title = "บินอิสระ (Fly - WASD + Space/Shift)",
+        Description = "เปิดระบบบินอิสระ บังคับทิศทางด้วย WASD และขึ้นลงด้วย Space/Shift",
         Default = Hub.Settings.Fly
     })
     FlyToggle:OnChanged(function(v)
@@ -2326,7 +2423,8 @@ local function InitUI()
     end)
 
     local FlySpeedSlider = Tabs.Movement:AddSlider("FlySpeedSlider", {
-        Title = "Fly Speed",
+        Title = "ความเร็วในการบิน (Fly Speed)",
+        Description = "ปรับระดับความเร็วขณะเปิดโหมดบิน",
         Default = Hub.Settings.FlySpeed,
         Min = 20,
         Max = 150,
@@ -2337,13 +2435,13 @@ local function InitUI()
     end)
 
     -- ================================================
-    -- FARM & WORLD TAB
+    -- 🌾 FARM & WORLD TAB (หมวดฟาร์ม & โลก)
     -- ================================================
-    Tabs.World:AddSection("Auto Farming")
+    Tabs.World:AddSection("ระบบฟาร์มอัตโนมัติ (Auto Farming)")
 
     local LootMagnetToggle = Tabs.World:AddToggle("LootMagnetToggle", {
-        Title = "Auto Loot Magnet (ดูดเงิน/ของตกพื้น)",
-        Description = "ดึงไอเทมและถุงเงินที่ตกใน GroundLoot อัตโนมัติ",
+        Title = "ดูดเงินและของตกพื้นอัตโนมัติ (Auto Loot Magnet)",
+        Description = "ดึงเงินและไอเทมที่ตกอยู่ตามพื้นรอบตัวเข้ากระเป๋าอัตโนมัติ",
         Default = Hub.Settings.AutoLootMagnet
     })
     LootMagnetToggle:OnChanged(function(v)
@@ -2351,19 +2449,19 @@ local function InitUI()
     end)
 
     local AutoHalloweenToggle = Tabs.World:AddToggle("AutoHalloweenToggle", {
-        Title = "Auto Claim Halloween Quests",
-        Description = "กดรับเควสอีเวนต์ฮาโลวีนระดับ 1-3 อัตโนมัติ",
+        Title = "กดรับเควสฮาโลวีนอัตโนมัติ (Auto Claim Halloween Quests)",
+        Description = "กดรับเควสอีเวนต์ฮาโลวีนระดับ 1 ถึง 3 อัตโนมัติทันทีที่พร้อมรับ",
         Default = Hub.Settings.AutoClaimHalloween
     })
     AutoHalloweenToggle:OnChanged(function(v)
         Hub.Settings.AutoClaimHalloween = v
     end)
 
-    Tabs.World:AddSection("Quick Banking")
+    Tabs.World:AddSection("ระบบฝากเงินด่วน (Quick Banking)")
 
     Tabs.World:AddButton({
-        Title = "Deposit All Cash (ฝากเงินเข้าตู้ ATM ทั้งหมด)",
-        Description = "ฝากเงินสดทั้งหมดในตัวเข้าบัญชีธนาคารทันที",
+        Title = "ฝากเงินสดทั้งหมดเข้าตู้ ATM (Deposit All Cash)",
+        Description = "นำเงินสดทั้งหมดในตัวฝากเข้าบัญชีธนาคารผ่านระบบ ATM ทันที",
         Callback = function()
             local money = tonumber(LocalPlayer:GetAttribute("Money")) or 0
             if money > 0 and Remotes and Remotes:FindFirstChild("ATM") then
@@ -2382,35 +2480,35 @@ local function InitUI()
     })
 
     -- ================================================
-    -- TELEPORT TAB
+    -- 📍 TELEPORT TAB (หมวดวาร์ป)
     -- ================================================
-    Tabs.Teleport:AddSection("Military Safes ($5K - $50K)")
+    Tabs.Teleport:AddSection("จุดตู้เซฟทหาร ($5K - $50K)")
 
     Tabs.Teleport:AddButton({
-        Title = "Teleport to Safe 1",
-        Description = "(-71, 20, 882) จุดตู้เซฟ 1",
+        Title = "วาร์ปไปตู้เซฟจุดที่ 1 (Safe 1)",
+        Description = "(-71, 20, 882) ตู้เซฟทหารจุดที่ 1",
         Callback = function() TeleportToSafe("Safe 1") end
     })
 
     Tabs.Teleport:AddButton({
-        Title = "Teleport to Safe 2",
-        Description = "(-770, 7, 411) จุดตู้เซฟ 2",
+        Title = "วาร์ปไปตู้เซฟจุดที่ 2 (Safe 2)",
+        Description = "(-770, 7, 411) ตู้เซฟทหารจุดที่ 2",
         Callback = function() TeleportToSafe("Safe 2") end
     })
 
     Tabs.Teleport:AddButton({
-        Title = "Teleport to Safe 3",
-        Description = "(209, 12, 533) จุดตู้เซฟ 3",
+        Title = "วาร์ปไปตู้เซฟจุดที่ 3 (Safe 3)",
+        Description = "(209, 12, 533) ตู้เซฟทหารจุดที่ 3",
         Callback = function() TeleportToSafe("Safe 3") end
     })
 
     Tabs.Teleport:AddButton({
-        Title = "Teleport to Safe 4",
-        Description = "(-733, 21, 730) จุดตู้เซฟ 4",
+        Title = "วาร์ปไปตู้เซฟจุดที่ 4 (Safe 4)",
+        Description = "(-733, 21, 730) ตู้เซฟทหารจุดที่ 4",
         Callback = function() TeleportToSafe("Safe 4") end
     })
 
-    Tabs.Teleport:AddSection("Safe Zones & Shops")
+    Tabs.Teleport:AddSection("เซฟโซน & ร้านค้า (Safe Zones & Shops)")
 
     local function TeleportTo(cf)
         local char = LocalPlayer.Character
@@ -2422,27 +2520,30 @@ local function InitUI()
     end
 
     Tabs.Teleport:AddButton({
-        Title = "Teleport to Gun Store",
+        Title = "วาร์ปไปร้านขายปืน (Gun Store)",
+        Description = "(-98, 18, 883) ร้านปืนหลักในเมือง",
         Callback = function() TeleportTo(CFrame.new(-98, 18, 883)) end
     })
 
     Tabs.Teleport:AddButton({
-        Title = "Teleport to Car Dealer",
+        Title = "วาร์ปไปร้านขายรถ (Car Dealer)",
+        Description = "(-721, 18, 694) ร้านซื้อยานพาหนะ",
         Callback = function() TeleportTo(CFrame.new(-721, 18, 694)) end
     })
 
     Tabs.Teleport:AddButton({
-        Title = "Teleport to ATM Group",
+        Title = "วาร์ปไปโซนตู้ ATM (ATM Group)",
+        Description = "(-768, 5, 405) โซนตู้ฝาก-ถอนเงินสด",
         Callback = function() TeleportTo(CFrame.new(-768, 5, 405)) end
     })
 
     -- ================================================
-    -- SETTINGS TAB
+    -- ⚙️ SETTINGS TAB (หมวดตั้งค่า)
     -- ================================================
-    Tabs.Settings:AddSection("Menu Toggle")
+    Tabs.Settings:AddSection("ปุ่มเปิด/ปิดเมนู (Menu Toggle)")
 
     Tabs.Settings:AddKeybind("MenuToggleKey", {
-        Title = "Open/Close Menu Keybind",
+        Title = "ปุ่มคีย์ลัดเปิด/ปิดเมนู (Open/Close Menu Keybind)",
         Mode = "Toggle",
         Default = Enum.KeyCode.RightControl,
         Callback = function(key)
@@ -2450,15 +2551,16 @@ local function InitUI()
         end
     })
 
-    Tabs.Settings:AddSection("Theme & Visuals")
+    Tabs.Settings:AddSection("ธีมและการแสดงผล (Theme & Visuals)")
 
     local IconThemeDrop = Tabs.Settings:AddDropdown("IconThemeDrop", {
-        Title = "Tab Icon Colors (สีไอค่อนแถบข้าง)",
-        Values = {"Themed Colors (สีตามหมวดหมู่ - แดง/ฟ้า/ส้ม/เขียว/ม่วง)", "Electric Blue (สีน้ำเงินนีออนทั้งหมด)"},
-        Default = "Themed Colors (สีตามหมวดหมู่ - แดง/ฟ้า/ส้ม/เขียว/ม่วง)"
+        Title = "สีไอค่อนแถบข้าง (Tab Icon Colors)",
+        Description = "เลือกชุดสีสำหรับไอค่อนเมนูแต่ละหมวดหมู่",
+        Values = {"สีตามหมวดหมู่ (แดง/ฟ้า/ส้ม/เขียว/ม่วง)", "สีน้ำเงินนีออนล้วน (Electric Blue)"},
+        Default = "สีตามหมวดหมู่ (แดง/ฟ้า/ส้ม/เขียว/ม่วง)"
     })
     IconThemeDrop:OnChanged(function(v)
-        if v:find("Electric Blue") then
+        if v:find("น้ำเงิน") or v:find("Electric") then
             Hub.Settings.IconTheme = "ElectricBlue"
         else
             Hub.Settings.IconTheme = "Themed"
@@ -2467,15 +2569,15 @@ local function InitUI()
     end)
 
     Tabs.Settings:AddButton({
-        Title = "Unload KrakenHub",
-        Description = "ปิดการทำงานของสคริปต์ ลบ UI และคืนค่าเดิมทั้งหมด",
+        Title = "ปิดการทำงาน KrakenHub (Unload Script)",
+        Description = "ปิดการทำงานของสคริปต์ ลบหน้าต่าง UI ทั้งหมด และคืนค่าเดิมของเกม",
         Callback = function()
             Window:Dialog({
                 Title = "ยืนยันการปิดสคริปต์",
                 Content = "คุณต้องการปิด KrakenHub และคืนค่าเดิมทั้งหมดหรือไม่?",
                 Buttons = {
                     {
-                        Title = "ยืนยัน (Unload)",
+                        Title = "ยืนยันการปิด (Unload)",
                         Callback = function()
                             if genv.UrbanReload_Cleanup then
                                 genv.UrbanReload_Cleanup()
@@ -2491,8 +2593,8 @@ local function InitUI()
 
     Window:SelectTab(1)
     Fluent:Notify({
-        Title = "🌊 KrakenHub Loaded!",
-        Content = "Urban Reload พร้อมใช้งานแล้ว!\nกดปุ่มโลโก้ หรือ Right Control เพื่อซ่อน/เปิดเมนู",
+        Title = "🌊 KrakenHub โหลดสำเร็จ!",
+        Content = "Urban Reload (ภาษาไทย) พร้อมใช้งานแล้ว!\nแตะปุ่มโลโก้ หรือกด Right Control เพื่อเปิด/ปิดเมนู",
         Duration = 5
     })
 end
