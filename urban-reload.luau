@@ -412,6 +412,47 @@ local function IsTargetValid(player)
     return true
 end
 
+-- ==============================================================
+-- 🧟 REAL-TIME ZOMBIE DATA EXTRACTION ENGINE
+-- Extracts live HP directly from HoodClient's active NPC state table
+-- ==============================================================
+local LiveNpcTable = nil
+local function GetLiveNpcTable()
+    if LiveNpcTable and next(LiveNpcTable) ~= nil then return LiveNpcTable end
+    pcall(function()
+        local hoodRemote = ReplicatedStorage:FindFirstChild("HoodNPC") and ReplicatedStorage.HoodNPC:FindFirstChild("Remote")
+        if hoodRemote and typeof(getconnections) == "function" then
+            local conns = getconnections(hoodRemote.OnClientEvent)
+            if #conns > 0 and typeof(getupvalues) == "function" then
+                local u = getupvalues(conns[1].Function)
+                if u and type(u[1]) == "table" then
+                    LiveNpcTable = u[1]
+                end
+            end
+        end
+    end)
+    return LiveNpcTable
+end
+
+local function GetZombieRealtimeData(zombieModel)
+    local tbl = GetLiveNpcTable()
+    if tbl then
+        for id, npc in pairs(tbl) do
+            local m = (npc.e and npc.e.model) or npc.model
+            if m == zombieModel then
+                local hp = tonumber(npc.hp) or 0
+                local maxHp = tonumber(npc.maxHp) or 100
+                local isDead = (npc.state == "dead") or (hp <= 0)
+                return hp, maxHp, isDead, id
+            end
+        end
+    end
+    local hum = zombieModel:FindFirstChildOfClass("Humanoid")
+    local hp = (hum and hum.Health) or 100
+    local maxHp = (hum and hum.MaxHealth) or 100
+    return hp, maxHp, hp <= 0, nil
+end
+
 -- Target Selection in FOV (Prioritizes Physically Close Enemies & Zombies in 3D Studs)
 local function GetClosestEnemyInFOV()
     local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
@@ -470,16 +511,16 @@ local function GetClosestEnemyInFOV()
         end
     end
 
-    -- 2. Check Zombies if ZombieKillAura is active
+    -- 2. Check Zombies if ZombieKillAura is active (uses 100% Realtime HP)
     if Hub.Settings.ZombieKillAura and not bestTarget then
         local hoodLocal = Workspace:FindFirstChild("HoodLocal")
         if hoodLocal then
             for _, z in ipairs(hoodLocal:GetChildren()) do
                 if z.Name:find("Zombie") then
-                    local hum = z:FindFirstChildOfClass("Humanoid")
+                    local hp, maxHp, isDead = GetZombieRealtimeData(z)
                     local head = z:FindFirstChild("Head") or z:FindFirstChild("HumanoidRootPart")
                     local zHrp = z:FindFirstChild("HumanoidRootPart")
-                    if hum and hum.Health > 0 and head and zHrp and zHrp.Position.Y > -100 then
+                    if not isDead and hp > 0 and head and zHrp and zHrp.Position.Y > -100 then
                         local worldDist = (myPos - head.Position).Magnitude
                         if worldDist <= (Hub.Settings.ZombieKillAuraRange or 250) then
                             if worldDist < bestScore then
@@ -1208,7 +1249,7 @@ local vim = game:GetService("VirtualInputManager")
 
 task.spawn(function()
     while Hub.Running and genv._UrbanReloadScriptId == SCRIPT_ID do
-        task.wait(0.1)
+        task.wait(0.04)
 
         -- 1. Zombie Natural Head Size Enforcer (No Big Heads)
         pcall(function()
@@ -1227,7 +1268,7 @@ task.spawn(function()
             end
         end)
 
-        -- 2. Zombie Visual ESP Update
+        -- 2. Zombie Real-Time Visual ESP & Health Bar Update
         pcall(function()
             local hoodLocal = Workspace:FindFirstChild("HoodLocal")
             local myChar = LocalPlayer.Character
@@ -1244,29 +1285,29 @@ task.spawn(function()
             if Hub.Settings.ZombieESP and hoodLocal then
                 for _, z in ipairs(hoodLocal:GetChildren()) do
                     if z.Name:find("Zombie") then
-                        local hum = z:FindFirstChildOfClass("Humanoid")
+                        local hp, maxHp, isDead = GetZombieRealtimeData(z)
                         local head = z:FindFirstChild("Head")
                         local zHrp = z:FindFirstChild("HumanoidRootPart")
-                        if hum and hum.Health > 0 and head and zHrp and zHrp.Position.Y > -100 then
+                        if not isDead and hp > 0 and head and zHrp and zHrp.Position.Y > -100 then
                             local dist = math.floor((myPos - zHrp.Position).Magnitude)
                             if dist <= (Hub.Settings.ZombieKillAuraRange or 250) then
-                                local bb = ZombieESPStorage[z]
-                                if not bb or not bb.Parent then
+                                local bb = head:FindFirstChild("KrakenZombieESP") or ZombieESPStorage[z]
+                                if not bb or not bb.Parent or not bb:FindFirstChild("BarBg") then
+                                    if bb then pcall(function() bb:Destroy() end) end
                                     bb = Instance.new("BillboardGui")
                                     bb.Name = "KrakenZombieESP"
                                     bb.AlwaysOnTop = true
-                                    bb.Size = UDim2.new(0, 120, 0, 36)
-                                    bb.StudsOffset = Vector3.new(0, 2.5, 0)
+                                    bb.Size = UDim2.new(0, 130, 0, 42)
+                                    bb.StudsOffset = Vector3.new(0, 2.8, 0)
                                     bb.Adornee = head
                                     CollectionService:AddTag(bb, "OwnFX")
-                                    bb.Parent = head
 
                                     local title = Instance.new("TextLabel")
                                     title.Name = "Title"
-                                    title.Size = UDim2.new(1, 0, 0, 18)
+                                    title.Size = UDim2.new(1, 0, 0, 16)
                                     title.BackgroundTransparency = 1
                                     title.Font = Enum.Font.GothamBold
-                                    title.TextSize = 13
+                                    title.TextSize = 12
                                     title.TextColor3 = Color3.fromRGB(0, 255, 170)
                                     title.TextStrokeTransparency = 0.2
                                     title.Text = "🧟 " .. z.Name
@@ -1274,8 +1315,8 @@ task.spawn(function()
 
                                     local sub = Instance.new("TextLabel")
                                     sub.Name = "Sub"
-                                    sub.Position = UDim2.new(0, 0, 0, 18)
-                                    sub.Size = UDim2.new(1, 0, 0, 16)
+                                    sub.Position = UDim2.new(0, 0, 0, 16)
+                                    sub.Size = UDim2.new(1, 0, 0, 14)
                                     sub.BackgroundTransparency = 1
                                     sub.Font = Enum.Font.GothamMedium
                                     sub.TextSize = 11
@@ -1283,23 +1324,76 @@ task.spawn(function()
                                     sub.TextStrokeTransparency = 0.3
                                     sub.Parent = bb
 
+                                    local barBg = Instance.new("Frame")
+                                    barBg.Name = "BarBg"
+                                    barBg.Position = UDim2.new(0.05, 0, 0, 32)
+                                    barBg.Size = UDim2.new(0.9, 0, 0, 5)
+                                    barBg.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+                                    barBg.BorderSizePixel = 0
+                                    barBg.Parent = bb
+
+                                    local bgCorner = Instance.new("UICorner")
+                                    bgCorner.CornerRadius = UDim.new(0, 2)
+                                    bgCorner.Parent = barBg
+
+                                    local barFill = Instance.new("Frame")
+                                    barFill.Name = "BarFill"
+                                    barFill.Size = UDim2.new(1, 0, 1, 0)
+                                    barFill.BackgroundColor3 = Color3.fromRGB(0, 255, 120)
+                                    barFill.BorderSizePixel = 0
+                                    barFill.Parent = barBg
+
+                                    local fillCorner = Instance.new("UICorner")
+                                    fillCorner.CornerRadius = UDim.new(0, 2)
+                                    fillCorner.Parent = barFill
+
+                                    bb.Parent = head
                                     ZombieESPStorage[z] = bb
                                 end
 
+                                -- Realtime HP and Health Bar update
+                                local pct = math.clamp(hp / math.max(maxHp, 1), 0, 1)
                                 local sub = bb:FindFirstChild("Sub")
+                                local barBg = bb:FindFirstChild("BarBg")
+                                local barFill = barBg and barBg:FindFirstChild("BarFill")
+
                                 if sub then
-                                    sub.Text = string.format("HP: %d | %dm", math.floor(hum.Health), dist)
+                                    sub.Text = string.format("HP: %d/%d | %dm", math.floor(hp), math.floor(maxHp), dist)
+                                    if pct > 0.5 then
+                                        sub.TextColor3 = Color3.fromRGB(100, 255, 120)
+                                    elseif pct > 0.25 then
+                                        sub.TextColor3 = Color3.fromRGB(255, 220, 60)
+                                    else
+                                        sub.TextColor3 = Color3.fromRGB(255, 70, 70)
+                                    end
+                                end
+
+                                if barFill then
+                                    barFill.Size = UDim2.new(pct, 0, 1, 0)
+                                    if pct > 0.5 then
+                                        barFill.BackgroundColor3 = Color3.fromRGB(0, 255, 120)
+                                    elseif pct > 0.25 then
+                                        barFill.BackgroundColor3 = Color3.fromRGB(255, 200, 50)
+                                    else
+                                        barFill.BackgroundColor3 = Color3.fromRGB(255, 60, 60)
+                                    end
                                 end
                             else
                                 if ZombieESPStorage[z] then
                                     pcall(function() ZombieESPStorage[z]:Destroy() end)
                                     ZombieESPStorage[z] = nil
                                 end
+                                local oldBb = head:FindFirstChild("KrakenZombieESP")
+                                if oldBb then pcall(function() oldBb:Destroy() end) end
                             end
                         else
                             if ZombieESPStorage[z] then
                                 pcall(function() ZombieESPStorage[z]:Destroy() end)
                                 ZombieESPStorage[z] = nil
+                            end
+                            if head then
+                                local oldBb = head:FindFirstChild("KrakenZombieESP")
+                                if oldBb then pcall(function() oldBb:Destroy() end) end
                             end
                         end
                     end
@@ -1324,32 +1418,32 @@ task.spawn(function()
             local myPos = (myHRP and myHRP.Position) or Camera.CFrame.Position
             local hoodLocal = Workspace:FindFirstChild("HoodLocal")
 
-            -- Find closest alive zombie in farm zone
+            -- Find closest alive zombie using 100% Realtime HP
             local targetZombie = nil
             local targetHead = nil
-            local targetHum = nil
+            local targetNpcId = nil
             local minDist = math.huge
 
             if hoodLocal then
                 for _, z in ipairs(hoodLocal:GetChildren()) do
                     if z.Name:find("Zombie") then
-                        local hum = z:FindFirstChildOfClass("Humanoid")
+                        local hp, maxHp, isDead, id = GetZombieRealtimeData(z)
                         local head = z:FindFirstChild("Head")
                         local zHrp = z:FindFirstChild("HumanoidRootPart")
-                        if hum and hum.Health > 0 and head and zHrp and zHrp.Position.Y > -100 then
+                        if not isDead and hp > 0 and head and zHrp and zHrp.Position.Y > -100 then
                             local dist = (myPos - head.Position).Magnitude
                             if dist <= (Hub.Settings.ZombieKillAuraRange or 250) and dist < minDist then
                                 minDist = dist
                                 targetZombie = z
                                 targetHead = head
-                                targetHum = hum
+                                targetNpcId = id
                             end
                         end
                     end
                 end
             end
 
-            if targetZombie and targetHead and targetHum and targetHum.Health > 0 and targetHead.Position.Y > -100 then
+            if targetZombie and targetHead and targetHead.Position.Y > -100 then
                 local equippedTool = nil
                 if char then
                     for _, c in ipairs(char:GetChildren()) do
@@ -1385,7 +1479,11 @@ task.spawn(function()
                         end
 
                         local shots = 0
-                        while Hub.Running and Hub.Settings.ZombieKillAura and targetHum and targetHum.Health > 0 and targetHead and targetHead.Position.Y > -100 and shots < 6 do
+                        while Hub.Running and Hub.Settings.ZombieKillAura and targetHead and targetHead.Position.Y > -100 and shots < 6 do
+                            local curHp, _, isDeadNow = GetZombieRealtimeData(targetZombie)
+                            if isDeadNow or curHp <= 0 then
+                                break
+                            end
                             shots = shots + 1
                             Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetHead.Position)
                             if Controls then
@@ -1403,19 +1501,14 @@ task.spawn(function()
                             end
                         end
 
-                        -- Instant loot sequence upon death
+                        -- Instant loot sequence upon death using direct NPC ID
                         pcall(function()
                             if ClientState and type(ClientState.HoodLootNow) == "function" then
                                 ClientState.HoodLootNow()
                             end
                             local hoodRemote = HoodRemote or (ReplicatedStorage:FindFirstChild("HoodNPC") and ReplicatedStorage.HoodNPC:FindFirstChild("Remote"))
-                            if hoodRemote then
-                                for _, t in ipairs(getgc(true)) do
-                                    if type(t) == "table" and rawget(t, "model") == targetZombie and rawget(t, "id") then
-                                        hoodRemote:FireServer("loot", t.id, targetHead.Position)
-                                        break
-                                    end
-                                end
+                            if hoodRemote and targetNpcId then
+                                hoodRemote:FireServer("loot", targetNpcId, targetHead.Position)
                             end
                             vim:SendKeyEvent(true, Enum.KeyCode.E, false, game)
                             task.wait(0.02)
@@ -3031,9 +3124,24 @@ genv.UrbanReload_Cleanup = function()
                 if head and head:IsA("BasePart") then
                     head.Size = naturalSize
                 end
+                local bb = head and head:FindFirstChild("KrakenZombieESP")
+                if bb then pcall(function() bb:Destroy() end) end
+            end
+        end
+        for _, desc in ipairs(hoodLocal:GetDescendants()) do
+            if desc:IsA("BillboardGui") and desc.Name == "KrakenZombieESP" then
+                pcall(function() desc:Destroy() end)
             end
         end
     end
+
+    if ZombieESPStorage then
+        for model, bb in pairs(ZombieESPStorage) do
+            pcall(function() bb:Destroy() end)
+        end
+        table.clear(ZombieESPStorage)
+    end
+    LiveNpcTable = nil
 
     StopFly()
     print("[KrakenHub] Urban Reload Script cleanly unloaded.")
