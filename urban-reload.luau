@@ -422,34 +422,46 @@ local function IsZombieVisible(targetHead, targetZombie)
     local params = RaycastParams.new()
     params.FilterType = Enum.RaycastFilterType.Exclude
 
-    local ignoreList = {LocalPlayer.Character, Camera}
+    local ignoreList = {Camera}
+    -- Exclude all player characters (including local player & others in farm)
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p.Character then
+            table.insert(ignoreList, p.Character)
+        end
+    end
+
     local ch = Workspace:FindFirstChild("ClientHitboxes")
     if ch then table.insert(ignoreList, ch) end
     local gl = Workspace:FindFirstChild("GroundLoot")
     if gl then table.insert(ignoreList, gl) end
+    local hl = Workspace:FindFirstChild("HoodLocal")
+    if hl then table.insert(ignoreList, hl) end
 
     params.FilterDescendantsInstances = ignoreList
     params.IgnoreWater = true
 
-    for _ = 1, 6 do
+    for _ = 1, 10 do
         local result = Workspace:Raycast(origin, direction, params)
         if not result then
             return true
         end
-        if result.Instance:IsDescendantOf(targetZombie) then
+        local inst = result.Instance
+        if inst:IsDescendantOf(targetZombie) then
             return true
         end
-        -- Ignore other zombies in HoodLocal so zombie swarms don't act as fake walls
-        local hl = Workspace:FindFirstChild("HoodLocal")
-        if hl and result.Instance:IsDescendantOf(hl) then
-            table.insert(ignoreList, result.Instance)
-            params.FilterDescendantsInstances = ignoreList
-        -- Ignore non-collidable or transparent decorative parts / hitboxes
-        elseif (not result.Instance.CanCollide) or result.Instance.Transparency >= 0.7 or result.Instance.Name == "Hitbox" then
-            table.insert(ignoreList, result.Instance)
+
+        local nameLower = inst.Name:lower()
+        -- Ignore transparent parts, non-collidables, hitboxes, and farm/warehouse doors, gates, fences, glass, props
+        if (not inst.CanCollide) or inst.Transparency >= 0.7 or inst.Name == "Hitbox"
+           or nameLower:find("door") or nameLower:find("waredoor") or nameLower:find("gate")
+           or nameLower:find("fence") or nameLower:find("glass") or nameLower:find("window")
+           or nameLower:find("bar") or nameLower:find("prop") or nameLower:find("debris")
+           or nameLower:find("rubble") or nameLower:find("mesh") or nameLower:find("panel")
+           or nameLower:find("cloth") or nameLower:find("chain") or nameLower:find("grate") then
+            table.insert(ignoreList, inst)
             params.FilterDescendantsInstances = ignoreList
         else
-            -- Hit a solid obstacle (wall, container, door, terrain, etc.)
+            -- Hit a true solid structure wall (brick/concrete/metal building wall)
             return false
         end
     end
@@ -1503,6 +1515,10 @@ task.spawn(function()
             end
 
             if targetZombie and targetHead and targetHead.Position.Y > -100 then
+                Hub.CurrentTarget = targetZombie
+                -- 1. Camera Aim: Continuously lock camera onto zombie head
+                Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetHead.Position)
+
                 if equippedTool then
                     local currentAmmo = equippedTool:GetAttribute("Ammo") or 30
                     local isReloading = equippedTool:GetAttribute("Reloading") == true
@@ -1522,7 +1538,7 @@ task.spawn(function()
                             task.wait(0.02)
                             vim:SendKeyEvent(false, Enum.KeyCode.E, false, game)
                         end)
-                        task.wait(0.25)
+                        task.wait(0.2)
                     else
                         -- Check obstacle: if zombie is behind a wall or obstacle, HOLD FIRE!
                         local isClearLOS = true
@@ -1531,14 +1547,15 @@ task.spawn(function()
                         end
 
                         if not isClearLOS then
-                            -- Target is behind obstacle: hold fire and wait for it to emerge!
-                            task.wait(0.04)
+                            -- Target is behind obstacle: keep aiming, hold fire until it emerges!
+                            task.wait(0.03)
                         else
-                            -- Target is in clear line-of-sight: FIRE!
+                            -- Target is in clear line-of-sight: AIM & FIRE!
                             if Controls then
                                 Controls.Press("Aim", true)
                             end
                             if ClientState then
+                                ClientState.Aiming = true
                                 ClientState.RecoilScale = 0
                             end
 
@@ -1556,15 +1573,15 @@ task.spawn(function()
                                 Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetHead.Position)
                                 if Controls then
                                     Controls.Press("Fire", true)
-                                    task.wait(0.09)
+                                    task.wait(0.08)
                                     Controls.Press("Fire", false)
-                                    task.wait(0.05)
+                                    task.wait(0.04)
                                 else
                                     if typeof(mouse1press) == "function" then
                                         mouse1press()
-                                        task.wait(0.08)
+                                        task.wait(0.07)
                                         mouse1release()
-                                        task.wait(0.04)
+                                        task.wait(0.03)
                                     end
                                 end
                             end
@@ -1586,6 +1603,7 @@ task.spawn(function()
                     end
                 end
             else
+                Hub.CurrentTarget = nil
                 -- No alive zombies currently in range (waiting for respawns)
                 if Controls and Controls.IsDown and Controls.IsDown("Aim") then
                     pcall(function() Controls.Press("Aim", false) end)
@@ -2904,7 +2922,24 @@ local function InitUI()
         if v then
             task.spawn(function()
                 EnsureWeaponEquipped()
+                if Controls then
+                    pcall(function() Controls.Press("Aim", true) end)
+                end
+                if ClientState then
+                    ClientState.Aiming = true
+                    ClientState.RecoilScale = 0
+                end
             end)
+        else
+            if Controls then
+                pcall(function()
+                    Controls.Press("Fire", false)
+                    Controls.Press("Aim", false)
+                end)
+            end
+            if ClientState then
+                ClientState.Aiming = false
+            end
         end
     end)
 
