@@ -22,6 +22,16 @@ local TweenService = game:GetService("TweenService")
 local Camera = Workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 
+local Controls = nil
+pcall(function()
+    Controls = require(ReplicatedStorage:WaitForChild("Controls", 3))
+end)
+local ClientState = nil
+pcall(function()
+    ClientState = require(ReplicatedStorage:WaitForChild("Weapons", 3):WaitForChild("ClientState", 3))
+end)
+local HoodRemote = ReplicatedStorage:FindFirstChild("HoodNPC") and ReplicatedStorage.HoodNPC:FindFirstChild("Remote")
+
 -- Check game PlaceId
 if game.PlaceId ~= 84448037861644 and game.PlaceId ~= 0 then
     warn("[KrakenHub] Warning: PlaceId does not match Urban Reload (84448037861644)")
@@ -30,6 +40,7 @@ end
 -- Cleanup previous instance
 local genv = (typeof(getgenv) == "function" and getgenv()) or _G
 genv._UrbanReloadScriptId = (genv._UrbanReloadScriptId or 0) + 1
+_G._UrbanReloadScriptId = genv._UrbanReloadScriptId
 local SCRIPT_ID = genv._UrbanReloadScriptId
 
 if genv.UrbanReload_Cleanup then
@@ -267,8 +278,6 @@ local Hub = {
         ZombieAutoShoot = false,
         ZombieAutoLoot = true,
         ZombieHeadLock = true,
-        ZombieHitboxExpand = true,
-        ZombieHitboxSize = 6,
         ZombieFarmDistance = 250,
         ZombieESP = true,
     }
@@ -793,11 +802,7 @@ RunService:BindToRenderStep("KrakenAimbot", Enum.RenderPriority.Camera.Value + 1
     local bone = targetBone or (isZombie and (target:FindFirstChild("Head") or target:FindFirstChild("HumanoidRootPart"))) or GetBone(target, Hub.Settings.AimbotBone or "Head")
     if not bone then return end
 
-    -- When targeting Head or Zombie, add vertical offset (+0.25 studs) for crown precision
     local aimPos = bone.Position
-    if isZombie or (Hub.Settings.AimbotBone or "Head") == "Head" then
-        aimPos = aimPos + Vector3.new(0, 0.25, 0)
-    end
 
     local currentCF = Camera.CFrame
     local targetCF = CFrame.new(currentCF.Position, aimPos)
@@ -1179,7 +1184,7 @@ end
 -- 🧲 12. AUTO LOOT MAGNET & HALLOWEEN CLAIM
 -- ================================================
 task.spawn(function()
-    while Hub.Running and _G._UrbanReloadScriptId == SCRIPT_ID do
+    while Hub.Running and genv._UrbanReloadScriptId == SCRIPT_ID do
         task.wait(0.5)
 
         -- 1. Auto Loot Magnet
@@ -1215,7 +1220,7 @@ local ZombieESPStorage = {}
 local vim = game:GetService("VirtualInputManager")
 
 task.spawn(function()
-    while Hub.Running and _G._UrbanReloadScriptId == SCRIPT_ID do
+    while Hub.Running and genv._UrbanReloadScriptId == SCRIPT_ID do
         task.wait(0.08)
 
         -- 1. Auto Loot [E] & Money Absorption Engine
@@ -1259,24 +1264,22 @@ task.spawn(function()
             end)
         end
 
-        -- 2. Zombie Head Hitbox Expander (Direct Bullet Tracking)
-        if Hub.Settings.ZombieHitboxExpand or Hub.Settings.ZombieAutoFarm then
+        -- 2. Zombie Natural Head Size Enforcer (No Big Heads)
+        pcall(function()
             local hoodLocal = Workspace:FindFirstChild("HoodLocal")
             if hoodLocal then
-                local sz = Vector3.new(Hub.Settings.ZombieHitboxSize, Hub.Settings.ZombieHitboxSize, Hub.Settings.ZombieHitboxSize)
+                local naturalSize = Vector3.new(0.792705, 1.214349, 0.902806)
                 for _, z in ipairs(hoodLocal:GetChildren()) do
                     if z.Name:find("Zombie") then
                         local head = z:FindFirstChild("Head")
-                        if head and head:IsA("BasePart") then
-                            if head.Size ~= sz then
-                                head.Size = sz
-                                head.CanCollide = false
-                            end
+                        if head and head:IsA("BasePart") and head.Size.X > 1.8 then
+                            head.Size = naturalSize
+                            head.CanCollide = false
                         end
                     end
                 end
             end
-        end
+        end)
 
         -- 3. Zombie Visual ESP Update
         pcall(function()
@@ -1362,48 +1365,83 @@ end)
 
 -- ==============================================================
 -- 🔫 12.2 ZOMBIE AUTO SHOOT BURST ENGINE
+-- Uses Controls.Press("Aim", true) + Controls.Press("Fire", ...)
+-- directly through the weapon engine to deal real server damage!
 -- ==============================================================
 task.spawn(function()
-    while Hub.Running and _G._UrbanReloadScriptId == SCRIPT_ID do
-        task.wait(0.06)
+    while Hub.Running and genv._UrbanReloadScriptId == SCRIPT_ID do
+        task.wait(0.04)
 
         if Hub.Settings.ZombieAutoFarm and Hub.Settings.ZombieAutoShoot then
             local target, bone, isZombie = GetClosestEnemyInFOV()
-            if target and bone and isZombie then
+            if target and bone and isZombie and bone.Position.Y > -100 then
                 local char = LocalPlayer.Character
-                local equippedGun = false
+                local equippedTool = nil
                 if char then
                     for _, c in ipairs(char:GetChildren()) do
                         if c:IsA("Tool") then
-                            equippedGun = true
+                            equippedTool = c
                             break
                         end
                     end
                 end
 
-                if equippedGun then
-                    if ClientState then
-                        ClientState.Aiming = true
-                    end
+                if equippedTool then
+                    -- Check ammo & reload status
+                    local currentAmmo = equippedTool:GetAttribute("Ammo") or 30
+                    local isReloading = equippedTool:GetAttribute("Reloading") == true
 
-                    -- Snap Camera to Head
-                    local aimPos = bone.Position + Vector3.new(0, 0.25, 0)
-                    Camera.CFrame = CFrame.new(Camera.CFrame.Position, aimPos)
-
-                    -- Trigger weapon burst
-                    pcall(function()
-                        if typeof(mouse1press) == "function" then
-                            mouse1press()
-                            task.wait(0.04)
-                            mouse1release()
-                        else
-                            local cx = Camera.ViewportSize.X / 2
-                            local cy = Camera.ViewportSize.Y / 2
-                            vim:SendMouseButtonEvent(cx, cy, 0, true, game, 0)
-                            task.wait(0.04)
-                            vim:SendMouseButtonEvent(cx, cy, 0, false, game, 0)
+                    if currentAmmo <= 0 and not isReloading then
+                        if Controls then
+                            Controls.Press("Reload", true)
+                            task.wait(0.05)
+                            Controls.Press("Reload", false)
                         end
-                    end)
+                        task.wait(0.5)
+                    elseif not isReloading then
+                        -- Snap camera directly to head
+                        local aimPos = bone.Position
+                        Camera.CFrame = CFrame.new(Camera.CFrame.Position, aimPos)
+
+                        if Controls then
+                            Controls.Press("Aim", true)
+                            Camera.CFrame = CFrame.new(Camera.CFrame.Position, aimPos)
+                            Controls.Press("Fire", true)
+                            task.wait(0.10)
+                            Controls.Press("Fire", false)
+                            task.wait(0.06)
+                        else
+                            if typeof(mouse1press) == "function" then
+                                mouse1press()
+                                task.wait(0.05)
+                                mouse1release()
+                            end
+                        end
+
+                        -- Instant loot trigger if target died
+                        local hum = target:FindFirstChildOfClass("Humanoid")
+                        if not hum or hum.Health <= 0 or bone.Position.Y < -100 then
+                            pcall(function()
+                                if ClientState and type(ClientState.HoodLootNow) == "function" then
+                                    ClientState.HoodLootNow()
+                                end
+                                local hoodRemote = HoodRemote or (ReplicatedStorage:FindFirstChild("HoodNPC") and ReplicatedStorage.HoodNPC:FindFirstChild("Remote"))
+                                if hoodRemote then
+                                    for _, t in ipairs(getgc(true)) do
+                                        if type(t) == "table" and rawget(t, "model") == target and rawget(t, "id") then
+                                            hoodRemote:FireServer("loot", t.id, bone.Position)
+                                            break
+                                        end
+                                    end
+                                end
+                            end)
+                        end
+                    end
+                end
+            else
+                -- Release Aim if no target is in range
+                if Controls and Controls.IsDown and Controls.IsDown("Aim") then
+                    pcall(function() Controls.Press("Aim", false) end)
                 end
             end
         end
@@ -3002,6 +3040,27 @@ genv.UrbanReload_Cleanup = function()
         Config.Global.BloomScale = 0.8
         Config.Global.RollCooldown = 0.5
         Config.Global.RollDistance = 1.2
+    end
+
+    if Controls and Controls.Press then
+        pcall(function()
+            Controls.Press("Fire", false)
+            Controls.Press("Aim", false)
+        end)
+    end
+
+    -- Restore Zombie Heads to natural size
+    local hoodLocal = Workspace:FindFirstChild("HoodLocal")
+    if hoodLocal then
+        local naturalSize = Vector3.new(0.792705, 1.214349, 0.902806)
+        for _, z in ipairs(hoodLocal:GetChildren()) do
+            if z.Name:find("Zombie") then
+                local head = z:FindFirstChild("Head")
+                if head and head:IsA("BasePart") then
+                    head.Size = naturalSize
+                end
+            end
+        end
     end
 
     StopFly()
