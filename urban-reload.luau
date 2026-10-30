@@ -270,6 +270,7 @@ local Hub = {
         -- Zombie Auto Aim & Shoot Kill Aura
         ZombieKillAura = false,
         ZombieKillAuraRange = 250,
+        ZombieWallCheck = true,
         ZombieESP = true,
     }
 }
@@ -363,6 +364,52 @@ local function IsVisible(targetChar, targetPart)
             table.insert(ignoreList, result.Instance)
             params.FilterDescendantsInstances = ignoreList
         else
+            return false
+        end
+    end
+    return false
+end
+
+-- Check direct line of sight / wall & obstacle obstruction for Zombies
+local function IsZombieVisible(targetHead, targetZombie)
+    if not targetHead or not targetZombie then return false end
+
+    local origin = Camera.CFrame.Position
+    local destination = targetHead.Position
+    local direction = destination - origin
+    if direction.Magnitude < 0.2 then return true end
+
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+
+    local ignoreList = {LocalPlayer.Character, Camera}
+    local ch = Workspace:FindFirstChild("ClientHitboxes")
+    if ch then table.insert(ignoreList, ch) end
+    local gl = Workspace:FindFirstChild("GroundLoot")
+    if gl then table.insert(ignoreList, gl) end
+
+    params.FilterDescendantsInstances = ignoreList
+    params.IgnoreWater = true
+
+    for _ = 1, 6 do
+        local result = Workspace:Raycast(origin, direction, params)
+        if not result then
+            return true
+        end
+        if result.Instance:IsDescendantOf(targetZombie) then
+            return true
+        end
+        -- Ignore other zombies in HoodLocal so zombie swarms don't act as fake walls
+        local hl = Workspace:FindFirstChild("HoodLocal")
+        if hl and result.Instance:IsDescendantOf(hl) then
+            table.insert(ignoreList, result.Instance)
+            params.FilterDescendantsInstances = ignoreList
+        -- Ignore non-collidable or transparent decorative parts / hitboxes
+        elseif (not result.Instance.CanCollide) or result.Instance.Transparency >= 0.7 or result.Instance.Name == "Hitbox" then
+            table.insert(ignoreList, result.Instance)
+            params.FilterDescendantsInstances = ignoreList
+        else
+            -- Hit a solid obstacle (wall, container, door, terrain, etc.)
             return false
         end
     end
@@ -471,7 +518,11 @@ local function GetClosestEnemyInFOV()
                     if not isDead and hp > 0 and head and zHrp and zHrp.Position.Y > -100 then
                         local worldDist = (myPos - head.Position).Magnitude
                         if worldDist <= (Hub.Settings.ZombieKillAuraRange or 250) then
-                            if worldDist < bestScore then
+                            local visible = true
+                            if Hub.Settings.ZombieWallCheck then
+                                visible = IsZombieVisible(head, z)
+                            end
+                            if visible and worldDist < bestScore then
                                 bestScore = worldDist
                                 bestTarget = z
                                 bestBone = head
@@ -1315,14 +1366,21 @@ task.spawn(function()
 
                                 -- Realtime HP and Health Bar update
                                 local pct = math.clamp(hp / math.max(maxHp, 1), 0, 1)
+                                local title = bb:FindFirstChild("Title")
                                 local sub = bb:FindFirstChild("Sub")
                                 local barBg = bb:FindFirstChild("BarBg")
                                 local barFill = barBg and barBg:FindFirstChild("BarFill")
 
+                                local isLosClear = IsZombieVisible(head, z)
+                                if title then
+                                    title.TextColor3 = isLosClear and Color3.fromRGB(0, 255, 170) or Color3.fromRGB(255, 140, 40)
+                                end
+
                                 if sub then
-                                    sub.Text = string.format("HP: %d/%d | %dm", math.floor(hp), math.floor(maxHp), dist)
+                                    local statusTag = isLosClear and "[โล่ง]" or "[หลังกำแพง]"
+                                    sub.Text = string.format("HP: %d/%d | %dm %s", math.floor(hp), math.floor(maxHp), dist, statusTag)
                                     if pct > 0.5 then
-                                        sub.TextColor3 = Color3.fromRGB(100, 255, 120)
+                                        sub.TextColor3 = isLosClear and Color3.fromRGB(100, 255, 120) or Color3.fromRGB(255, 180, 80)
                                     elseif pct > 0.25 then
                                         sub.TextColor3 = Color3.fromRGB(255, 220, 60)
                                     else
@@ -1395,10 +1453,16 @@ task.spawn(function()
                         if not isDead and hp > 0 and head and zHrp and zHrp.Position.Y > -100 then
                             local dist = (myPos - head.Position).Magnitude
                             if dist <= (Hub.Settings.ZombieKillAuraRange or 250) and dist < minDist then
-                                minDist = dist
-                                targetZombie = z
-                                targetHead = head
-                                targetNpcId = id
+                                local visible = true
+                                if Hub.Settings.ZombieWallCheck then
+                                    visible = IsZombieVisible(head, z)
+                                end
+                                if visible then
+                                    minDist = dist
+                                    targetZombie = z
+                                    targetHead = head
+                                    targetNpcId = id
+                                end
                             end
                         end
                     end
@@ -1464,6 +1528,10 @@ task.spawn(function()
                         while Hub.Running and Hub.Settings.ZombieKillAura and targetHead and targetHead.Position.Y > -100 and shots < 6 do
                             local curHp, _, isDeadNow = GetZombieRealtimeData(targetZombie)
                             if isDeadNow or curHp <= 0 then
+                                break
+                            end
+                            -- Stop firing immediately if zombie steps behind an obstacle mid-burst
+                            if Hub.Settings.ZombieWallCheck and not IsZombieVisible(targetHead, targetZombie) then
                                 break
                             end
                             shots = shots + 1
@@ -2814,6 +2882,15 @@ local function InitUI()
     })
     ZombieKillAuraToggle:OnChanged(function(v)
         Hub.Settings.ZombieKillAura = v
+    end)
+
+    local ZombieWallCheckToggle = Tabs.World:AddToggle("ZombieWallCheckToggle", {
+        Title = "ตรวจจับสิ่งกีดขวาง (Zombie Wall Check / LOS)",
+        Description = "ไม่ยิงสิ่งกีดขวาง รอให้ซอมบี้เดินออกมาในที่โล่งก่อนค่อยยิง (ประหยัดกระสุน)",
+        Default = Hub.Settings.ZombieWallCheck
+    })
+    ZombieWallCheckToggle:OnChanged(function(v)
+        Hub.Settings.ZombieWallCheck = v
     end)
 
     local ZombieKillAuraDistSlider = Tabs.World:AddSlider("ZombieKillAuraDistSlider", {
