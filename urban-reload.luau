@@ -330,6 +330,46 @@ local function GetBone(player, boneName)
     return char:FindFirstChild("HumanoidRootPart")
 end
 
+-- Ensure firearm is equipped in character's hand (ignores consumables)
+local function EnsureWeaponEquipped()
+    local c = LocalPlayer.Character
+    if not c then return nil end
+    local h = c:FindFirstChildOfClass("Humanoid")
+    if not h or h.Health <= 0 then return nil end
+
+    local equipped = c:FindFirstChildOfClass("Tool")
+    if equipped and equipped:GetAttribute("Ammo") ~= nil then
+        return equipped
+    end
+
+    local bp = LocalPlayer:FindFirstChild("Backpack")
+    if not bp then return equipped end
+
+    local bestWeapon = nil
+    for _, t in ipairs(bp:GetChildren()) do
+        if t:IsA("Tool") then
+            local isConsumable = t.Name:find("Medkit") or t.Name:find("Drink") or t.Name:find("Kevlar") or t.Name:find("Bandage")
+            if not isConsumable then
+                if t:GetAttribute("Ammo") ~= nil then
+                    bestWeapon = t
+                    break
+                elseif not bestWeapon then
+                    bestWeapon = t
+                end
+            end
+        end
+    end
+
+    if bestWeapon then
+        h:EquipTool(bestWeapon)
+        task.wait(0.12)
+        return c:FindFirstChildOfClass("Tool")
+    end
+
+    return equipped
+end
+Hub.EnsureWeaponEquipped = EnsureWeaponEquipped
+
 -- Check direct line of sight / wall obstruction
 local function IsVisible(targetChar, targetPart)
     if not targetChar or not targetPart then return false end
@@ -518,11 +558,7 @@ local function GetClosestEnemyInFOV()
                     if not isDead and hp > 0 and head and zHrp and zHrp.Position.Y > -100 then
                         local worldDist = (myPos - head.Position).Magnitude
                         if worldDist <= (Hub.Settings.ZombieKillAuraRange or 250) then
-                            local visible = true
-                            if Hub.Settings.ZombieWallCheck then
-                                visible = IsZombieVisible(head, z)
-                            end
-                            if visible and worldDist < bestScore then
+                            if worldDist < bestScore then
                                 bestScore = worldDist
                                 bestTarget = z
                                 bestBone = head
@@ -831,7 +867,8 @@ RunService:BindToRenderStep("KrakenAimbot", Enum.RenderPriority.Camera.Value + 1
         FOVCircle.Color = Hub.Settings.FOVColor
     end
 
-    if not Hub.Settings.Aimbot then
+    local isAutoFarming = Hub.Settings.ZombieKillAura
+    if not Hub.Settings.Aimbot and not isAutoFarming then
         Hub.CurrentTarget = nil
         return
     end
@@ -860,7 +897,6 @@ RunService:BindToRenderStep("KrakenAimbot", Enum.RenderPriority.Camera.Value + 1
         aimKeyPressed = isKey
     end
 
-    local isAutoFarming = Hub.Settings.ZombieKillAura
     if not (aimKeyPressed or isAutoFarming) then
         Hub.CurrentTarget = nil
         return
@@ -1433,6 +1469,9 @@ task.spawn(function()
         task.wait(0.02)
 
         if Hub.Settings.ZombieKillAura then
+            -- 1. Ensure weapon is always equipped in hand
+            local equippedTool = EnsureWeaponEquipped()
+
             local char = LocalPlayer.Character
             local myHRP = char and char:FindFirstChild("HumanoidRootPart")
             local myPos = (myHRP and myHRP.Position) or Camera.CFrame.Position
@@ -1453,16 +1492,10 @@ task.spawn(function()
                         if not isDead and hp > 0 and head and zHrp and zHrp.Position.Y > -100 then
                             local dist = (myPos - head.Position).Magnitude
                             if dist <= (Hub.Settings.ZombieKillAuraRange or 250) and dist < minDist then
-                                local visible = true
-                                if Hub.Settings.ZombieWallCheck then
-                                    visible = IsZombieVisible(head, z)
-                                end
-                                if visible then
-                                    minDist = dist
-                                    targetZombie = z
-                                    targetHead = head
-                                    targetNpcId = id
-                                end
+                                minDist = dist
+                                targetZombie = z
+                                targetHead = head
+                                targetNpcId = id
                             end
                         end
                     end
@@ -1470,32 +1503,6 @@ task.spawn(function()
             end
 
             if targetZombie and targetHead and targetHead.Position.Y > -100 then
-                local equippedTool = nil
-                if char then
-                    for _, c in ipairs(char:GetChildren()) do
-                        if c:IsA("Tool") then
-                            equippedTool = c
-                            break
-                        end
-                    end
-                end
-
-                -- Auto-equip weapon from Backpack if unequipped
-                if not equippedTool and char then
-                    local hum = char:FindFirstChildOfClass("Humanoid")
-                    local backpack = LocalPlayer:FindFirstChild("Backpack")
-                    if hum and backpack then
-                        for _, t in ipairs(backpack:GetChildren()) do
-                            if t:IsA("Tool") then
-                                hum:EquipTool(t)
-                                equippedTool = t
-                                task.wait(0.1)
-                                break
-                            end
-                        end
-                    end
-                end
-
                 if equippedTool then
                     local currentAmmo = equippedTool:GetAttribute("Ammo") or 30
                     local isReloading = equippedTool:GetAttribute("Reloading") == true
@@ -1517,53 +1524,65 @@ task.spawn(function()
                         end)
                         task.wait(0.25)
                     else
-                        if Controls then
-                            Controls.Press("Aim", true)
-                        end
-                        if ClientState then
-                            ClientState.RecoilScale = 0
+                        -- Check obstacle: if zombie is behind a wall or obstacle, HOLD FIRE!
+                        local isClearLOS = true
+                        if Hub.Settings.ZombieWallCheck then
+                            isClearLOS = IsZombieVisible(targetHead, targetZombie)
                         end
 
-                        local shots = 0
-                        while Hub.Running and Hub.Settings.ZombieKillAura and targetHead and targetHead.Position.Y > -100 and shots < 6 do
-                            local curHp, _, isDeadNow = GetZombieRealtimeData(targetZombie)
-                            if isDeadNow or curHp <= 0 then
-                                break
-                            end
-                            -- Stop firing immediately if zombie steps behind an obstacle mid-burst
-                            if Hub.Settings.ZombieWallCheck and not IsZombieVisible(targetHead, targetZombie) then
-                                break
-                            end
-                            shots = shots + 1
-                            Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetHead.Position)
+                        if not isClearLOS then
+                            -- Target is behind obstacle: hold fire and wait for it to emerge!
+                            task.wait(0.04)
+                        else
+                            -- Target is in clear line-of-sight: FIRE!
                             if Controls then
-                                Controls.Press("Fire", true)
-                                task.wait(0.09)
-                                Controls.Press("Fire", false)
-                                task.wait(0.05)
-                            else
-                                if typeof(mouse1press) == "function" then
-                                    mouse1press()
-                                    task.wait(0.08)
-                                    mouse1release()
-                                    task.wait(0.04)
+                                Controls.Press("Aim", true)
+                            end
+                            if ClientState then
+                                ClientState.RecoilScale = 0
+                            end
+
+                            local shots = 0
+                            while Hub.Running and Hub.Settings.ZombieKillAura and targetHead and targetHead.Position.Y > -100 and shots < 6 do
+                                local curHp, _, isDeadNow = GetZombieRealtimeData(targetZombie)
+                                if isDeadNow or curHp <= 0 then
+                                    break
+                                end
+                                -- Stop firing immediately if zombie steps behind an obstacle mid-burst
+                                if Hub.Settings.ZombieWallCheck and not IsZombieVisible(targetHead, targetZombie) then
+                                    break
+                                end
+                                shots = shots + 1
+                                Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetHead.Position)
+                                if Controls then
+                                    Controls.Press("Fire", true)
+                                    task.wait(0.09)
+                                    Controls.Press("Fire", false)
+                                    task.wait(0.05)
+                                else
+                                    if typeof(mouse1press) == "function" then
+                                        mouse1press()
+                                        task.wait(0.08)
+                                        mouse1release()
+                                        task.wait(0.04)
+                                    end
                                 end
                             end
-                        end
 
-                        -- Instant loot sequence upon death using direct NPC ID
-                        pcall(function()
-                            if ClientState and type(ClientState.HoodLootNow) == "function" then
-                                ClientState.HoodLootNow()
-                            end
-                            local hoodRemote = HoodRemote or (ReplicatedStorage:FindFirstChild("HoodNPC") and ReplicatedStorage.HoodNPC:FindFirstChild("Remote"))
-                            if hoodRemote and targetNpcId then
-                                hoodRemote:FireServer("loot", targetNpcId, targetHead.Position)
-                            end
-                            vim:SendKeyEvent(true, Enum.KeyCode.E, false, game)
-                            task.wait(0.02)
-                            vim:SendKeyEvent(false, Enum.KeyCode.E, false, game)
-                        end)
+                            -- Instant loot sequence upon death using direct NPC ID
+                            pcall(function()
+                                if ClientState and type(ClientState.HoodLootNow) == "function" then
+                                    ClientState.HoodLootNow()
+                                end
+                                local hoodRemote = HoodRemote or (ReplicatedStorage:FindFirstChild("HoodNPC") and ReplicatedStorage.HoodNPC:FindFirstChild("Remote"))
+                                if hoodRemote and targetNpcId then
+                                    hoodRemote:FireServer("loot", targetNpcId, targetHead.Position)
+                                end
+                                vim:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+                                task.wait(0.02)
+                                vim:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+                            end)
+                        end
                     end
                 end
             else
@@ -2882,6 +2901,11 @@ local function InitUI()
     })
     ZombieKillAuraToggle:OnChanged(function(v)
         Hub.Settings.ZombieKillAura = v
+        if v then
+            task.spawn(function()
+                EnsureWeaponEquipped()
+            end)
+        end
     end)
 
     local ZombieWallCheckToggle = Tabs.World:AddToggle("ZombieWallCheckToggle", {
