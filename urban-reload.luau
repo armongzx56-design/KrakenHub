@@ -267,13 +267,7 @@ local Hub = {
         HalloweenESP = true,
         ATMESP = false,
 
-        -- Automation
-        AutoLootMagnet = false,
-        AutoClaimHalloween = false,
-        AutoSafeCrack = false,
-        SelectedSafe = "Safe 1",
-
-        -- Zombie Kill Aura
+        -- Zombie Auto Aim & Shoot Kill Aura
         ZombieKillAura = false,
         ZombieKillAuraRange = 250,
         ZombieESP = true,
@@ -465,8 +459,33 @@ local function GetClosestEnemyInFOV()
     local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
     local myPos = (myHRP and myHRP.Position) or Camera.CFrame.Position
 
-    -- 1. Check Players if not in dedicated Zombie Auto Farm mode
-    if not (Hub.Settings.ZombieAutoFarm and Hub.Settings.ZombieAutoShoot) then
+    -- 1. Check Zombies first if ZombieKillAura is active (uses 100% Realtime HP)
+    if Hub.Settings.ZombieKillAura then
+        local hoodLocal = Workspace:FindFirstChild("HoodLocal")
+        if hoodLocal then
+            for _, z in ipairs(hoodLocal:GetChildren()) do
+                if z.Name:find("Zombie") then
+                    local hp, maxHp, isDead = GetZombieRealtimeData(z)
+                    local head = z:FindFirstChild("Head") or z:FindFirstChild("HumanoidRootPart")
+                    local zHrp = z:FindFirstChild("HumanoidRootPart")
+                    if not isDead and hp > 0 and head and zHrp and zHrp.Position.Y > -100 then
+                        local worldDist = (myPos - head.Position).Magnitude
+                        if worldDist <= (Hub.Settings.ZombieKillAuraRange or 250) then
+                            if worldDist < bestScore then
+                                bestScore = worldDist
+                                bestTarget = z
+                                bestBone = head
+                                isZombieTarget = true
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- 2. Check Players if not targeting a zombie
+    if not isZombieTarget then
         for _, player in ipairs(Players:GetPlayers()) do
             if IsTargetValid(player) then
                 local bone = GetBone(player, Hub.Settings.AimbotBone)
@@ -503,31 +522,6 @@ local function GetClosestEnemyInFOV()
                                         isZombieTarget = false
                                     end
                                 end
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    -- 2. Check Zombies if ZombieKillAura is active (uses 100% Realtime HP)
-    if Hub.Settings.ZombieKillAura and not bestTarget then
-        local hoodLocal = Workspace:FindFirstChild("HoodLocal")
-        if hoodLocal then
-            for _, z in ipairs(hoodLocal:GetChildren()) do
-                if z.Name:find("Zombie") then
-                    local hp, maxHp, isDead = GetZombieRealtimeData(z)
-                    local head = z:FindFirstChild("Head") or z:FindFirstChild("HumanoidRootPart")
-                    local zHrp = z:FindFirstChild("HumanoidRootPart")
-                    if not isDead and hp > 0 and head and zHrp and zHrp.Position.Y > -100 then
-                        local worldDist = (myPos - head.Position).Magnitude
-                        if worldDist <= (Hub.Settings.ZombieKillAuraRange or 250) then
-                            if worldDist < bestScore then
-                                bestScore = worldDist
-                                bestTarget = z
-                                bestBone = head
-                                isZombieTarget = true
                             end
                         end
                     end
@@ -815,7 +809,7 @@ RunService:BindToRenderStep("KrakenAimbot", Enum.RenderPriority.Camera.Value + 1
         aimKeyPressed = isKey
     end
 
-    local isAutoFarming = Hub.Settings.ZombieAutoFarm and Hub.Settings.ZombieAutoShoot
+    local isAutoFarming = Hub.Settings.ZombieKillAura
     if not (aimKeyPressed or isAutoFarming) then
         Hub.CurrentTarget = nil
         return
@@ -834,8 +828,8 @@ RunService:BindToRenderStep("KrakenAimbot", Enum.RenderPriority.Camera.Value + 1
 
     local currentCF = Camera.CFrame
     local targetCF = CFrame.new(currentCF.Position, aimPos)
-    -- Smoothing formula from ssss.txt: 0 = instant 100% lock, > 0 = organic lerp
-    local alpha = (Hub.Settings.AimbotSmoothing <= 0) and 1 or math.clamp(Hub.Settings.AimbotSmoothing, 0.01, 1)
+    -- Instant 100% lock when targeting zombies, or smoothing formula for players
+    local alpha = (Hub.Settings.AimbotSmoothing <= 0 or isZombie) and 1 or math.clamp(Hub.Settings.AimbotSmoothing, 0.01, 1)
     Camera.CFrame = currentCF:Lerp(targetCF, alpha)
 end)
 
@@ -1208,38 +1202,6 @@ local function UpdateSafeESP()
     end
 end
 
--- ================================================
--- 🧲 12. AUTO LOOT MAGNET & HALLOWEEN CLAIM
--- ================================================
-task.spawn(function()
-    while Hub.Running and genv._UrbanReloadScriptId == SCRIPT_ID do
-        task.wait(0.5)
-
-        -- 1. Auto Loot Magnet
-        if Hub.Settings.AutoLootMagnet and Remotes and Remotes:FindFirstChild("Loot") then
-            local gl = Workspace:FindFirstChild("GroundLoot")
-            if gl then
-                for _, item in ipairs(gl:GetChildren()) do
-                    pcall(function()
-                        Remotes.Loot:FireServer("pick", item)
-                    end)
-                end
-            end
-        end
-
-        -- 2. Auto Claim Halloween Quests
-        if Hub.Settings.AutoClaimHalloween then
-            local hq = ReplicatedStorage:FindFirstChild("HalloweenQuest")
-            if hq then
-                pcall(function()
-                    hq:FireServer("claim", 1)
-                    hq:FireServer("claim", 2)
-                    hq:FireServer("claim", 3)
-                end)
-            end
-        end
-    end
-end)
 
 -- ==============================================================
 -- 🧟‍♂️ 12.1 ZOMBIE AUTO FARM, AUTO LOOT [E] & HITBOX ENGINE
@@ -1454,23 +1416,43 @@ task.spawn(function()
                     end
                 end
 
+                -- Auto-equip weapon from Backpack if unequipped
+                if not equippedTool and char then
+                    local hum = char:FindFirstChildOfClass("Humanoid")
+                    local backpack = LocalPlayer:FindFirstChild("Backpack")
+                    if hum and backpack then
+                        for _, t in ipairs(backpack:GetChildren()) do
+                            if t:IsA("Tool") then
+                                hum:EquipTool(t)
+                                equippedTool = t
+                                task.wait(0.1)
+                                break
+                            end
+                        end
+                    end
+                end
+
                 if equippedTool then
                     local currentAmmo = equippedTool:GetAttribute("Ammo") or 30
                     local isReloading = equippedTool:GetAttribute("Reloading") == true
 
-                    if currentAmmo <= 0 and not isReloading then
-                        if Controls then
+                    if currentAmmo <= 0 or isReloading then
+                        if not isReloading and Controls then
                             Controls.Press("Reload", true)
                             task.wait(0.04)
                             Controls.Press("Reload", false)
                         end
+                        -- Sweep loot while waiting for reload
                         pcall(function()
                             if ClientState and type(ClientState.HoodLootNow) == "function" then
                                 ClientState.HoodLootNow()
                             end
+                            vim:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+                            task.wait(0.02)
+                            vim:SendKeyEvent(false, Enum.KeyCode.E, false, game)
                         end)
-                        task.wait(0.35)
-                    elseif not isReloading then
+                        task.wait(0.25)
+                    else
                         if Controls then
                             Controls.Press("Aim", true)
                         end
@@ -2821,13 +2803,13 @@ local function InitUI()
     -- 🌾 FARM & WORLD TAB (หมวดฟาร์ม & โลก)
     -- ================================================
     -- ================================================
-    -- ⚔️ ZOMBIE KILL AURA & LOOT (คิลออร่าซอมบี้)
+    -- ⚔️ AUTO AIM & SHOOT ZOMBIES (เล็งและยิงซอมบี้อัตโนมัติ)
     -- ================================================
-    Tabs.World:AddSection("⚔️ คิลออร่าซอมบี้ (Zombie Kill Aura)")
+    Tabs.World:AddSection("⚔️ เล็งและยิงซอมบี้อัตโนมัติ (Auto Aim & Shoot Zombies)")
 
     local ZombieKillAuraToggle = Tabs.World:AddToggle("ZombieKillAuraToggle", {
-        Title = "เปิดใช้งานคิลออร่าซอมบี้ (Zombie Kill Aura)",
-        Description = "ฆ่าซอมบี้ทั้งหมดในจุดฟาร์มอัตโนมัติ วนลูปเกิดใหม่ฆ่าทันที + กด E ดูดเงิน",
+        Title = "เริ่มเล็งและยิงซอมบี้อัตโนมัติ (Auto Aim & Shoot Zombies)",
+        Description = "เล็งหัวและยิงซอมบี้ทั้งหมดในจุดฟาร์มอัตโนมัติ วนลูปเกิดใหม่ก็ยิง + ดูดเงิน",
         Default = Hub.Settings.ZombieKillAura
     })
     ZombieKillAuraToggle:OnChanged(function(v)
@@ -2835,8 +2817,8 @@ local function InitUI()
     end)
 
     local ZombieKillAuraDistSlider = Tabs.World:AddSlider("ZombieKillAuraDistSlider", {
-        Title = "ระยะตรวจจับคิลออร่า (Kill Aura Range)",
-        Description = "ระยะสแกนและสังหารซอมบี้รอบตัว (แนะนำ 250 studs)",
+        Title = "ระยะตรวจจับซอมบี้ (Target Range)",
+        Description = "ระยะสแกน เล็ง และสังหารซอมบี้รอบตัว (แนะนำ 250 studs)",
         Min = 50,
         Max = 400,
         Default = Hub.Settings.ZombieKillAuraRange,
@@ -2848,31 +2830,11 @@ local function InitUI()
 
     local ZombieESPToggle = Tabs.World:AddToggle("ZombieESPToggle", {
         Title = "มองทะลุซอมบี้ (Zombie ESP)",
-        Description = "แสดงชื่อ ระยะ และหลอดเลือดซอมบี้ทั้งหมด",
+        Description = "แสดงชื่อ ระยะ และหลอดเลือดซอมบี้แบบ Real-time",
         Default = Hub.Settings.ZombieESP
     })
     ZombieESPToggle:OnChanged(function(v)
         Hub.Settings.ZombieESP = v
-    end)
-
-    Tabs.World:AddSection("ระบบฟาร์มอัตโนมัติ (Auto Farming)")
-
-    local LootMagnetToggle = Tabs.World:AddToggle("LootMagnetToggle", {
-        Title = "ดูดเงินและของตกพื้นอัตโนมัติ (Auto Loot Magnet)",
-        Description = "ดึงเงินและไอเทมที่ตกอยู่ตามพื้นรอบตัวเข้ากระเป๋าอัตโนมัติ",
-        Default = Hub.Settings.AutoLootMagnet
-    })
-    LootMagnetToggle:OnChanged(function(v)
-        Hub.Settings.AutoLootMagnet = v
-    end)
-
-    local AutoHalloweenToggle = Tabs.World:AddToggle("AutoHalloweenToggle", {
-        Title = "กดรับเควสฮาโลวีนอัตโนมัติ (Auto Claim Halloween Quests)",
-        Description = "กดรับเควสอีเวนต์ฮาโลวีนระดับ 1 ถึง 3 อัตโนมัติทันทีที่พร้อมรับ",
-        Default = Hub.Settings.AutoClaimHalloween
-    })
-    AutoHalloweenToggle:OnChanged(function(v)
-        Hub.Settings.AutoClaimHalloween = v
     end)
 
     Tabs.World:AddSection("ระบบฝากเงินด่วน (Quick Banking)")
