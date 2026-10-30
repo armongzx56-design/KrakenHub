@@ -261,6 +261,16 @@ local Hub = {
         AutoClaimHalloween = false,
         AutoSafeCrack = false,
         SelectedSafe = "Safe 1",
+
+        -- Zombie Auto Farm & Targeting
+        ZombieAutoFarm = false,
+        ZombieAutoShoot = false,
+        ZombieAutoLoot = true,
+        ZombieHeadLock = true,
+        ZombieHitboxExpand = true,
+        ZombieHitboxSize = 6,
+        ZombieFarmDistance = 250,
+        ZombieESP = true,
     }
 }
 genv.KrakenHub = Hub
@@ -396,57 +406,90 @@ local function IsTargetValid(player)
     return true
 end
 
--- Target Selection in FOV (Prioritizes Physically Close Enemies in 3D Studs)
+-- Target Selection in FOV (Prioritizes Physically Close Enemies & Zombies in 3D Studs)
 local function GetClosestEnemyInFOV()
     local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     local bestTarget = nil
+    local bestBone = nil
     local bestScore = math.huge
+    local isZombieTarget = false
 
     local myChar = LocalPlayer.Character
     local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
     local myPos = (myHRP and myHRP.Position) or Camera.CFrame.Position
 
-    for _, player in ipairs(Players:GetPlayers()) do
-        if IsTargetValid(player) then
-            local bone = GetBone(player, Hub.Settings.AimbotBone)
-            if bone then
-                local worldDist = (myPos - bone.Position).Magnitude
-
-                -- Check max 3D distance limit
-                if worldDist <= Hub.Settings.AimbotMaxDist then
-                    local screenPos, depth, onScreen = WorldToViewport(bone.Position)
-                    if onScreen and depth > 0 then
-                        local screenDist = (screenPos - center).Magnitude
-
-                        -- Check FOV circle limit
-                        if screenDist <= Hub.Settings.AimbotFOV then
-                            -- Check Wall Check if enabled
-                            local visible = true
-                            if Hub.Settings.AimbotWallCheck then
-                                visible = IsVisible(player.Character, bone)
-                            end
-
-                            if visible then
-                                local score = 0
-                                if Hub.Settings.AimbotPriority == "Distance" then
-                                    -- Distance priority: Closest 3D enemy wins (screenDist is a minor tiebreaker)
-                                    score = worldDist + (screenDist * 0.05)
-                                elseif Hub.Settings.AimbotPriority == "Crosshair" then
-                                    -- Crosshair priority: Closest to screen center
-                                    score = screenDist
-                                else -- "Smart"
-                                    -- Hybrid priority: 70% 3D world distance + 30% screen distance
-                                    score = (worldDist * 0.7) + (screenDist * 0.3)
+    -- 1. Check Players if not in dedicated Zombie Auto Farm mode
+    if not (Hub.Settings.ZombieAutoFarm and Hub.Settings.ZombieAutoShoot) then
+        for _, player in ipairs(Players:GetPlayers()) do
+            if IsTargetValid(player) then
+                local bone = GetBone(player, Hub.Settings.AimbotBone)
+                if bone then
+                    local worldDist = (myPos - bone.Position).Magnitude
+                    if worldDist <= Hub.Settings.AimbotMaxDist then
+                        local screenPos, depth, onScreen = WorldToViewport(bone.Position)
+                        if onScreen and depth > 0 then
+                            local screenDist = (screenPos - center).Magnitude
+                            if screenDist <= Hub.Settings.AimbotFOV then
+                                local visible = true
+                                if Hub.Settings.AimbotWallCheck then
+                                    visible = IsVisible(player.Character, bone)
                                 end
 
-                                -- Stickiness bonus to prevent erratic target swapping while holding aim
-                                if Hub.CurrentTarget == player then
-                                    score = score - 15
+                                if visible then
+                                    local score = 0
+                                    if Hub.Settings.AimbotPriority == "Distance" then
+                                        score = worldDist + (screenDist * 0.05)
+                                    elseif Hub.Settings.AimbotPriority == "Crosshair" then
+                                        score = screenDist
+                                    else
+                                        score = (worldDist * 0.7) + (screenDist * 0.3)
+                                    end
+
+                                    if Hub.CurrentTarget == player then
+                                        score = score - 15
+                                    end
+
+                                    if score < bestScore then
+                                        bestScore = score
+                                        bestTarget = player
+                                        bestBone = bone
+                                        isZombieTarget = false
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- 2. Check Zombies if ZombieAutoFarm or ZombieHeadLock is active
+    if (Hub.Settings.ZombieAutoFarm or Hub.Settings.ZombieHeadLock) and (not bestTarget or Hub.Settings.ZombieAutoFarm) then
+        local hoodLocal = Workspace:FindFirstChild("HoodLocal")
+        if hoodLocal then
+            for _, z in ipairs(hoodLocal:GetChildren()) do
+                if z.Name:find("Zombie") then
+                    local hum = z:FindFirstChildOfClass("Humanoid")
+                    local head = z:FindFirstChild("Head") or z:FindFirstChild("HumanoidRootPart")
+                    local zHrp = z:FindFirstChild("HumanoidRootPart")
+                    if hum and hum.Health > 0 and head and zHrp and zHrp.Position.Y > -100 then
+                        local worldDist = (myPos - head.Position).Magnitude
+                        if worldDist <= Hub.Settings.ZombieFarmDistance then
+                            local screenPos, depth, onScreen = WorldToViewport(head.Position)
+                            local maxFov = Hub.Settings.ZombieAutoFarm and math.max(Hub.Settings.AimbotFOV, 350) or Hub.Settings.AimbotFOV
+                            local inFov = onScreen and depth > 0 and ((screenPos - center).Magnitude <= maxFov)
+                            if inFov or Hub.Settings.ZombieAutoFarm then
+                                local score = worldDist + (inFov and (screenPos - center).Magnitude * 0.05 or 40)
+                                if Hub.CurrentTarget == z then
+                                    score = score - 20
                                 end
 
                                 if score < bestScore then
                                     bestScore = score
-                                    bestTarget = player
+                                    bestTarget = z
+                                    bestBone = head
+                                    isZombieTarget = true
                                 end
                             end
                         end
@@ -457,7 +500,9 @@ local function GetClosestEnemyInFOV()
     end
 
     Hub.CurrentTarget = bestTarget
-    return bestTarget
+    Hub.CurrentTargetBone = bestBone
+    Hub.IsTargetingZombie = isZombieTarget
+    return bestTarget, bestBone, isZombieTarget
 end
 
 local function makeWritable(tbl)
@@ -733,24 +778,24 @@ RunService:BindToRenderStep("KrakenAimbot", Enum.RenderPriority.Camera.Value + 1
         aimKeyPressed = isKey
     end
 
-    if not aimKeyPressed then
+    local isAutoFarming = Hub.Settings.ZombieAutoFarm and Hub.Settings.ZombieAutoShoot
+    if not (aimKeyPressed or isAutoFarming) then
         Hub.CurrentTarget = nil
         return
     end
 
-    local target = GetClosestEnemyInFOV()
+    local target, targetBone, isZombie = GetClosestEnemyInFOV()
     if not target then
         Hub.CurrentTarget = nil
         return
     end
 
-    local bone = GetBone(target, Hub.Settings.AimbotBone or "Head")
+    local bone = targetBone or (isZombie and (target:FindFirstChild("Head") or target:FindFirstChild("HumanoidRootPart"))) or GetBone(target, Hub.Settings.AimbotBone or "Head")
     if not bone then return end
 
-    -- When targeting Head, add a slight vertical offset (+0.25 studs) so raycasts
-    -- enter directly into the upper crown of the skull, avoiding torso/limb collisions
+    -- When targeting Head or Zombie, add vertical offset (+0.25 studs) for crown precision
     local aimPos = bone.Position
-    if (Hub.Settings.AimbotBone or "Head") == "Head" then
+    if isZombie or (Hub.Settings.AimbotBone or "Head") == "Head" then
         aimPos = aimPos + Vector3.new(0, 0.25, 0)
     end
 
@@ -1158,6 +1203,208 @@ task.spawn(function()
                     hq:FireServer("claim", 2)
                     hq:FireServer("claim", 3)
                 end)
+            end
+        end
+    end
+end)
+
+-- ==============================================================
+-- 🧟‍♂️ 12.1 ZOMBIE AUTO FARM, AUTO LOOT [E] & HITBOX ENGINE
+-- ==============================================================
+local ZombieESPStorage = {}
+local vim = game:GetService("VirtualInputManager")
+
+task.spawn(function()
+    while Hub.Running and _G._UrbanReloadScriptId == SCRIPT_ID do
+        task.wait(0.08)
+
+        -- 1. Auto Loot [E] & Money Absorption Engine
+        if Hub.Settings.ZombieAutoLoot or Hub.Settings.ZombieAutoFarm then
+            -- Layer 1: Native HoodLootNow call
+            pcall(function()
+                if ClientState and type(ClientState.HoodLootNow) == "function" then
+                    ClientState.HoodLootNow()
+                end
+            end)
+
+            -- Layer 2: Virtual Key [E] press simulation
+            pcall(function()
+                vim:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+                task.wait(0.03)
+                vim:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+            end)
+
+            -- Layer 3: Direct Remote Loot dispatch for all dead corpses in memory
+            pcall(function()
+                local hoodRemote = ReplicatedStorage:FindFirstChild("HoodNPC") and ReplicatedStorage.HoodNPC:FindFirstChild("Remote")
+                if hoodRemote then
+                    for _, t in ipairs(getgc(true)) do
+                        if type(t) == "table" and rawget(t, "id") and rawget(t, "state") == "dead" then
+                            local pos = (t.e and t.e.torso and t.e.torso.Position) or (t.model and t.model:FindFirstChild("HumanoidRootPart") and t.model.HumanoidRootPart.Position) or Vector3.zero
+                            hoodRemote:FireServer("loot", t.id, pos)
+                        end
+                    end
+                end
+            end)
+
+            -- Layer 4: Sweep ground loot & cash notes
+            pcall(function()
+                local lootRemote = Remotes and Remotes:FindFirstChild("Loot")
+                local gl = Workspace:FindFirstChild("GroundLoot")
+                if lootRemote and gl then
+                    for _, item in ipairs(gl:GetChildren()) do
+                        lootRemote:FireServer("pick", item)
+                    end
+                end
+            end)
+        end
+
+        -- 2. Zombie Head Hitbox Expander (Direct Bullet Tracking)
+        if Hub.Settings.ZombieHitboxExpand or Hub.Settings.ZombieAutoFarm then
+            local hoodLocal = Workspace:FindFirstChild("HoodLocal")
+            if hoodLocal then
+                local sz = Vector3.new(Hub.Settings.ZombieHitboxSize, Hub.Settings.ZombieHitboxSize, Hub.Settings.ZombieHitboxSize)
+                for _, z in ipairs(hoodLocal:GetChildren()) do
+                    if z.Name:find("Zombie") then
+                        local head = z:FindFirstChild("Head")
+                        if head and head:IsA("BasePart") then
+                            if head.Size ~= sz then
+                                head.Size = sz
+                                head.CanCollide = false
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        -- 3. Zombie Visual ESP Update
+        pcall(function()
+            local hoodLocal = Workspace:FindFirstChild("HoodLocal")
+            local myChar = LocalPlayer.Character
+            local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
+            local myPos = (myHRP and myHRP.Position) or Camera.CFrame.Position
+
+            for model, bb in pairs(ZombieESPStorage) do
+                if not model.Parent or not Hub.Settings.ZombieESP then
+                    pcall(function() bb:Destroy() end)
+                    ZombieESPStorage[model] = nil
+                end
+            end
+
+            if Hub.Settings.ZombieESP and hoodLocal then
+                for _, z in ipairs(hoodLocal:GetChildren()) do
+                    if z.Name:find("Zombie") then
+                        local hum = z:FindFirstChildOfClass("Humanoid")
+                        local head = z:FindFirstChild("Head")
+                        local zHrp = z:FindFirstChild("HumanoidRootPart")
+                        if hum and hum.Health > 0 and head and zHrp and zHrp.Position.Y > -100 then
+                            local dist = math.floor((myPos - zHrp.Position).Magnitude)
+                            if dist <= Hub.Settings.ZombieFarmDistance then
+                                local bb = ZombieESPStorage[z]
+                                if not bb or not bb.Parent then
+                                    bb = Instance.new("BillboardGui")
+                                    bb.Name = "KrakenZombieESP"
+                                    bb.AlwaysOnTop = true
+                                    bb.Size = UDim2.new(0, 120, 0, 36)
+                                    bb.StudsOffset = Vector3.new(0, 2.5, 0)
+                                    bb.Adornee = head
+                                    CollectionService:AddTag(bb, "OwnFX")
+                                    bb.Parent = head
+
+                                    local title = Instance.new("TextLabel")
+                                    title.Name = "Title"
+                                    title.Size = UDim2.new(1, 0, 0, 18)
+                                    title.BackgroundTransparency = 1
+                                    title.Font = Enum.Font.GothamBold
+                                    title.TextSize = 13
+                                    title.TextColor3 = Color3.fromRGB(0, 255, 170)
+                                    title.TextStrokeTransparency = 0.2
+                                    title.Text = "🧟 " .. z.Name
+                                    title.Parent = bb
+
+                                    local sub = Instance.new("TextLabel")
+                                    sub.Name = "Sub"
+                                    sub.Position = UDim2.new(0, 0, 0, 18)
+                                    sub.Size = UDim2.new(1, 0, 0, 16)
+                                    sub.BackgroundTransparency = 1
+                                    sub.Font = Enum.Font.GothamMedium
+                                    sub.TextSize = 11
+                                    sub.TextColor3 = Color3.fromRGB(255, 255, 255)
+                                    sub.TextStrokeTransparency = 0.3
+                                    sub.Parent = bb
+
+                                    ZombieESPStorage[z] = bb
+                                end
+
+                                local sub = bb:FindFirstChild("Sub")
+                                if sub then
+                                    sub.Text = string.format("HP: %d | %dm", math.floor(hum.Health), dist)
+                                end
+                            else
+                                if ZombieESPStorage[z] then
+                                    pcall(function() ZombieESPStorage[z]:Destroy() end)
+                                    ZombieESPStorage[z] = nil
+                                end
+                            end
+                        else
+                            if ZombieESPStorage[z] then
+                                pcall(function() ZombieESPStorage[z]:Destroy() end)
+                                ZombieESPStorage[z] = nil
+                            end
+                        end
+                    end
+                end
+            end
+        end)
+    end
+end)
+
+-- ==============================================================
+-- 🔫 12.2 ZOMBIE AUTO SHOOT BURST ENGINE
+-- ==============================================================
+task.spawn(function()
+    while Hub.Running and _G._UrbanReloadScriptId == SCRIPT_ID do
+        task.wait(0.06)
+
+        if Hub.Settings.ZombieAutoFarm and Hub.Settings.ZombieAutoShoot then
+            local target, bone, isZombie = GetClosestEnemyInFOV()
+            if target and bone and isZombie then
+                local char = LocalPlayer.Character
+                local equippedGun = false
+                if char then
+                    for _, c in ipairs(char:GetChildren()) do
+                        if c:IsA("Tool") then
+                            equippedGun = true
+                            break
+                        end
+                    end
+                end
+
+                if equippedGun then
+                    if ClientState then
+                        ClientState.Aiming = true
+                    end
+
+                    -- Snap Camera to Head
+                    local aimPos = bone.Position + Vector3.new(0, 0.25, 0)
+                    Camera.CFrame = CFrame.new(Camera.CFrame.Position, aimPos)
+
+                    -- Trigger weapon burst
+                    pcall(function()
+                        if typeof(mouse1press) == "function" then
+                            mouse1press()
+                            task.wait(0.04)
+                            mouse1release()
+                        else
+                            local cx = Camera.ViewportSize.X / 2
+                            local cy = Camera.ViewportSize.Y / 2
+                            vim:SendMouseButtonEvent(cx, cy, 0, true, game, 0)
+                            task.wait(0.04)
+                            vim:SendMouseButtonEvent(cx, cy, 0, false, game, 0)
+                        end
+                    end)
+                end
             end
         end
     end
@@ -2446,6 +2693,65 @@ local function InitUI()
     -- ================================================
     -- 🌾 FARM & WORLD TAB (หมวดฟาร์ม & โลก)
     -- ================================================
+    Tabs.World:AddSection("🧟‍♂️ ฟาร์มซอมบี้อัตโนมัติ (Zombie Auto Farm)")
+
+    local ZombieFarmToggle = Tabs.World:AddToggle("ZombieFarmToggle", {
+        Title = "เปิดใช้งานออโต้ฟาร์มซอมบี้ (Auto Farm Zombies)",
+        Description = "ล็อคหัวซอมบี้ + ยิงอัตโนมัติ + ดูดเงินรางวัลทันที",
+        Default = Hub.Settings.ZombieAutoFarm
+    })
+    ZombieFarmToggle:OnChanged(function(v)
+        Hub.Settings.ZombieAutoFarm = v
+    end)
+
+    local ZombieShootToggle = Tabs.World:AddToggle("ZombieShootToggle", {
+        Title = "ยิงหัวซอมบี้อัตโนมัติ (Auto Shoot Heads)",
+        Description = "เล็งหัวและยิงซอมบี้อัตโนมัติเมื่อถือปืนและอยู่ในระยะ",
+        Default = Hub.Settings.ZombieAutoShoot
+    })
+    ZombieShootToggle:OnChanged(function(v)
+        Hub.Settings.ZombieAutoShoot = v
+    end)
+
+    local ZombieLootToggle = Tabs.World:AddToggle("ZombieLootToggle", {
+        Title = "ออโต้กด E รูทของ/เงินด่วน (Auto Loot [E] & Cash)",
+        Description = "กด E ดูดเงินรางวัลจากซอมบี้ที่ตายทันทีทุกนัด",
+        Default = Hub.Settings.ZombieAutoLoot
+    })
+    ZombieLootToggle:OnChanged(function(v)
+        Hub.Settings.ZombieAutoLoot = v
+    end)
+
+    local ZombieHeadLockToggle = Tabs.World:AddToggle("ZombieHeadLockToggle", {
+        Title = "Aimbot ล็อคหัวซอมบี้ (Aimbot Locks Zombies)",
+        Description = "รวมซอมบี้ในระบบช่วยเล็ง ล็อคหัว 100% ทุกนัด",
+        Default = Hub.Settings.ZombieHeadLock
+    })
+    ZombieHeadLockToggle:OnChanged(function(v)
+        Hub.Settings.ZombieHeadLock = v
+    end)
+
+    local ZombieDistSlider = Tabs.World:AddSlider("ZombieDistSlider", {
+        Title = "ระยะฟาร์มซอมบี้ (Farm Distance)",
+        Description = "ระยะตรวจจับและล็อคซอมบี้ (ระยะแนะนำ 250 studs)",
+        Min = 50,
+        Max = 400,
+        Default = Hub.Settings.ZombieFarmDistance,
+        Rounding = 0
+    })
+    ZombieDistSlider:OnChanged(function(v)
+        Hub.Settings.ZombieFarmDistance = v
+    end)
+
+    local ZombieESPToggle = Tabs.World:AddToggle("ZombieESPToggle", {
+        Title = "มองทะลุซอมบี้ (Zombie ESP)",
+        Description = "แสดงชื่อ ระยะ และหลอดเลือดซอมบี้ทั้งหมด",
+        Default = Hub.Settings.ZombieESP
+    })
+    ZombieESPToggle:OnChanged(function(v)
+        Hub.Settings.ZombieESP = v
+    end)
+
     Tabs.World:AddSection("ระบบฟาร์มอัตโนมัติ (Auto Farming)")
 
     local LootMagnetToggle = Tabs.World:AddToggle("LootMagnetToggle", {
