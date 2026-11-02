@@ -96,6 +96,35 @@ end
 
 local function verifyKey(key)
     if not key or key == "" then return false end
+    key = string.gsub(tostring(key), "%s+", "")
+    local upperKey = string.upper(key)
+
+    -- 1. ตรวจสอบคีย์ประเภท KrakenHub License Key จาก Discord Bot (KRAKEN-XXXX-XXXX-XXXX)
+    if string.sub(upperKey, 1, 7) == "KRAKEN-" then
+        local p1, p2, p3 = string.match(upperKey, "^KRAKEN%-([%w]+)%-([%w]+)%-([%w]+)$")
+        if p1 and p2 and p3 and #p1 >= 3 and #p2 >= 3 and #p3 >= 3 then
+            local existingExpiry = nil
+            if readfile and isfile and isfile("KrakenHub_Key_Expiry.txt") then
+                local rawExp = readfile("KrakenHub_Key_Expiry.txt")
+                if rawExp and tonumber(rawExp) then
+                    local expNum = tonumber(rawExp)
+                    if expNum > os.time() then
+                        existingExpiry = expNum
+                    end
+                end
+            end
+
+            local expiry = existingExpiry or (os.time() + (30 * 86400))
+            _G._KrakenKeyExpiry = expiry
+            if writefile then
+                pcall(writefile, "KrakenHub_Key_Expiry.txt", tostring(expiry))
+                pcall(writefile, KEY_FILE, key)
+            end
+            return true
+        end
+    end
+
+    -- 2. ตรวจสอบคีย์ Platoboost
     local nonce = generateNonce();
     local endpoint = host .. "/public/whitelist/" .. fToString(service) .. "?identifier=" .. lDigest(fGetHwid()) .. "&key=" .. key;
     if useNonce then endpoint = endpoint .. "&nonce=" .. nonce end
@@ -136,7 +165,7 @@ local function SaveKeyToFile(key)
     end
 end
 
-    local savedKey = ReadSavedKey()
+    local savedKey = (_G.KrakenKey and tostring(_G.KrakenKey)) or ReadSavedKey()
     if savedKey and savedKey ~= "" and verifyKey(savedKey) then
         _KrakenKeyPassed = true
         _G._KrakenKeyVerified = true
@@ -304,7 +333,7 @@ Title.TextTransparency = 1
 local SubTitle = Instance.new("TextLabel", MainFrame)
 SubTitle.Size = UDim2.new(1, -110, 0, 18)
 SubTitle.Position = UDim2.new(0, 24, 0, 46)
-SubTitle.Text = "Sailueatarchiwa Edition | Powered by Platoboost"
+SubTitle.Text = "Sailueat Archiwa Edition | KrakenHub License & Platoboost"
 SubTitle.TextColor3 = Color3.fromRGB(110, 120, 145)
 SubTitle.Font = Enum.Font.GothamMedium
 SubTitle.TextSize = 11
