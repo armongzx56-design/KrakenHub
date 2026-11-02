@@ -365,9 +365,9 @@ KeyInput.FocusLost:Connect(function()
     Tween(InputContainer, {BackgroundColor3 = Color3.fromRGB(20, 22, 32)}, 0.25)
 end)
 
--- ปุ่ม Check Key
+-- ปุ่ม Check Key (ปรับขนาดเต็มความกว้าง)
 local SubmitBtn = Instance.new("TextButton", MainFrame)
-SubmitBtn.Size = UDim2.new(0.5, -28, 0, 40)
+SubmitBtn.Size = UDim2.new(1, -48, 0, 40)
 SubmitBtn.Position = UDim2.new(0, 24, 0, 160)
 SubmitBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 240)
 SubmitBtn.Text = "Verify Key"
@@ -385,31 +385,12 @@ SubmitGradient.Color = ColorSequence.new{
     ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 120, 230))
 }
 
--- ปุ่ม Get Key (Copy Link)
-local GetKeyBtn = Instance.new("TextButton", MainFrame)
-GetKeyBtn.Size = UDim2.new(0.5, -28, 0, 40)
-GetKeyBtn.Position = UDim2.new(0.5, 4, 0, 160)
-GetKeyBtn.BackgroundColor3 = Color3.fromRGB(26, 30, 42)
-GetKeyBtn.Text = "Get Free Key"
-GetKeyBtn.TextColor3 = Color3.fromRGB(200, 210, 230)
-GetKeyBtn.Font = Enum.Font.GothamBold
-GetKeyBtn.TextSize = 13
-GetKeyBtn.BorderSizePixel = 0
-GetKeyBtn.BackgroundTransparency = 1
-GetKeyBtn.TextTransparency = 1
-Instance.new("UICorner", GetKeyBtn).CornerRadius = UDim.new(0, 9)
-
-local GetKeyStroke = Instance.new("UIStroke", GetKeyBtn)
-GetKeyStroke.Color = Color3.fromRGB(45, 52, 75)
-GetKeyStroke.Thickness = 1
-GetKeyStroke.Transparency = 1
-
--- ปุ่ม Discord / Buy Key
+-- ปุ่ม Discord / ซื้อkey
 local DiscordBtn = Instance.new("TextButton", MainFrame)
 DiscordBtn.Size = UDim2.new(1, -48, 0, 34)
 DiscordBtn.Position = UDim2.new(0, 24, 0, 214)
 DiscordBtn.BackgroundColor3 = Color3.fromRGB(20, 23, 34)
-DiscordBtn.Text = "Discord Community / Buy Key"
+DiscordBtn.Text = "Discord Community / ซื้อ key"
 DiscordBtn.TextColor3 = Color3.fromRGB(120, 140, 220)
 DiscordBtn.Font = Enum.Font.GothamMedium
 DiscordBtn.TextSize = 12
@@ -431,7 +412,6 @@ local function AddHover(btn, normalColor, hoverColor)
 end
 
 AddHover(SubmitBtn, Color3.fromRGB(0, 150, 240), Color3.fromRGB(0, 180, 255))
-AddHover(GetKeyBtn, Color3.fromRGB(26, 30, 42), Color3.fromRGB(36, 42, 60))
 AddHover(DiscordBtn, Color3.fromRGB(20, 23, 34), Color3.fromRGB(32, 36, 52))
 
 -- Animation เปิดหน้าต่าง (Entrance Smooth Animation)
@@ -454,8 +434,6 @@ task.spawn(function()
     Tween(InputStroke, {Transparency = 0}, 0.5)
     Tween(KeyInput, {TextTransparency = 0}, 0.5)
     Tween(SubmitBtn, {BackgroundTransparency = 0, TextTransparency = 0}, 0.55)
-    Tween(GetKeyBtn, {BackgroundTransparency = 0, TextTransparency = 0}, 0.55)
-    Tween(GetKeyStroke, {Transparency = 0}, 0.55)
     Tween(DiscordBtn, {BackgroundTransparency = 0, TextTransparency = 0}, 0.6)
     Tween(MinimizeBtn, {BackgroundTransparency = 0, TextTransparency = 0}, 0.5)
     Tween(CloseBtn, {BackgroundTransparency = 0, TextTransparency = 0}, 0.5)
@@ -495,13 +473,11 @@ MinimizeBtn.MouseButton1Click:Connect(function()
         Tween(InputContainer, {BackgroundTransparency = 1}, 0.15)
         Tween(KeyInput, {TextTransparency = 1}, 0.15)
         Tween(SubmitBtn, {BackgroundTransparency = 1, TextTransparency = 1}, 0.15)
-        Tween(GetKeyBtn, {BackgroundTransparency = 1, TextTransparency = 1}, 0.15)
         Tween(DiscordBtn, {BackgroundTransparency = 1, TextTransparency = 1}, 0.15)
         task.delay(0.2, function()
             if isMinimized then
                 InputContainer.Visible = false
                 SubmitBtn.Visible = false
-                GetKeyBtn.Visible = false
                 DiscordBtn.Visible = false
                 StatusLabel.Visible = false
             end
@@ -510,7 +486,6 @@ MinimizeBtn.MouseButton1Click:Connect(function()
         MinimizeBtn.Text = "-"
         InputContainer.Visible = true
         SubmitBtn.Visible = true
-        GetKeyBtn.Visible = true
         DiscordBtn.Visible = true
         StatusLabel.Visible = true
         Tween(MainFrame, {Size = normalSize}, 0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
@@ -519,27 +494,12 @@ MinimizeBtn.MouseButton1Click:Connect(function()
         Tween(InputContainer, {BackgroundTransparency = 0}, 0.3)
         Tween(KeyInput, {TextTransparency = 0}, 0.3)
         Tween(SubmitBtn, {BackgroundTransparency = 0, TextTransparency = 0}, 0.35)
-        Tween(GetKeyBtn, {BackgroundTransparency = 0, TextTransparency = 0}, 0.35)
         Tween(DiscordBtn, {BackgroundTransparency = 0, TextTransparency = 0}, 0.35)
     end
 end)
 
-GetKeyBtn.MouseButton1Click:Connect(function()
-    StatusLabel.Text = "Fetching key link from Platoboost..."
-    StatusLabel.TextColor3 = Color3.fromRGB(0, 180, 255)
-    local success, link = cacheLink()
-    if success and link then
-        fSetClipboard(link)
-        StatusLabel.Text = "Key Link copied to clipboard! (Paste in browser)"
-        StatusLabel.TextColor3 = Color3.fromRGB(0, 255, 160)
-    else
-        StatusLabel.Text = "Failed to fetch link. Try again shortly."
-        StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
-    end
-end)
-
 DiscordBtn.MouseButton1Click:Connect(function()
-    fSetClipboard("https://discord.gg/krakenhub")
+    fSetClipboard("https://discord.com/invite/vvkVDYeuhn")
     StatusLabel.Text = "Discord invite link copied to clipboard!"
     StatusLabel.TextColor3 = Color3.fromRGB(120, 180, 255)
 end)
@@ -579,7 +539,6 @@ SubmitBtn.MouseButton1Click:Connect(function()
         Tween(InputContainer, {BackgroundTransparency = 1}, 0.3)
         Tween(KeyInput, {TextTransparency = 1}, 0.3)
         Tween(SubmitBtn, {BackgroundTransparency = 1, TextTransparency = 1}, 0.3)
-        Tween(GetKeyBtn, {BackgroundTransparency = 1, TextTransparency = 1}, 0.3)
         Tween(DiscordBtn, {BackgroundTransparency = 1, TextTransparency = 1}, 0.3)
         Tween(MinimizeBtn, {BackgroundTransparency = 1, TextTransparency = 1}, 0.3)
         Tween(CloseBtn, {BackgroundTransparency = 1, TextTransparency = 1}, 0.3)
