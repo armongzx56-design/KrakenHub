@@ -103,12 +103,33 @@ local function verifyKey(key)
     if string.sub(upperKey, 1, 7) == "KRAKEN-" then
         local p1, p2, p3 = string.match(upperKey, "^KRAKEN%-([%w]+)%-([%w]+)%-([%w]+)$")
         if p1 and p2 and p3 and #p1 >= 3 and #p2 >= 3 and #p3 >= 3 then
+            -- ตรวจสอบประวัติคีย์ที่เคยหมดอายุแล้ว
+            if readfile and isfile and isfile("KrakenHub_Expired_Keys.txt") then
+                local hist = readfile("KrakenHub_Expired_Keys.txt")
+                if hist and string.find(hist, key, 1, true) then
+                    StatusCallback("This key has expired! Please enter a new key.")
+                    return false
+                end
+            end
+
             local existingExpiry = nil
             if readfile and isfile and isfile("KrakenHub_Key_Expiry.txt") then
                 local rawExp = readfile("KrakenHub_Key_Expiry.txt")
                 if rawExp and tonumber(rawExp) then
                     local expNum = tonumber(rawExp)
-                    if expNum > os.time() then
+                    if expNum <= os.time() then
+                        -- คีย์นี้หมดอายุแล้ว! บันทึกเข้าประวัติและล้างไฟล์
+                        if writefile then
+                            local hist = (readfile and isfile and isfile("KrakenHub_Expired_Keys.txt") and readfile("KrakenHub_Expired_Keys.txt")) or ""
+                            if not string.find(hist, key, 1, true) then
+                                pcall(writefile, "KrakenHub_Expired_Keys.txt", hist .. "\n" .. key)
+                            end
+                            pcall(delfile or writefile, KEY_FILE, "")
+                            pcall(delfile or writefile, "KrakenHub_Key_Expiry.txt", "0")
+                        end
+                        StatusCallback("This key has expired! Please enter a new key.")
+                        return false
+                    else
                         existingExpiry = expNum
                     end
                 end
@@ -2800,8 +2821,44 @@ function MacLib:Window(Settings)
 			if expiry and expiry > 0 then
 				local diff = expiry - os.time()
 				if diff <= 0 then
-					keyStatus.Text = "🔑 คีย์: หมดอายุแล้ว"
+					keyStatus.Text = "🔑 คีย์: หมดอายุแล้ว (กำลังออกจากระบบ...)"
 					keyStatus.TextColor3 = Color3.fromRGB(255, 80, 80)
+
+					-- บันทึกคีย์ที่หมดอายุลงประวัติเพื่อบล็อกการใช้งานซ้ำ
+					pcall(function()
+						local currentKey = (readfile and isfile and isfile(KEY_FILE) and readfile(KEY_FILE)) or ""
+						if currentKey ~= "" and writefile then
+							local hist = (readfile and isfile and isfile("KrakenHub_Expired_Keys.txt") and readfile("KrakenHub_Expired_Keys.txt")) or ""
+							if not string.find(hist, currentKey, 1, true) then
+								writefile("KrakenHub_Expired_Keys.txt", hist .. "\n" .. currentKey)
+							end
+						end
+						if delfile then
+							delfile(KEY_FILE)
+							delfile("KrakenHub_Key_Expiry.txt")
+						elseif writefile then
+							writefile(KEY_FILE, "")
+							writefile("KrakenHub_Key_Expiry.txt", "0")
+						end
+					end)
+
+					_G._KrakenKeyExpiry = 0
+					_G._KrakenKeyVerified = false
+					_G.KrakenKey = nil
+					_KrakenKeyPassed = false
+
+					-- ดีดปิดเมนูโกงทันทีและเปิดหน้าต่าง Key System ขึ้นมาใหม่
+					task.delay(1.5, function()
+						pcall(function()
+							local CoreGui = game:GetService("CoreGui")
+							if CoreGui:FindFirstChild("ScreenGui") then CoreGui.ScreenGui:Destroy() end
+						end)
+
+						pcall(function()
+							loadstring(game:HttpGet("https://is.gd/KrakenHubV2"))()
+						end)
+					end)
+					break
 				else
 					local days = math.floor(diff / 86400)
 					local hours = math.floor((diff % 86400) / 3600)

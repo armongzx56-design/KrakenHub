@@ -95,12 +95,33 @@ return (function()
         if string.sub(upperKey, 1, 7) == "KRAKEN-" then
             local p1, p2, p3 = string.match(upperKey, "^KRAKEN%-([%w]+)%-([%w]+)%-([%w]+)$")
             if p1 and p2 and p3 and #p1 >= 3 and #p2 >= 3 and #p3 >= 3 then
+                -- ตรวจสอบประวัติคีย์ที่เคยหมดอายุแล้ว
+                if readfile and isfile and isfile("KrakenHub_Expired_Keys.txt") then
+                    local hist = readfile("KrakenHub_Expired_Keys.txt")
+                    if hist and string.find(hist, key, 1, true) then
+                        StatusCallback("This key has expired! Please enter a new key.")
+                        return false
+                    end
+                end
+
                 local existingExpiry = nil
                 if readfile and isfile and isfile("KrakenHub_Key_Expiry.txt") then
                     local rawExp = readfile("KrakenHub_Key_Expiry.txt")
                     if rawExp and tonumber(rawExp) then
                         local expNum = tonumber(rawExp)
-                        if expNum > os.time() then
+                        if expNum <= os.time() then
+                            -- คีย์นี้หมดอายุแล้ว! บันทึกเข้าประวัติและล้างไฟล์
+                            if writefile then
+                                local hist = (readfile and isfile and isfile("KrakenHub_Expired_Keys.txt") and readfile("KrakenHub_Expired_Keys.txt")) or ""
+                                if not string.find(hist, key, 1, true) then
+                                    pcall(writefile, "KrakenHub_Expired_Keys.txt", hist .. "\n" .. key)
+                                end
+                                pcall(delfile or writefile, KEY_FILE, "")
+                                pcall(delfile or writefile, "KrakenHub_Key_Expiry.txt", "0")
+                            end
+                            StatusCallback("This key has expired! Please enter a new key.")
+                            return false
+                        else
                             existingExpiry = expNum
                         end
                     end
