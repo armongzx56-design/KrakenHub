@@ -89,8 +89,7 @@ SilenceCameraAntiCheat()
 
 if ClientState and type(ClientState) == "table" then
     pcall(function()
-        ClientState.RobloxCamera = true
-        ClientState.RecoilScale = 0
+                ClientState.RecoilScale = 0
     end)
 end
 
@@ -326,8 +325,7 @@ task.spawn(function()
             pcall(table.clear, NetBeatESPList)
         end
         if ClientState and type(ClientState) == "table" then
-            ClientState.RobloxCamera = true
-        end
+                    end
         task.wait(1)
     end
 end)
