@@ -279,28 +279,56 @@ if AntiHitboxFn and typeof(hookfunction) == "function" then
     end)
 end
 
--- 1.9 Direct Beat:FireServer Hook (Honeypot & Buffer Scrubbing - ZERO NAMECALL HOOKS)
+-- 1.9 Universal Remote Packet Guardian (Full Support for Delta, Fluxus, Codex & PC)
+local oldNamecall = nil
+if typeof(hookmetamethod) == "function" then
+    pcall(function()
+        oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+            local method = getnamecallmethod()
+            if method == "FireServer" or method == "fireServer" then
+                -- 1. Drop HHeartbeatB (Anti-Hitbox Ban Remote)
+                if HHeartbeatB and self == HHeartbeatB then
+                    return nil
+                end
+                -- 2. Drop Honeypots & Scrub NetBeat buffer packets
+                if BeatRemote and self == BeatRemote then
+                    local arg1 = ...
+                    -- Drop number-code honeypots (AdminTools 7312, 7411, 7412, 7419, 7420, etc.)
+                    if typeof(arg1) == "number" and arg1 >= 7000 then
+                        return nil
+                    end
+                    local arg2 = select(2, ...)
+                    if typeof(arg2) == "table" and arg2.p ~= nil then
+                        return nil
+                    end
+                    -- Scrub buffer packets: force any anomaly code >= 7000 to clean heartbeat 0
+                    if typeof(arg1) == "buffer" and buffer.len(arg1) >= 6 then
+                        local bCode = buffer.readu16(arg1, 4)
+                        if bCode >= 7000 or (bCode ~= 0 and bCode ~= 1) then
+                            buffer.writeu16(arg1, 4, 0)
+                            buffer.writeu8(arg1, 6, 0)
+                        end
+                    end
+                end
+            end
+            return oldNamecall(self, ...)
+        end))
+    end)
+end
+
+-- Fallback Instance hook
 if BeatRemote and typeof(hookfunction) == "function" then
     pcall(function()
         local oldBeatFire = nil
         oldBeatFire = hookfunction(BeatRemote.FireServer, function(self, ...)
             local args = {...}
-            -- 1. Drop number-code honeypots (AdminTools 7312, 7419, 7420, etc.)
-            if typeof(args[1]) == "number" and args[1] >= 7000 then
-                return nil
-            end
-            if typeof(args[2]) == "table" and args[2].p ~= nil then
-                return nil
-            end
-            -- 2. Scrub buffer packets (if code at offset 4 is an anomaly report)
-            if typeof(args[1]) == "buffer" then
-                local buf = args[1]
-                if buffer.len(buf) >= 6 then
-                    local code = buffer.readu16(buf, 4)
-                    if code >= 7000 or (code ~= 0 and code ~= 1) then
-                        buffer.writeu16(buf, 4, 0)
-                        buffer.writeu8(buf, 6, 0)
-                    end
+            if typeof(args[1]) == "number" and args[1] >= 7000 then return nil end
+            if typeof(args[2]) == "table" and args[2].p ~= nil then return nil end
+            if typeof(args[1]) == "buffer" and buffer.len(args[1]) >= 6 then
+                local bCode = buffer.readu16(args[1], 4)
+                if bCode >= 7000 or (bCode ~= 0 and bCode ~= 1) then
+                    buffer.writeu16(args[1], 4, 0)
+                    buffer.writeu8(args[1], 6, 0)
                 end
             end
             return oldBeatFire(self, ...)
@@ -416,7 +444,7 @@ local Hub = {
 
         -- Hitbox Expander (Bullet Tracking into Head)
         HitboxExpander = true,
-        HitboxSize = 10,
+        HitboxSize = 6,
         HitboxTarget = "Head", -- Focus directly on Head
         HitboxVisible = false,
         HitboxTransparency = 0.65,
@@ -1014,20 +1042,9 @@ local function ApplyWeaponMods()
     for name, weapon in pairs(WeaponData) do
         if type(weapon) == "table" then
             pcall(function()
-                -- 1. No Recoil
-                if weapon.Recoil then
-                    makeWritable(weapon.Recoil)
-                    if Hub.Settings.NoRecoil then
-                        weapon.Recoil.Up = 0
-                        weapon.Recoil.Side = 0
-                        weapon.Recoil.AimScale = 0
-                        weapon.Recoil.Return = 100
-                    elseif OriginalWeaponData[name] and OriginalWeaponData[name].Recoil then
-                        weapon.Recoil.Up = OriginalWeaponData[name].Recoil.Up
-                        weapon.Recoil.Side = OriginalWeaponData[name].Recoil.Side
-                        weapon.Recoil.AimScale = OriginalWeaponData[name].Recoil.AimScale
-                        weapon.Recoil.Return = OriginalWeaponData[name].Recoil.Return
-                    end
+                -- 1. Safe Native Zero Recoil (Does not tamper with frozen tables)
+                if ClientState and type(ClientState) == "table" then
+                    ClientState.RecoilScale = Hub.Settings.NoRecoil and 0 or (Hub.Settings.RecoilScale or 1)
                 end
 
                 -- 2. No Spread / Perfect Bloom
@@ -3372,7 +3389,7 @@ local function InitUI()
             Hub.Settings.FullAuto = true
             Hub.Settings.HitboxExpander = true
             Hub.Settings.HitboxTarget = "Head"
-            Hub.Settings.HitboxSize = 10
+            Hub.Settings.HitboxSize = 6
             ApplyWeaponMods()
             if Options.SilentAimToggle then Options.SilentAimToggle:SetValue(true) end
             if Options.SilentBoneDrop then Options.SilentBoneDrop:SetValue("ส่วนหัว (Head - แนะนำ)") end
