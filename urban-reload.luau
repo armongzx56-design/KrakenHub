@@ -1999,8 +1999,7 @@ local function InitUI()
     Tabs.World:Select()
     Fluent:Notify({
         Title = "🌊 KrakenHub Delta iOS Edition!",
-        Content = "โหลดระบบฟาร์มและ ESP เวอร์ชั่นรองรับ Delta iOS 100% สำเร็จ!
-แตะปุ่มโลโก้ หรือกด Right Control เพื่อเปิด/ปิดเมนู",
+        Content = "โหลดระบบฟาร์มและ ESP เวอร์ชั่นรองรับ Delta iOS 100% สำเร็จ!\nแตะปุ่มโลโก้ หรือกด Right Control เพื่อเปิด/ปิดเมนู",
         Duration = 5
     })
 end
