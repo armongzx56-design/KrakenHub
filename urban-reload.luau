@@ -21,8 +21,11 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 local CollectionService = game:GetService("CollectionService")
-local Camera = Workspace.CurrentCamera
+local Camera = Workspace.CurrentCamera or Workspace:FindFirstChildOfClass("Camera")
 local LocalPlayer = Players.LocalPlayer
+if not LocalPlayer then
+    repeat task.wait(0.1) LocalPlayer = Players.LocalPlayer until LocalPlayer
+end
 
 local Controls = nil
 pcall(function()
@@ -1035,10 +1038,41 @@ local function InitUI()
         return "rbxasset://5059d143b75fc7c70a58a871660c4f16/k_community_logo.png"
     end
 
-    -- 🎨 Load MacLib UI Library
+    -- 🎨 Load MacLib UI Library (Multi-Mirror Resilient Loader)
     local MacLib = nil
+    local maclibCode = nil
+    local maclibUrls = {
+        "https://raw.githubusercontent.com/armongzx56-design/KrakenHub/main/maclib.txt", -- Direct 200 OK (Zero Redirects)
+        "https://github.com/biggaboy212/Maclib/releases/latest/download/maclib.txt",      -- Official Release
+        "https://raw.githubusercontent.com/biggaboy212/Maclib/main/maclib.txt"           -- Raw Backup
+    }
+
+    for _, url in ipairs(maclibUrls) do
+        local s, res = pcall(function() return game:HttpGet(url) end)
+        if s and type(res) == "string" and #res > 5000 and not res:find("<html") then
+            maclibCode = res
+            break
+        end
+    end
+
+    if not maclibCode then
+        warn("[KrakenHub] Failed to download MacLib from all mirrors! Checking local cache...")
+        if typeof(isfile) == "function" and isfile("maclib.txt") then
+            pcall(function() maclibCode = readfile("maclib.txt") end)
+        end
+    end
+
+    if not maclibCode then
+        warn("[KrakenHub] Fatal: Unable to load MacLib UI library.")
+        return
+    end
+
+    if typeof(writefile) == "function" and typeof(isfile) == "function" and not isfile("maclib.txt") then
+        pcall(writefile, "maclib.txt", maclibCode)
+    end
+
     local ok, lib = pcall(function()
-        local code = game:HttpGet("https://github.com/biggaboy212/Maclib/releases/latest/download/maclib.txt")
+        local code = maclibCode
 
         -- 1. Patch toggle ON state to vibrant red Color3.fromRGB(235, 50, 50)
         code = code:gsub(
@@ -2064,7 +2098,10 @@ end
 -- 🚀 11. INITIALIZE
 -- ==============================================================
 task.spawn(function()
-    pcall(InitUI)
+    local ok, err = pcall(InitUI)
+    if not ok then
+        warn("[KrakenHub Fatal Init Error] " .. tostring(err))
+    end
 end)
 
 -- 📦 Cases Menu Auto-Optimizer
