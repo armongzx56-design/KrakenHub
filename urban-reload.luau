@@ -8,9 +8,8 @@
 -- • 🎯 Combat Engine: Silent Hitbox Expander + Smooth Camera Aimbot + Bone Targeting
 -- • 🔫 Weapon Mods: 100% No Recoil + 100% No Spread + Rapid Fire + Full Auto + Instant Reload
 -- • 👁️ Visuals: 2D Box ESP + Skeleton Tracers + Health Bar + Distance + Weapon Name + Safe ESP + Loot ESP
--- • ⚡ Movement: Native Speed Enforcer + Infinite Stamina + High Jump + Inf Jump + Noclip + Fly
+-- • ⚡ Character: Infinite Stamina + Instant Respawn + Fast Reset
 -- • 🌾 Automation: Auto Safe Farm (Safes 1-4) + Auto Loot Magnet + Auto Halloween Quest Claim
--- • 📍 Teleports: All 4 Military Safes + 8 Airdrop Spots + All SafeZones + ATMs
 -- ==============================================================
 
 local Players = game:GetService("Players")
@@ -66,6 +65,18 @@ end
 local CollectionService = game:GetService("CollectionService")
 local BeatRemote = ReplicatedStorage:WaitForChild("Remotes", 5) and ReplicatedStorage.Remotes:FindFirstChild("Beat")
 
+-- 1.0 Client-Side Anti-Kick Guardian (Delta Executor & Mobile Ready)
+pcall(function()
+    local lp = game:GetService("Players").LocalPlayer
+    if lp and typeof(hookfunction) == "function" and typeof(lp.Kick) == "function" then
+        local oldKick = nil
+        oldKick = hookfunction(lp.Kick, function(self, reason, ...)
+            warn("[KrakenHub Anti-Kick] Blocked LocalPlayer:Kick! Reason: " .. tostring(reason))
+            return nil
+        end)
+    end
+end)
+
 -- 1.1 Neutralize Camera Anti-Cheat Rendersteps
 local function SilenceCameraAntiCheat()
     pcall(function() RunService:UnbindFromRenderStep("NetBeatCamStart") end)
@@ -73,15 +84,20 @@ local function SilenceCameraAntiCheat()
 end
 SilenceCameraAntiCheat()
 
--- 1.2 Locate and Lock the Anomaly Queue (u28) in NetBeatClient
+-- 1.2 Locate and Lock the Anomaly Queue (u28) in NetBeatClient (Safe on Delta & Mobile)
 local NetBeatQueue = nil
-if typeof(getgc) == "function" and typeof(getupvalues) == "function" then
-    pcall(function()
+pcall(function()
+    local get_info = getinfo or (debug and debug.getinfo)
+    local get_upvalues = getupvalues or (debug and debug.getupvalues)
+    local is_l = islclosure or is_l_closure or function(f) return type(f) == "function" end
+    local is_exec = isexecutorclosure or is_executor_closure or checkcaller or function() return false end
+
+    if typeof(getgc) == "function" and typeof(get_upvalues) == "function" then
         for _, fn in ipairs(getgc()) do
-            if type(fn) == "function" and islclosure(fn) and not isexecutorclosure(fn) then
-                local inf = getinfo(fn)
-                if inf.source and inf.source:find("NetBeatClient") then
-                    local ups = getupvalues(fn)
+            if type(fn) == "function" and is_l(fn) and not is_exec(fn) then
+                local inf = get_info and get_info(fn)
+                if inf and inf.source and inf.source:find("NetBeatClient") then
+                    local ups = get_upvalues(fn)
                     local hasBeat = false
                     local cand = nil
                     for _, val in pairs(ups) do
@@ -98,29 +114,51 @@ if typeof(getgc) == "function" and typeof(getupvalues) == "function" then
                 end
             end
         end
-    end)
-end
+    end
+end)
 
 if NetBeatQueue then
-    table.clear(NetBeatQueue)
+    pcall(table.clear, NetBeatQueue)
     pcall(setmetatable, NetBeatQueue, {
         __newindex = function() return end
     })
 end
 
--- 1.3 Safe Honeypot Blocker via Beat.FireServer (WITHOUT touching game.__namecall)
+-- 1.3 Safe Honeypot Blocker via Beat.FireServer (WITHOUT touching game.__namecall for other services)
+local BeatBlocked = false
 if BeatRemote and typeof(hookfunction) == "function" then
-    local oldBeatFire = nil
-    oldBeatFire = hookfunction(BeatRemote.FireServer, function(self, ...)
-        local args = {...}
-        -- Drop AdminTools / Admin honeypots: Beat:FireServer(code, { p = ..., v = ... })
-        if typeof(args[2]) == "table" and args[2].p ~= nil then
-            return nil
-        end
-        if typeof(args[1]) == "number" and args[1] >= 7000 then
-            return nil
-        end
-        return oldBeatFire(self, ...)
+    pcall(function()
+        local oldBeatFire = nil
+        oldBeatFire = hookfunction(BeatRemote.FireServer, function(self, ...)
+            local args = {...}
+            -- Drop AdminTools / Admin honeypots: Beat:FireServer(code, { p = ..., v = ... })
+            if typeof(args[2]) == "table" and args[2].p ~= nil then
+                return nil
+            end
+            if typeof(args[1]) == "number" and args[1] >= 7000 then
+                return nil
+            end
+            return oldBeatFire(self, ...)
+        end)
+        BeatBlocked = true
+    end)
+end
+
+-- Fallback for Delta Executor if hookfunction on Instance method is unsupported
+if not BeatBlocked and BeatRemote and typeof(hookmetamethod) == "function" then
+    pcall(function()
+        local oldNamecall = nil
+        oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+            if self == BeatRemote then
+                local method = getnamecallmethod()
+                if method == "FireServer" or method == "fireServer" then
+                    local args = {...}
+                    if typeof(args[2]) == "table" and args[2].p ~= nil then return nil end
+                    if typeof(args[1]) == "number" and args[1] >= 7000 then return nil end
+                end
+            end
+            return oldNamecall(self, ...)
+        end)
     end)
 end
 
@@ -192,23 +230,32 @@ local Hub = {
     SafeESP = {},
     HitboxParts = {},
     Settings = {
-        -- Combat / Aimbot
-        Aimbot = true,
-        AimbotTriggerMode = "Aim OR Shoot", -- "Aim OR Shoot", "Right Click Only", "Left Click Only", "Custom Keybind"
-        AimbotKey = Enum.UserInputType.MouseButton2,
-        AimbotBone = "Head", -- Always Head for 100% head lock
-        AimbotPriority = "Distance", -- "Distance", "Crosshair", "Smart"
-        AimbotSmoothing = 0, -- 0 = Instant 100% Lock to Head (ตาม ssss.txt)
-        AimbotFOV = 200, -- Default from ssss.txt
-        AimbotMaxDist = 350,
-        AimbotWallCheck = true,
-        AimbotIgnoreSafeZone = true,
-        AimbotIgnoreShield = true,
-        AimbotIgnoreDowned = true,
-        DrawFOV = true,
-        FOVColor = Color3.fromRGB(0, 220, 255),
+        -- Combat / Silent Aim (Bullet Snapping / Redirection)
+        SilentAim = true,
+        SilentAimBone = "Head", -- "Head", "UpperTorso", "Random"
+        SilentAimFOV = 180,
+        SilentAimMaxDist = 400,
+        SilentAimHitChance = 100,
+        SilentAimWallCheck = true,
+        SilentAimIgnoreSafeZone = true,
+        SilentAimIgnoreShield = true,
+        SilentAimIgnoreDowned = true,
+        SilentAimPriority = "Crosshair", -- "Crosshair", "Distance"
+        SilentAimTargetHood = true,
+        SilentAimTargetZombies = true,
+        SilentAimDrawFOV = false,
+        SilentAimFOVColor = Color3.fromRGB(255, 140, 0), -- Neon Amber/Orange
+        SilentAimFOVRainbow = false,
+        SilentAimFOVR = 255,
+        SilentAimFOVG = 140,
+        SilentAimFOVB = 0,
         RedDamageNumbers = true,
         IconTheme = "Themed", -- "Themed", "ElectricBlue"
+
+        -- FOV Circle Styles
+        FOVCircleThickness = 1.5,
+        FOVCircleTransparency = 0.85,
+        FOVCircleFilled = false,
 
         -- Hitbox Expander (Bullet Tracking into Head)
         HitboxExpander = true,
@@ -221,7 +268,7 @@ local Hub = {
         AutoRespawn = true,
         RespawnKey = Enum.KeyCode.X,
 
-        -- Weapon Mods (From ssss.txt + Reversing)
+        -- Weapon Mods
         NoRecoil = true,
         NoSpread = true,
         RapidFire = false,
@@ -230,36 +277,34 @@ local Hub = {
         InstantReload = false,
         FastReloadRatio = 0.35,
 
-        -- Movement
-        SpeedHack = false,
-        SpeedValue = 28,
         InfiniteStamina = true,
-        InfJump = false,
-        HighJump = false,
-        HighJumpPower = 65,
-        Noclip = false,
-        Fly = false,
-        FlySpeed = 50,
-        FastRoll = false,
 
         -- Visuals (ESP)
         PlayerESP = true,
         ESPBox = true,
         ESPName = true,
         ESPFont = "UI", -- "UI", "System", "Plex", "Monospace"
-        ESPFontSize = 14,
+        ESPFontSize = 13,
         ESPNameMode = "DisplayName", -- "DisplayName", "Username", "Both"
         ESPHealth = true,
+        ESPHealthBar = true,
+        ESPChams = true,
+        ChamsColor = Color3.fromRGB(255, 35, 35),
+        ChamsOutlineColor = Color3.fromRGB(255, 35, 35),
+        ChamsTransparency = 0.78,
         ESPDistance = true,
         ESPTracers = false,
         ESPWeapon = true,
         ESPTeamCheck = false,
-        ESPMaxDistance = 1500,
+        ESPMaxDistance = 650,
 
         BoxColor = Color3.fromRGB(255, 60, 60),
         NameColor = Color3.fromRGB(255, 255, 255),
         HealthColor = Color3.fromRGB(60, 255, 60),
         TracerColor = Color3.fromRGB(0, 200, 255),
+
+        -- Character
+        HideCharacterName = false,
 
         -- World ESP
         SafeESP = true,
@@ -267,7 +312,13 @@ local Hub = {
         HalloweenESP = true,
         ATMESP = false,
 
-        -- Zombie Auto Aim & Shoot Kill Aura
+        -- Hood NPC Auto Aim & Shoot Kill Aura
+        HoodKillAura = false,
+        HoodKillAuraRange = 250,
+        HoodWallCheck = true,
+        HoodESP = true,
+        SavedFarmSpot = Vector3.new(-1033.4, 14.6, 427.6),
+        -- Aliases
         ZombieKillAura = false,
         ZombieKillAuraRange = 250,
         ZombieWallCheck = true,
@@ -277,16 +328,18 @@ local Hub = {
 genv.KrakenHub = Hub
 
 -- ================================================
--- 🎯 4. FOV DRAWING CIRCLE
+-- ⭕ 4. SILENT AIM FOV DRAWING CIRCLE
 -- ================================================
-local FOVCircle = Drawing.new("Circle")
-FOVCircle.Visible = false
-FOVCircle.Radius = Hub.Settings.AimbotFOV
-FOVCircle.Color = Hub.Settings.FOVColor
-FOVCircle.Thickness = 1.5
-FOVCircle.Filled = false
-FOVCircle.NumSides = 64
-FOVCircle.Transparency = 0.85
+local SilentFOVCircle = Drawing.new("Circle")
+SilentFOVCircle.Visible = false
+SilentFOVCircle.Radius = Hub.Settings.SilentAimFOV or 180
+SilentFOVCircle.Color = Hub.Settings.SilentAimFOVColor or Color3.fromRGB(255, 140, 0)
+SilentFOVCircle.Thickness = Hub.Settings.FOVCircleThickness or 1.5
+SilentFOVCircle.Filled = false
+SilentFOVCircle.NumSides = 64
+SilentFOVCircle.Transparency = Hub.Settings.FOVCircleTransparency or 0.85
+
+local FOVCircle = SilentFOVCircle -- Compatibility alias
 
 -- ================================================
 -- 🛠️ 5. HELPER FUNCTIONS
@@ -317,6 +370,26 @@ end
 local function WorldToViewport(pos)
     local screenPos, onScreen = Camera:WorldToViewportPoint(pos)
     return Vector2.new(screenPos.X, screenPos.Y), screenPos.Z, onScreen
+end
+
+-- Dynamic health gradient: 100% Emerald Green -> 50% Amber Orange -> 20% Crimson Red
+local function GetHealthColor(percent)
+    local p = math.clamp(percent, 0, 100) / 100
+    if p >= 0.5 then
+        -- 50% to 100%: Amber Orange (255, 165, 0) -> Emerald Green (35, 209, 96)
+        local t = (p - 0.5) / 0.5
+        local r = math.floor(255 + (35 - 255) * t)
+        local g = math.floor(165 + (209 - 165) * t)
+        local b = math.floor(0 + (96 - 0) * t)
+        return Color3.fromRGB(r, g, b)
+    else
+        -- 0% to 50%: Danger Red (235, 40, 40) -> Amber Orange (255, 165, 0)
+        local t = p / 0.5
+        local r = math.floor(235 + (255 - 235) * t)
+        local g = math.floor(40 + (165 - 40) * t)
+        local b = math.floor(40 + (0 - 40) * t)
+        return Color3.fromRGB(r, g, b)
+    end
 end
 
 local function GetBone(player, boneName)
@@ -370,7 +443,13 @@ local function EnsureWeaponEquipped()
 end
 Hub.EnsureWeaponEquipped = EnsureWeaponEquipped
 
--- Check direct line of sight / wall obstruction
+-- ================================================
+-- 🚀 ZERO-ALLOCATION PERSISTENT RAYCAST ENGINE
+-- ================================================
+local SharedRayParams = RaycastParams.new()
+SharedRayParams.FilterType = Enum.RaycastFilterType.Exclude
+SharedRayParams.IgnoreWater = true
+
 local function IsVisible(targetChar, targetPart)
     if not targetChar or not targetPart then return false end
 
@@ -379,30 +458,21 @@ local function IsVisible(targetChar, targetPart)
     local direction = destination - origin
     if direction.Magnitude < 0.2 then return true end
 
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Exclude
-
     local ignoreList = {LocalPlayer.Character, Camera}
     local ch = Workspace:FindFirstChild("ClientHitboxes")
     if ch then table.insert(ignoreList, ch) end
     local gl = Workspace:FindFirstChild("GroundLoot")
     if gl then table.insert(ignoreList, gl) end
 
-    params.FilterDescendantsInstances = ignoreList
-    params.IgnoreWater = true
+    SharedRayParams.FilterDescendantsInstances = ignoreList
 
-    for _ = 1, 4 do
-        local result = Workspace:Raycast(origin, direction, params)
-        if not result then
-            return true
-        end
-        if result.Instance:IsDescendantOf(targetChar) then
-            return true
-        end
-        -- Ignore non-collidable or transparent parts / shields / hitboxes
+    for _ = 1, 3 do
+        local result = Workspace:Raycast(origin, direction, SharedRayParams)
+        if not result then return true end
+        if result.Instance:IsDescendantOf(targetChar) then return true end
         if (not result.Instance.CanCollide) or result.Instance.Transparency >= 0.7 or result.Instance.Name == "Hitbox" then
             table.insert(ignoreList, result.Instance)
-            params.FilterDescendantsInstances = ignoreList
+            SharedRayParams.FilterDescendantsInstances = ignoreList
         else
             return false
         end
@@ -410,63 +480,71 @@ local function IsVisible(targetChar, targetPart)
     return false
 end
 
--- Check direct line of sight / wall & obstacle obstruction for Zombies
-local function IsZombieVisible(targetHead, targetZombie)
-    if not targetHead or not targetZombie then return false end
+-- Fast Line-of-Sight Check for Hood NPCs (Capped to 3 iterations, static exclusions)
+local function IsEnemyNPC(model)
+    if not model or not model:IsA("Model") then return false end
+    if model.Name:find("Hood") or model.Name:find("Zombie") then return true end
+    local parent = model.Parent
+    if parent and (parent.Name == "HoodLocal" or parent.Name == "Zombies") then
+        return model:FindFirstChild("HumanoidRootPart") ~= nil or model:FindFirstChild("Head") ~= nil
+    end
+    return false
+end
+
+-- Fast Line-of-Sight Check for Hood NPCs (Capped to 3 iterations)
+local function IsHoodVisible(targetHead, targetNpc)
+    if not targetHead or not targetNpc then return false end
 
     local origin = Camera.CFrame.Position
     local destination = targetHead.Position
     local direction = destination - origin
     if direction.Magnitude < 0.2 then return true end
 
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Exclude
-
-    local ignoreList = {Camera}
-    -- Exclude all player characters (including local player & others in farm)
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p.Character then
-            table.insert(ignoreList, p.Character)
-        end
-    end
-
+    local ignoreList = {Camera, LocalPlayer.Character}
     local ch = Workspace:FindFirstChild("ClientHitboxes")
     if ch then table.insert(ignoreList, ch) end
     local gl = Workspace:FindFirstChild("GroundLoot")
     if gl then table.insert(ignoreList, gl) end
+
     local hl = Workspace:FindFirstChild("HoodLocal")
-    if hl then table.insert(ignoreList, hl) end
-
-    params.FilterDescendantsInstances = ignoreList
-    params.IgnoreWater = true
-
-    for _ = 1, 10 do
-        local result = Workspace:Raycast(origin, direction, params)
-        if not result then
-            return true
+    if hl then
+        for _, otherZ in ipairs(hl:GetChildren()) do
+            if otherZ ~= targetNpc then
+                table.insert(ignoreList, otherZ)
+            end
         end
+    end
+    local zf = Workspace:FindFirstChild("Zombies")
+    if zf then
+        for _, otherZ in ipairs(zf:GetChildren()) do
+            if otherZ ~= targetNpc then
+                table.insert(ignoreList, otherZ)
+            end
+        end
+    end
+
+    SharedRayParams.FilterDescendantsInstances = ignoreList
+
+    for _ = 1, 3 do
+        local result = Workspace:Raycast(origin, direction, SharedRayParams)
+        if not result then return true end
         local inst = result.Instance
-        if inst:IsDescendantOf(targetZombie) then
-            return true
-        end
+        if inst:IsDescendantOf(targetNpc) then return true end
 
         local nameLower = inst.Name:lower()
-        -- Ignore transparent parts, non-collidables, hitboxes, and farm/warehouse doors, gates, fences, glass, props
         if (not inst.CanCollide) or inst.Transparency >= 0.7 or inst.Name == "Hitbox"
-           or nameLower:find("door") or nameLower:find("waredoor") or nameLower:find("gate")
-           or nameLower:find("fence") or nameLower:find("glass") or nameLower:find("window")
-           or nameLower:find("bar") or nameLower:find("prop") or nameLower:find("debris")
-           or nameLower:find("rubble") or nameLower:find("mesh") or nameLower:find("panel")
-           or nameLower:find("cloth") or nameLower:find("chain") or nameLower:find("grate") then
+           or nameLower:find("door") or nameLower:find("gate") or nameLower:find("fence")
+           or nameLower:find("glass") or nameLower:find("window") or nameLower:find("bar")
+           or nameLower:find("prop") or nameLower:find("debris") or nameLower:find("mesh") then
             table.insert(ignoreList, inst)
-            params.FilterDescendantsInstances = ignoreList
+            SharedRayParams.FilterDescendantsInstances = ignoreList
         else
-            -- Hit a true solid structure wall (brick/concrete/metal building wall)
             return false
         end
     end
     return false
 end
+local IsZombieVisible = IsHoodVisible
 
 -- Validate target status (filters out invincible, downed, and safezone players)
 local function IsTargetValid(player)
@@ -506,7 +584,7 @@ local function IsTargetValid(player)
 end
 
 -- ==============================================================
--- 🧟 REAL-TIME ZOMBIE DATA EXTRACTION ENGINE
+-- 🔫 REAL-TIME HOOD NPC DATA EXTRACTION ENGINE
 -- Extracts live HP directly from HoodClient's active NPC state table
 -- ==============================================================
 local LiveNpcTable = nil
@@ -527,12 +605,12 @@ local function GetLiveNpcTable()
     return LiveNpcTable
 end
 
-local function GetZombieRealtimeData(zombieModel)
+local function GetHoodRealtimeData(npcModel)
     local tbl = GetLiveNpcTable()
     if tbl then
         for id, npc in pairs(tbl) do
             local m = (npc.e and npc.e.model) or npc.model
-            if m == zombieModel then
+            if m == npcModel then
                 local hp = tonumber(npc.hp) or 0
                 local maxHp = tonumber(npc.maxHp) or 100
                 local isDead = (npc.state == "dead") or (hp <= 0)
@@ -540,41 +618,99 @@ local function GetZombieRealtimeData(zombieModel)
             end
         end
     end
-    local hum = zombieModel:FindFirstChildOfClass("Humanoid")
+    local hum = npcModel:FindFirstChildOfClass("Humanoid")
     local hp = (hum and hum.Health) or 100
     local maxHp = (hum and hum.MaxHealth) or 100
     return hp, maxHp, hp <= 0, nil
 end
+local GetZombieRealtimeData = GetHoodRealtimeData
 
--- Target Selection in FOV (Prioritizes Physically Close Enemies & Zombies in 3D Studs)
-local function GetClosestEnemyInFOV()
+
+-- ================================================
+-- ⚡ 5.1 SILENT AIM TARGETING & HOOK ENGINE
+-- Dedicated standalone bullet redirection
+-- ================================================
+local function IsSilentAimTargetValid(player)
+    if not player or player == LocalPlayer then return false end
+    if not IsEnemy(player) then return false end
+
+    local char = player.Character
+    if not char then return false end
+
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hum or hum.Health <= 0 or not hrp then return false end
+
+    if Hub.Settings.SilentAimIgnoreDowned and char:GetAttribute("Downed") == true then
+        return false
+    end
+
+    if Hub.Settings.SilentAimIgnoreShield and char:GetAttribute("SpawnShield") == true then
+        return false
+    end
+
+    if Hub.Settings.SilentAimIgnoreSafeZone then
+        if char:GetAttribute("InSafeZone") == true or char:GetAttribute("PvPSafe") == true then
+            return false
+        end
+        if SafeZoneModule and SafeZoneModule.IsIn then
+            local inSZ = false
+            pcall(function() inSZ = SafeZoneModule.IsIn(char) end)
+            if inSZ then return false end
+        end
+    end
+
+    return true
+end
+
+local function GetSilentAimTarget()
+    if not Hub.Settings.SilentAim then return nil, nil, false end
+
     local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     local bestTarget = nil
     local bestBone = nil
     local bestScore = math.huge
-    local isZombieTarget = false
+    local isNpcTarget = false
 
     local myChar = LocalPlayer.Character
     local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
     local myPos = (myHRP and myHRP.Position) or Camera.CFrame.Position
 
-    -- 1. Check Zombies first if ZombieKillAura is active (uses 100% Realtime HP)
-    if Hub.Settings.ZombieKillAura then
-        local hoodLocal = Workspace:FindFirstChild("HoodLocal")
-        if hoodLocal then
-            for _, z in ipairs(hoodLocal:GetChildren()) do
-                if z.Name:find("Zombie") then
-                    local hp, maxHp, isDead = GetZombieRealtimeData(z)
+    -- 1. Check Hood NPCs if enabled
+    if Hub.Settings.SilentAimTargetHood or Hub.Settings.SilentAimTargetZombies or Hub.Settings.HoodKillAura or Hub.Settings.ZombieKillAura then
+        local enemyFolders = {}
+        local hl = Workspace:FindFirstChild("HoodLocal")
+        if hl then table.insert(enemyFolders, hl) end
+        local zf = Workspace:FindFirstChild("Zombies")
+        if zf then table.insert(enemyFolders, zf) end
+
+        for _, folder in ipairs(enemyFolders) do
+            for _, z in ipairs(folder:GetChildren()) do
+                if IsEnemyNPC(z) then
+                    local hp, maxHp, isDead = GetHoodRealtimeData(z)
                     local head = z:FindFirstChild("Head") or z:FindFirstChild("HumanoidRootPart")
                     local zHrp = z:FindFirstChild("HumanoidRootPart")
                     if not isDead and hp > 0 and head and zHrp and zHrp.Position.Y > -100 then
                         local worldDist = (myPos - head.Position).Magnitude
-                        if worldDist <= (Hub.Settings.ZombieKillAuraRange or 250) then
-                            if worldDist < bestScore then
-                                bestScore = worldDist
-                                bestTarget = z
-                                bestBone = head
-                                isZombieTarget = true
+                        if worldDist <= (Hub.Settings.SilentAimMaxDist or 400) then
+                            local screenPos, depth, onScreen = WorldToViewport(head.Position)
+                            if onScreen and depth > 0 then
+                                local screenDist = (screenPos - center).Magnitude
+                                if screenDist <= Hub.Settings.SilentAimFOV then
+                                    local visible = true
+                                    if Hub.Settings.SilentAimWallCheck then
+                                        visible = IsHoodVisible(head, z)
+                                    end
+                                    if visible then
+                                        local score = screenDist
+                                        if score < bestScore then
+                                            bestScore = score
+                                            bestTarget = z
+                                            bestBone = head
+                                            isNpcTarget = true
+                                        end
+                                    end
+                                end
                             end
                         end
                     end
@@ -583,42 +719,51 @@ local function GetClosestEnemyInFOV()
         end
     end
 
-    -- 2. Check Players if not targeting a zombie
-    if not isZombieTarget then
+    -- 2. Check Players if not locked on NPC
+    if not isNpcTarget then
         for _, player in ipairs(Players:GetPlayers()) do
-            if IsTargetValid(player) then
-                local bone = GetBone(player, Hub.Settings.AimbotBone)
-                if bone then
-                    local worldDist = (myPos - bone.Position).Magnitude
-                    if worldDist <= Hub.Settings.AimbotMaxDist then
-                        local screenPos, depth, onScreen = WorldToViewport(bone.Position)
+            if IsSilentAimTargetValid(player) then
+                local boneName = Hub.Settings.SilentAimBone or "Head"
+                if boneName == "Random" then
+                    boneName = (math.random(1, 100) <= 70) and "Head" or "UpperTorso"
+                end
+
+                -- Prefer exact hitbox part from ClientHitboxes for 100% collision accuracy
+                local targetBone = nil
+                local ch = Workspace:FindFirstChild("ClientHitboxes")
+                local pFolder = ch and ch:FindFirstChild(player.Name)
+                if pFolder then
+                    targetBone = pFolder:FindFirstChild(boneName) or pFolder:FindFirstChild("Head") or pFolder:FindFirstChild("UpperTorso")
+                end
+                if not targetBone then
+                    targetBone = GetBone(player, boneName)
+                end
+
+                if targetBone then
+                    local worldDist = (myPos - targetBone.Position).Magnitude
+                    if worldDist <= (Hub.Settings.SilentAimMaxDist or 400) then
+                        local screenPos, depth, onScreen = WorldToViewport(targetBone.Position)
                         if onScreen and depth > 0 then
                             local screenDist = (screenPos - center).Magnitude
-                            if screenDist <= Hub.Settings.AimbotFOV then
+                            if screenDist <= Hub.Settings.SilentAimFOV then
                                 local visible = true
-                                if Hub.Settings.AimbotWallCheck then
-                                    visible = IsVisible(player.Character, bone)
+                                if Hub.Settings.SilentAimWallCheck then
+                                    visible = IsVisible(player.Character, targetBone)
                                 end
 
                                 if visible then
                                     local score = 0
-                                    if Hub.Settings.AimbotPriority == "Distance" then
-                                        score = worldDist + (screenDist * 0.05)
-                                    elseif Hub.Settings.AimbotPriority == "Crosshair" then
+                                    if Hub.Settings.SilentAimPriority == "Crosshair" then
                                         score = screenDist
                                     else
-                                        score = (worldDist * 0.7) + (screenDist * 0.3)
-                                    end
-
-                                    if Hub.CurrentTarget == player then
-                                        score = score - 15
+                                        score = worldDist + (screenDist * 0.05)
                                     end
 
                                     if score < bestScore then
                                         bestScore = score
                                         bestTarget = player
-                                        bestBone = bone
-                                        isZombieTarget = false
+                                        bestBone = targetBone
+                                        isNpcTarget = false
                                     end
                                 end
                             end
@@ -629,11 +774,71 @@ local function GetClosestEnemyInFOV()
         end
     end
 
-    Hub.CurrentTarget = bestTarget
-    Hub.CurrentTargetBone = bestBone
-    Hub.IsTargetingZombie = isZombieTarget
-    return bestTarget, bestBone, isZombieTarget
+    return bestTarget, bestBone, isNpcTarget
 end
+
+-- Hook engine for ViewportPointToRay & ScreenPointToRay redirection
+local function InitSilentAimHooks()
+    if typeof(hookfunction) == "function" then
+        if typeof(Camera.ViewportPointToRay) == "function" then
+            local oldVPR = nil
+            oldVPR = hookfunction(Camera.ViewportPointToRay, function(self, x, y)
+                local origRay = oldVPR(self, x, y)
+                if not checkcaller() and Hub.Settings.SilentAim and (self == Camera or self == Workspace.CurrentCamera) then
+                    if Hub.Settings.SilentAimHitChance >= 100 or math.random(1, 100) <= Hub.Settings.SilentAimHitChance then
+                        local _, targetBone = GetSilentAimTarget()
+                        if targetBone then
+                            local dir = (targetBone.Position - origRay.Origin).Unit
+                            return Ray.new(origRay.Origin, dir)
+                        end
+                    end
+                end
+                return origRay
+            end)
+        end
+
+        if typeof(Camera.ScreenPointToRay) == "function" then
+            local oldSPR = nil
+            oldSPR = hookfunction(Camera.ScreenPointToRay, function(self, x, y)
+                local origRay = oldSPR(self, x, y)
+                if not checkcaller() and Hub.Settings.SilentAim and (self == Camera or self == Workspace.CurrentCamera) then
+                    if Hub.Settings.SilentAimHitChance >= 100 or math.random(1, 100) <= Hub.Settings.SilentAimHitChance then
+                        local _, targetBone = GetSilentAimTarget()
+                        if targetBone then
+                            local dir = (targetBone.Position - origRay.Origin).Unit
+                            return Ray.new(origRay.Origin, dir)
+                        end
+                    end
+                end
+                return origRay
+            end)
+        end
+    end
+
+    if typeof(hookmetamethod) == "function" then
+        pcall(function()
+            local oldNamecall = nil
+            oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+                local method = getnamecallmethod()
+                if method == "ViewportPointToRay" or method == "ScreenPointToRay" then
+                    if not checkcaller() and Hub.Settings.SilentAim and (self == Camera or self == Workspace.CurrentCamera) then
+                        local origRay = oldNamecall(self, ...)
+                        if Hub.Settings.SilentAimHitChance >= 100 or math.random(1, 100) <= Hub.Settings.SilentAimHitChance then
+                            local _, targetBone = GetSilentAimTarget()
+                            if targetBone then
+                                local dir = (targetBone.Position - origRay.Origin).Unit
+                                return Ray.new(origRay.Origin, dir)
+                            end
+                        end
+                        return origRay
+                    end
+                end
+                return oldNamecall(self, ...)
+            end)
+        end)
+    end
+end
+pcall(InitSilentAimHooks)
 
 local function makeWritable(tbl)
     if type(tbl) == "table" and typeof(setreadonly) == "function" then
@@ -721,46 +926,44 @@ local function ApplyWeaponMods()
 end
 
 -- ================================================
--- 🎯 7. HITBOX EXPANDER (SILENT AIM ENGINE)
--- Directly scales parts in Workspace.ClientHitboxes
+-- 🎯 7. HITBOX EXPANDER (ZERO-COST CONDITIONAL UPDATE)
 -- ================================================
+local _lastHitboxUpdate = 0
 local function UpdateHitboxes()
     local clientHitboxes = Workspace:FindFirstChild("ClientHitboxes")
     if not clientHitboxes then return end
 
-    local targetSize = Vector3.new(Hub.Settings.HitboxSize, Hub.Settings.HitboxSize, Hub.Settings.HitboxSize)
+    local hSize = Hub.Settings.HitboxSize or 14
+    local targetSize = Vector3.new(hSize, hSize, hSize)
+    local isVisible = Hub.Settings.HitboxVisible == true
+    local targetTrans = isVisible and (Hub.Settings.HitboxTransparency or 0.65) or 1
+    local targetBone = Hub.Settings.HitboxTarget or "Head"
 
     for _, folder in ipairs(clientHitboxes:GetChildren()) do
         if folder.Name ~= LocalPlayer.Name then
             local player = Players:FindFirstChild(folder.Name)
-            local isTargetValid = player and IsEnemy(player) and IsAlive(player)
+            local char = player and player.Character
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            local isTargetValid = char and hum and hum.Health > 0 and IsEnemy(player)
 
-            local partsToScale = {}
-            if Hub.Settings.HitboxTarget == "Head" then
-                table.insert(partsToScale, folder:FindFirstChild("Head"))
-            elseif Hub.Settings.HitboxTarget == "UpperTorso" then
-                table.insert(partsToScale, folder:FindFirstChild("UpperTorso"))
-            else
-                for _, part in ipairs(folder:GetChildren()) do
-                    if part:IsA("BasePart") then
-                        table.insert(partsToScale, part)
-                    end
-                end
-            end
-
-            for _, part in ipairs(partsToScale) do
-                if part and part:IsA("BasePart") then
-                    if Hub.Settings.HitboxExpander and isTargetValid then
+            local part = folder:FindFirstChild(targetBone) or folder:FindFirstChild("Head")
+            if part and part:IsA("BasePart") then
+                if Hub.Settings.HitboxExpander and isTargetValid then
+                    if part.Size ~= targetSize then
                         part.Size = targetSize
+                    end
+                    if part.CanCollide then
                         part.CanCollide = false
-                        if Hub.Settings.HitboxVisible then
-                            part.Transparency = Hub.Settings.HitboxTransparency
-                            part.Color = Color3.fromRGB(255, 30, 30)
-                            part.Material = Enum.Material.ForceField
-                        else
-                            part.Transparency = 1
-                        end
-                    else
+                    end
+                    if part.Transparency ~= targetTrans then
+                        part.Transparency = targetTrans
+                    end
+                    if isVisible and part.Material ~= Enum.Material.ForceField then
+                        part.Color = Color3.fromRGB(255, 30, 30)
+                        part.Material = Enum.Material.ForceField
+                    end
+                else
+                    if part.Transparency ~= 1 then
                         part.Transparency = 1
                     end
                 end
@@ -770,35 +973,31 @@ local function UpdateHitboxes()
 end
 
 -- ================================================
--- 🔄 8. HEARTBEAT / RENDERSTEPPED CORE LOOP
+-- 🔄 8. HEARTBEAT / RENDERSTEPPED CORE LOOP (OPTIMIZED)
 -- ================================================
+local _cachedHitmarker = nil
+local _lastDamageCheck = 0
+
 Hub.Connections.CoreEnforcer = RunService.RenderStepped:Connect(function(dt)
     if not Hub.Running then return end
 
-    -- 1. 100% Safe Native Camera Recoil Multiplier (Zero detection)
+    -- 1. Native Camera Recoil & Stamina (Direct table writes - Zero Overhead)
     if ClientState then
-        if Hub.Settings.NoRecoil then
-            ClientState.RecoilScale = 0
-        else
-            ClientState.RecoilScale = 1
-        end
-        -- Infinite Stamina & No Exhaustion
+        ClientState.RecoilScale = Hub.Settings.NoRecoil and 0 or 1
         if Hub.Settings.InfiniteStamina then
             ClientState.Stamina = ClientState.StaminaMax or 150
             ClientState.Exhausted = false
             ClientState.JumpCost = 0
         end
-        -- Anti-Freeze / Downed Prevention
         ClientState.Frozen = false
 
-        -- Enforce Red Damage Numbers in ClientState
         if Hub.Settings.RedDamageNumbers and not ClientState._HookedRedDamage then
             ClientState._HookedRedDamage = true
             local oldShow = ClientState.ShowDamageNumber
             if type(oldShow) == "function" then
                 ClientState.ShowDamageNumber = function(hitData)
                     if type(hitData) == "table" and Hub.Settings.RedDamageNumbers then
-                        if Hub.Settings.AimbotBone == "Head" or hitData.Headshot == true then
+                        if Hub.Settings.SilentAimBone == "Head" or hitData.Headshot == true then
                             hitData.Headshot = true
                         end
                     end
@@ -808,8 +1007,11 @@ Hub.Connections.CoreEnforcer = RunService.RenderStepped:Connect(function(dt)
         end
     end
 
-    -- Enforce Red Headshot Color attributes in StarterGui & PlayerGui
-    if Hub.Settings.RedDamageNumbers then
+    local now = os.clock()
+
+    -- 2. Damage Numbers UI Check (Throttled to once every 2 seconds, no per-frame DOM search)
+    if Hub.Settings.RedDamageNumbers and (now - _lastDamageCheck >= 2.0) then
+        _lastDamageCheck = now
         pcall(function()
             local starterGui = game:GetService("StarterGui")
             local wui = starterGui:FindFirstChild("WorldUI")
@@ -819,117 +1021,62 @@ Hub.Connections.CoreEnforcer = RunService.RenderStepped:Connect(function(dt)
                 text:SetAttribute("HeadColor", Color3.fromRGB(255, 30, 30))
             end
 
-            local pg = LocalPlayer:FindFirstChild("PlayerGui")
-            local hm = pg and pg:FindFirstChild("Hitmarker", true)
-            if hm and hm:GetAttribute("HeadshotColor") ~= Color3.fromRGB(255, 30, 30) then
-                hm:SetAttribute("HeadshotColor", Color3.fromRGB(255, 30, 30))
-                hm:SetAttribute("KillColor", Color3.fromRGB(255, 30, 30))
+            if not _cachedHitmarker or not _cachedHitmarker.Parent then
+                local pg = LocalPlayer:FindFirstChild("PlayerGui")
+                _cachedHitmarker = pg and pg:FindFirstChild("Hitmarker", true)
+            end
+            if _cachedHitmarker then
+                if _cachedHitmarker:GetAttribute("HeadshotColor") ~= Color3.fromRGB(255, 30, 30) then
+                    _cachedHitmarker:SetAttribute("HeadshotColor", Color3.fromRGB(255, 30, 30))
+                    _cachedHitmarker:SetAttribute("KillColor", Color3.fromRGB(255, 30, 30))
+                end
             end
         end)
     end
 
-    if Config and Config.Global then
-        if Hub.Settings.FastRoll then
-            Config.Global.RollCooldown = 0
-            Config.Global.RollDistance = 2.2
-        end
-        -- Native Speed Multiplier
-        if Hub.Settings.SpeedHack then
-            Config.Global.SprintSpeed = Hub.Settings.SpeedValue
-            Config.Global.WalkSpeed = math.min(Hub.Settings.SpeedValue * 0.7, 24)
-            Config.Global.MoveSpeedMul = 1.3
-        end
-    end
-
-    -- Character Speed & Jump
-    local myChar = LocalPlayer.Character
-    local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
-    local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
-
-    if myHum and myHRP and myHum.Health > 0 then
-        if Hub.Settings.SpeedHack then
-            myHum.WalkSpeed = Hub.Settings.SpeedValue
-        end
-        if Hub.Settings.HighJump then
-            myHum.UseJumpPower = true
-            myHum.JumpPower = Hub.Settings.HighJumpPower
-        end
-    end
-
-    -- Hitbox Expander update (Bullet tracking directly to head)
-    if Hub.Settings.HitboxExpander then
+    -- Hitbox Expander update (Throttled to 10 Hz to prevent physics stutter)
+    if Hub.Settings.HitboxExpander and (now - _lastHitboxUpdate >= 0.1) then
+        _lastHitboxUpdate = now
         UpdateHitboxes()
     end
 end)
 
 -- ================================================
--- 🎯 8.1 POST-CAMERA AIMBOT ENGINE (FROM ssss.txt)
--- BindToRenderStep Camera.Value + 1 prevents camera fighting
--- Locks 100% to head on Shoot (Left Click) OR Aim (Right Click)
+-- ⭕ 8.1 SILENT AIM FOV RENDER LOOP
+-- Keeps FOV Circle position, size & rainbow cycle in sync
 -- ================================================
-pcall(function() RunService:UnbindFromRenderStep("KrakenAimbot") end)
-RunService:BindToRenderStep("KrakenAimbot", Enum.RenderPriority.Camera.Value + 1, function()
+pcall(function() RunService:UnbindFromRenderStep("KrakenSilentFOV") end)
+    pcall(function() RunService:UnbindFromRenderStep("KrakenAimbot") end)
+pcall(function() RunService:UnbindFromRenderStep("KrakenSilentFOV") end)
+RunService:BindToRenderStep("KrakenSilentFOV", Enum.RenderPriority.Camera.Value + 1, function()
     if not Hub.Running then return end
 
-    -- Update FOV Circle perfectly in sync with camera viewport
-    FOVCircle.Visible = Hub.Settings.Aimbot and Hub.Settings.DrawFOV
-    if FOVCircle.Visible then
-        FOVCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-        FOVCircle.Radius = Hub.Settings.AimbotFOV
-        FOVCircle.Color = Hub.Settings.FOVColor
-    end
-
-    local isAutoFarming = Hub.Settings.ZombieKillAura
-    if not Hub.Settings.Aimbot and not isAutoFarming then
-        Hub.CurrentTarget = nil
-        return
-    end
-
-    -- Trigger detection: Left Click (shooting), Right Click (aiming), or configured keybind
-    local aimKeyPressed = false
-    local trig = Hub.Settings.AimbotTriggerMode or "Aim OR Shoot"
-    local isRightClick = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
-    local isLeftClick = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
-    local isKey = false
-    if typeof(Hub.Settings.AimbotKey) == "EnumItem" then
-        if Hub.Settings.AimbotKey.EnumType == Enum.UserInputType then
-            isKey = UserInputService:IsMouseButtonPressed(Hub.Settings.AimbotKey)
-        else
-            isKey = UserInputService:IsKeyDown(Hub.Settings.AimbotKey)
+    if SilentFOVCircle then
+        local shouldDraw = Hub.Settings.SilentAimDrawFOV == true
+        if SilentFOVCircle.Visible ~= shouldDraw then
+            SilentFOVCircle.Visible = shouldDraw
+        end
+        if shouldDraw then
+            local vp = Camera.ViewportSize
+            local cx = vp.X * 0.5
+            local cy = vp.Y * 0.5
+            if SilentFOVCircle.Position.X ~= cx or SilentFOVCircle.Position.Y ~= cy then
+                SilentFOVCircle.Position = Vector2.new(cx, cy)
+            end
+            local r = Hub.Settings.SilentAimFOV or 180
+            if SilentFOVCircle.Radius ~= r then
+                SilentFOVCircle.Radius = r
+            end
+            if Hub.Settings.SilentAimFOVRainbow then
+                SilentFOVCircle.Color = Color3.fromHSV((tick() * 0.35) % 1, 1, 1)
+            else
+                local col = Hub.Settings.SilentAimFOVColor or Color3.fromRGB(255, 140, 0)
+                if SilentFOVCircle.Color ~= col then
+                    SilentFOVCircle.Color = col
+                end
+            end
         end
     end
-
-    if trig == "Aim OR Shoot" or trig:find("Aim OR Shoot") then
-        aimKeyPressed = isRightClick or isLeftClick or isKey
-    elseif trig:find("Right Click") then
-        aimKeyPressed = isRightClick or isKey
-    elseif trig:find("Left Click") then
-        aimKeyPressed = isLeftClick
-    else
-        aimKeyPressed = isKey
-    end
-
-    if not (aimKeyPressed or isAutoFarming) then
-        Hub.CurrentTarget = nil
-        return
-    end
-
-    local target, targetBone, isZombie = GetClosestEnemyInFOV()
-    if not target then
-        Hub.CurrentTarget = nil
-        return
-    end
-
-    local bone = targetBone or (isZombie and (target:FindFirstChild("Head") or target:FindFirstChild("HumanoidRootPart"))) or GetBone(target, Hub.Settings.AimbotBone or "Head")
-    if not bone then return end
-
-    local aimPos = bone.Position
-
-    local currentCF = Camera.CFrame
-    local targetCF = CFrame.new(currentCF.Position, aimPos)
-    -- Instant 100% lock when targeting zombies, or smoothing formula for players
-    local alpha = (Hub.Settings.AimbotSmoothing <= 0 or isZombie) and 1 or math.clamp(Hub.Settings.AimbotSmoothing, 0.01, 1)
-    Camera.CFrame = currentCF:Lerp(targetCF, alpha)
 end)
 
 -- ================================================
@@ -1002,76 +1149,64 @@ local charAddedConn = LocalPlayer.CharacterAdded:Connect(MonitorCharacterForResp
 table.insert(Hub.Connections, charAddedConn)
 
 -- ================================================
--- 🚀 9. INFINITE JUMP & FLY ENGINE
+-- 👤 9.1 CHARACTER NAME HIDER ENGINE
 -- ================================================
-Hub.Connections.InfJump = UserInputService.JumpRequest:Connect(function()
-    if Hub.Running and Hub.Settings.InfJump then
+local OriginalDisplayName = nil
+local function ApplyNametagVisibility(hide)
+    pcall(function()
         local char = LocalPlayer.Character
-        local hum = char and char:FindFirstChildOfClass("Humanoid")
-        if hum and hum.Health > 0 then
-            hum:ChangeState(Enum.HumanoidStateType.Jumping)
+        if not char then return end
+
+        local nt = char:FindFirstChild("NameTag")
+        if nt then
+            nt.Enabled = not hide
+            local nom = nt:FindFirstChild("Nom")
+            if nom then nom.Visible = not hide end
+            local plate = nt:FindFirstChild("Plate")
+            if plate then plate.Visible = not hide end
         end
-    end
-end)
 
-local flyBodyVel, flyBodyGyro = nil, nil
-local function StartFly()
-    local char = LocalPlayer.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-
-    flyBodyVel = Instance.new("BodyVelocity")
-    flyBodyVel.Name = "KrakenFlyVel"
-    flyBodyVel.MaxForce = Vector3.new(1e5, 1e5, 1e5)
-    flyBodyVel.Velocity = Vector3.zero
-    CollectionService:AddTag(flyBodyVel, "OwnFX")
-    flyBodyVel.Parent = hrp
-
-    flyBodyGyro = Instance.new("BodyGyro")
-    flyBodyGyro.Name = "KrakenFlyGyro"
-    flyBodyGyro.MaxTorque = Vector3.new(1e5, 1e5, 1e5)
-    flyBodyGyro.CFrame = hrp.CFrame
-    CollectionService:AddTag(flyBodyGyro, "OwnFX")
-    flyBodyGyro.Parent = hrp
-
-    Hub.Connections.FlyLoop = RunService.RenderStepped:Connect(function()
-        if not Hub.Settings.Fly or not flyBodyVel or not flyBodyVel.Parent then return end
-        local camCF = Camera.CFrame
-        local dir = Vector3.zero
-
-        if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir = dir + camCF.LookVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir = dir - camCF.LookVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir = dir - camCF.RightVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir = dir + camCF.RightVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir = dir + Vector3.new(0, 1, 0) end
-        if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then dir = dir - Vector3.new(0, 1, 0) end
-
-        flyBodyVel.Velocity = dir * Hub.Settings.FlySpeed
-        flyBodyGyro.CFrame = camCF
-    end)
-end
-
-local function StopFly()
-    if Hub.Connections.FlyLoop then
-        pcall(function() Hub.Connections.FlyLoop:Disconnect() end)
-    end
-    if flyBodyVel then pcall(function() flyBodyVel:Destroy() end) flyBodyVel = nil end
-    if flyBodyGyro then pcall(function() flyBodyGyro:Destroy() end) flyBodyGyro = nil end
-end
-
--- Noclip loop
-Hub.Connections.NoclipLoop = RunService.Stepped:Connect(function()
-    if Hub.Running and Hub.Settings.Noclip then
-        local char = LocalPlayer.Character
-        if char then
-            for _, part in ipairs(char:GetChildren()) do
-                if part:IsA("BasePart") then
-                    part.CanCollide = false
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            if hide then
+                if not OriginalDisplayName and hum.DisplayName ~= "" then
+                    OriginalDisplayName = hum.DisplayName
+                end
+                hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+                hum.NameDisplayDistance = 0
+            else
+                hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.Viewer
+                hum.NameDisplayDistance = 100
+                if OriginalDisplayName then
+                    hum.DisplayName = OriginalDisplayName
                 end
             end
         end
+    end)
+end
+
+local function SetHideCharacterName(enable)
+    Hub.Settings.HideCharacterName = enable
+    ApplyNametagVisibility(enable)
+end
+Hub.SetHideCharacterName = SetHideCharacterName
+Hub.ApplyNametagVisibility = ApplyNametagVisibility
+
+-- Auto re-apply on respawn
+local nameHiderConn = LocalPlayer.CharacterAdded:Connect(function(char)
+    if Hub.Running and Hub.Settings.HideCharacterName then
+        task.wait(0.2)
+        ApplyNametagVisibility(true)
+        local childConn = char.ChildAdded:Connect(function(child)
+            if Hub.Running and Hub.Settings.HideCharacterName and child.Name == "NameTag" then
+                task.wait(0.05)
+                ApplyNametagVisibility(true)
+            end
+        end)
+        table.insert(Hub.Connections, childConn)
     end
 end)
+table.insert(Hub.Connections, nameHiderConn)
 
 -- ================================================
 -- 👁️ 10. DRAWING API PLAYER ESP
@@ -1080,25 +1215,46 @@ local function MakePlayerESP(player)
     if Hub.ESP[player] then return end
 
     local obj = {
+        BoxOutline = Drawing.new("Square"),
         Box = Drawing.new("Square"),
+        HealthBarOutline = Drawing.new("Square"),
+        HealthBar = Drawing.new("Square"),
         Name = Drawing.new("Text"),
         Health = Drawing.new("Text"),
         Dist = Drawing.new("Text"),
         Weapon = Drawing.new("Text"),
         Tracer = Drawing.new("Line"),
+        Highlight = nil,
     }
 
     local fontId = (Drawing and Drawing.Fonts and Drawing.Fonts[Hub.Settings.ESPFont]) or 0
-    local fontSize = Hub.Settings.ESPFontSize or 14
+    local fontSize = Hub.Settings.ESPFontSize or 13
     local subSize = math.max(10, fontSize - 2)
 
+    obj.BoxOutline.Visible = false
+    obj.BoxOutline.Thickness = 3.0
+    obj.BoxOutline.Filled = false
+    obj.BoxOutline.Color = Color3.fromRGB(0, 0, 0)
+    obj.BoxOutline.Transparency = 0.85
+
     obj.Box.Visible = false
-    obj.Box.Thickness = 1.5
+    obj.Box.Thickness = 1.2
     obj.Box.Filled = false
-    obj.Box.Color = Hub.Settings.BoxColor
+    obj.Box.Color = Hub.Settings.BoxColor or Color3.fromRGB(255, 60, 60)
+
+    obj.HealthBarOutline.Visible = false
+    obj.HealthBarOutline.Thickness = 1
+    obj.HealthBarOutline.Filled = true
+    obj.HealthBarOutline.Color = Color3.fromRGB(15, 15, 15)
+    obj.HealthBarOutline.Transparency = 0.85
+
+    obj.HealthBar.Visible = false
+    obj.HealthBar.Thickness = 1
+    obj.HealthBar.Filled = true
+    obj.HealthBar.Transparency = 1
 
     obj.Name.Visible = false
-    obj.Name.Color = Hub.Settings.NameColor
+    obj.Name.Color = Hub.Settings.NameColor or Color3.fromRGB(255, 255, 255)
     obj.Name.Font = fontId
     obj.Name.Size = fontSize
     obj.Name.Center = true
@@ -1106,15 +1262,15 @@ local function MakePlayerESP(player)
     obj.Name.OutlineColor = Color3.fromRGB(0, 0, 0)
 
     obj.Health.Visible = false
-    obj.Health.Color = Hub.Settings.HealthColor
+    obj.Health.Color = Hub.Settings.HealthColor or Color3.fromRGB(60, 255, 60)
     obj.Health.Font = fontId
-    obj.Health.Size = subSize
-    obj.Health.Center = true
+    obj.Health.Size = math.max(10, subSize - 1)
+    obj.Health.Center = false
     obj.Health.Outline = true
     obj.Health.OutlineColor = Color3.fromRGB(0, 0, 0)
 
     obj.Dist.Visible = false
-    obj.Dist.Color = Hub.Settings.NameColor
+    obj.Dist.Color = Color3.fromRGB(180, 220, 255)
     obj.Dist.Font = fontId
     obj.Dist.Size = subSize
     obj.Dist.Center = true
@@ -1122,7 +1278,7 @@ local function MakePlayerESP(player)
     obj.Dist.OutlineColor = Color3.fromRGB(0, 0, 0)
 
     obj.Weapon.Visible = false
-    obj.Weapon.Color = Color3.fromRGB(255, 215, 0)
+    obj.Weapon.Color = Color3.fromRGB(255, 215, 80)
     obj.Weapon.Font = fontId
     obj.Weapon.Size = subSize
     obj.Weapon.Center = true
@@ -1130,8 +1286,19 @@ local function MakePlayerESP(player)
     obj.Weapon.OutlineColor = Color3.fromRGB(0, 0, 0)
 
     obj.Tracer.Visible = false
-    obj.Tracer.Color = Hub.Settings.TracerColor
+    obj.Tracer.Color = Hub.Settings.TracerColor or Color3.fromRGB(0, 200, 255)
     obj.Tracer.Thickness = 1.2
+
+    -- Chams Glowing Highlight (ขอบแดง ตัวแดงจางลง นุ่มนวลตา ไม่บังหน้าจอ)
+    local hl = Instance.new("Highlight")
+    hl.Name = "KrakenChams_" .. player.Name
+    hl.FillColor = Hub.Settings.ChamsColor or Color3.fromRGB(255, 35, 35)
+    hl.OutlineColor = Hub.Settings.ChamsOutlineColor or Color3.fromRGB(255, 45, 45)
+    hl.FillTransparency = Hub.Settings.ChamsTransparency or 0.78
+    hl.OutlineTransparency = 0.25
+    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    hl.Enabled = false
+    obj.Highlight = hl
 
     Hub.ESP[player] = obj
 end
@@ -1139,8 +1306,14 @@ end
 local function RemovePlayerESP(player)
     local obj = Hub.ESP[player]
     if not obj then return end
-    for _, d in pairs(obj) do
-        pcall(function() d:Remove() end)
+    if obj.Highlight then
+        pcall(function() obj.Highlight:Destroy() end)
+        obj.Highlight = nil
+    end
+    for k, d in pairs(obj) do
+        if k ~= "Highlight" then
+            pcall(function() d:Remove() end)
+        end
     end
     Hub.ESP[player] = nil
 end
@@ -1151,99 +1324,243 @@ end
 Hub.Connections.PlayerAdded = Players.PlayerAdded:Connect(MakePlayerESP)
 Hub.Connections.PlayerRemoving = Players.PlayerRemoving:Connect(RemovePlayerESP)
 
+local weaponNameCache = {}
+local function GetFormattedWeaponName(rawName)
+    local cached = weaponNameCache[rawName]
+    if not cached then
+        cached = rawName:gsub("Tool", ""):gsub("_", " ")
+        weaponNameCache[rawName] = cached
+    end
+    return cached
+end
+
 Hub.Connections.ESPUpdate = RunService:BindToRenderStep("KrakenESP", Enum.RenderPriority.Camera.Value - 2, function()
     if not Hub.Running then return end
+
+    local function hideESP(obj)
+        if obj.BoxOutline then obj.BoxOutline.Visible = false end
+        obj.Box.Visible = false
+        obj.Name.Visible = false
+        obj.Health.Visible = false
+        obj.Dist.Visible = false
+        obj.Weapon.Visible = false
+        obj.Tracer.Visible = false
+        obj.HealthBarOutline.Visible = false
+        obj.HealthBar.Visible = false
+        if obj.Highlight and obj.Highlight.Enabled then
+            obj.Highlight.Enabled = false
+            obj.Highlight.Adornee = nil
+        end
+    end
+
+    -- Pause drawing and hide if PlayerESP is off or Cases UI is open
+    if not Hub.Settings.PlayerESP or Hub._CasesOpen then
+        for _, obj in pairs(Hub.ESP) do
+            hideESP(obj)
+        end
+        return
+    end
 
     local fontId = (Drawing and Drawing.Fonts and Drawing.Fonts[Hub.Settings.ESPFont]) or 0
     local fontSize = Hub.Settings.ESPFontSize or 14
     local subSize = math.max(10, fontSize - 2)
 
+    local camPos = Camera.CFrame.Position
+    local maxDist = Hub.Settings.ESPMaxDistance or 650
+    local maxDistSq = maxDist * maxDist
+    local vp = Camera.ViewportSize
+    local vpX = vp.X
+    local vpY = vp.Y
+    local tracerOrigin = Vector2.new(vpX * 0.5, vpY)
+
     for player, obj in pairs(Hub.ESP) do
-        local visible = Hub.Settings.PlayerESP and IsEnemy(player) and IsAlive(player)
+        if player == LocalPlayer or (Hub.Settings.ESPTeamCheck and player.Team and LocalPlayer.Team and player.Team == LocalPlayer.Team) then
+            hideESP(obj)
+            continue
+        end
 
-        if not visible then
-            for _, d in pairs(obj) do d.Visible = false end
-        else
-            local char = GetCharacter(player)
-            local root = char and char:FindFirstChild("HumanoidRootPart")
-            local head = char and char:FindFirstChild("Head")
-            local hum = char and char:FindFirstChildOfClass("Humanoid")
+        local char = player.Character
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        local head = char and char:FindFirstChild("Head")
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
 
-            if not root or not head or not hum then
-                for _, d in pairs(obj) do d.Visible = false end
-                continue
+        if not root or not head or not hum or hum.Health <= 0 then
+            hideESP(obj)
+            continue
+        end
+
+        local rootPos = root.Position
+        local distSq = (camPos.X - rootPos.X)^2 + (camPos.Y - rootPos.Y)^2 + (camPos.Z - rootPos.Z)^2
+        if distSq > maxDistSq then
+            hideESP(obj)
+            continue
+        end
+
+        local headHalfY = (head.Size and head.Size.Y * 0.5) or 0.6
+        local topWorld = head.Position + Vector3.new(0, headHalfY + 0.15, 0)
+        local bottomWorld = root.Position - Vector3.new(0, 2.75, 0)
+
+        local topScreen, topDepth = WorldToViewport(topWorld)
+        local bottomScreen, bottomDepth = WorldToViewport(bottomWorld)
+
+        -- Target behind camera frustum: hide
+        if topDepth <= 0 and bottomDepth <= 0 then
+            hideESP(obj)
+            continue
+        end
+
+        local boxH = math.abs(bottomScreen.Y - topScreen.Y)
+        if boxH < 3 then
+            hideESP(obj)
+            continue
+        end
+
+        -- Fast 2D Bounding Box Calculation
+        local boxW = math.clamp(math.floor(boxH * 0.46), 4, 300)
+        local centerX = topScreen.X
+        local boxX = centerX - boxW * 0.5
+        local boxY = topScreen.Y
+
+        -- Frustum visibility check: intersects screen borders (with 25px leeway to stop flickering)
+        if (boxX + boxW < -25) or (boxX > vpX + 25) or (boxY + boxH < -25) or (boxY > vpY + 25) then
+            hideESP(obj)
+            continue
+        end
+
+        local dist = math.sqrt(distSq)
+
+        -- 0. Glowing Body Chams (Optimized: capped to 200 studs to prevent mobile/low-end GPU fillrate drops)
+        if Hub.Settings.ESPChams and obj.Highlight and dist <= 200 then
+            if obj.Highlight.Adornee ~= char then
+                obj.Highlight.Adornee = char
+                obj.Highlight.Parent = char
+                obj.Highlight.FillColor = Hub.Settings.ChamsColor or Color3.fromRGB(255, 35, 35)
+                obj.Highlight.OutlineColor = Hub.Settings.ChamsOutlineColor or Color3.fromRGB(255, 45, 45)
+                obj.Highlight.FillTransparency = Hub.Settings.ChamsTransparency or 0.78
+                obj.Highlight.OutlineTransparency = 0.25
             end
-
-            local dist = (Camera.CFrame.Position - root.Position).Magnitude
-            if dist > Hub.Settings.ESPMaxDistance then
-                for _, d in pairs(obj) do d.Visible = false end
-                continue
+            if not obj.Highlight.Enabled then
+                obj.Highlight.Enabled = true
             end
+        elseif obj.Highlight and obj.Highlight.Enabled then
+            obj.Highlight.Enabled = false
+            obj.Highlight.Adornee = nil
+        end
 
-            local topScreen, _, topOn = WorldToViewport(head.Position + Vector3.new(0, 2.2, 0))
-            local bottomScreen, _, bottomOn = WorldToViewport(root.Position - Vector3.new(0, 3.2, 0))
-
-            if not topOn or not bottomOn then
-                for _, d in pairs(obj) do d.Visible = false end
-                continue
+        -- 1. Precision 2D Box with High-Contrast Black Border
+        if obj.BoxOutline then
+            obj.BoxOutline.Visible = Hub.Settings.ESPBox
+            if Hub.Settings.ESPBox then
+                obj.BoxOutline.Position = Vector2.new(boxX - 1, boxY - 1)
+                obj.BoxOutline.Size = Vector2.new(boxW + 2, boxH + 2)
             end
+        end
 
-            local boxH = math.abs(topScreen.Y - bottomScreen.Y)
-            local boxW = boxH * 0.55
-            local boxX = topScreen.X - boxW / 2
-
-            -- 1. Box
-            obj.Box.Visible = Hub.Settings.ESPBox
-            obj.Box.Position = Vector2.new(boxX, topScreen.Y)
+        obj.Box.Visible = Hub.Settings.ESPBox
+        if Hub.Settings.ESPBox then
+            obj.Box.Position = Vector2.new(boxX, boxY)
             obj.Box.Size = Vector2.new(boxW, boxH)
-            obj.Box.Color = Hub.Settings.BoxColor
+            obj.Box.Color = Hub.Settings.BoxColor or Color3.fromRGB(255, 60, 60)
+        end
 
-            -- 2. Name (Clean Font & Legible format)
-            obj.Name.Visible = Hub.Settings.ESPName
+        -- 2. Clean Header (Single-line Name + Distance on top of Box)
+        local distMeters = math.floor(dist * 0.28)
+        local nameStr = player.DisplayName
+        if Hub.Settings.ESPNameMode == "Username" then
+            nameStr = player.Name
+        elseif Hub.Settings.ESPNameMode == "Both" then
+            nameStr = player.DisplayName .. " (@" .. player.Name .. ")"
+        end
+
+        local headerText = ""
+        if Hub.Settings.ESPName and Hub.Settings.ESPDistance then
+            headerText = nameStr .. "  [" .. distMeters .. "m]"
+        elseif Hub.Settings.ESPName then
+            headerText = nameStr
+        elseif Hub.Settings.ESPDistance then
+            headerText = distMeters .. "m"
+        end
+
+        if headerText ~= "" then
+            obj.Name.Visible = true
             obj.Name.Font = fontId
             obj.Name.Size = fontSize
-            obj.Name.Position = Vector2.new(topScreen.X, topScreen.Y - (fontSize + 3))
-
-            local nameStr = player.DisplayName
-            if Hub.Settings.ESPNameMode == "Username" then
-                nameStr = player.Name
-            elseif Hub.Settings.ESPNameMode == "Both" then
-                nameStr = player.DisplayName .. " (@" .. player.Name .. ")"
-            end
-            obj.Name.Text = nameStr
+            obj.Name.Position = Vector2.new(centerX, boxY - (fontSize + 3))
+            obj.Name.Text = headerText
             obj.Name.Color = Hub.Settings.NameColor
+        else
+            obj.Name.Visible = false
+        end
+        obj.Dist.Visible = false
 
-            -- 3. Health
-            local hp = math.clamp(math.floor((hum.Health / hum.MaxHealth) * 100), 0, 100)
-            obj.Health.Visible = Hub.Settings.ESPHealth
-            obj.Health.Font = fontId
-            obj.Health.Size = subSize
-            obj.Health.Position = Vector2.new(topScreen.X, topScreen.Y + boxH + 2)
-            obj.Health.Text = hp .. "% HP"
-            obj.Health.Color = Color3.fromRGB(255 - hp * 2.55, hp * 2.55, 30)
+        -- 3. Dynamic Health & Health Bar (Left of Box)
+        local hp = math.clamp(math.floor((hum.Health / math.max(hum.MaxHealth, 1)) * 100), 0, 100)
+        local hpColor = GetHealthColor(hp)
 
-            -- 4. Distance
-            obj.Dist.Visible = Hub.Settings.ESPDistance
-            obj.Dist.Font = fontId
-            obj.Dist.Size = subSize
-            obj.Dist.Position = Vector2.new(topScreen.X, topScreen.Y + boxH + subSize + 3)
-            obj.Dist.Text = math.floor(dist * 0.28) .. "m"
+        if Hub.Settings.ESPHealthBar and Hub.Settings.ESPBox then
+            local barW = 3
+            local barOutlineW = barW + 2
+            local barX = boxX - barOutlineW - 3
+            local currentBarH = math.clamp(math.floor(boxH * (hp / 100)), 1, math.max(1, boxH))
 
-            -- 5. Weapon
-            local tool = char:FindFirstChildOfClass("Tool")
-            obj.Weapon.Visible = Hub.Settings.ESPWeapon and tool ~= nil
-            if obj.Weapon.Visible then
-                obj.Weapon.Font = fontId
-                obj.Weapon.Size = subSize
-                obj.Weapon.Position = Vector2.new(topScreen.X, topScreen.Y + boxH + (subSize * 2) + 5)
-                obj.Weapon.Text = "[" .. (tool.Name) .. "]"
+            obj.HealthBarOutline.Visible = true
+            obj.HealthBarOutline.Position = Vector2.new(barX, boxY - 1)
+            obj.HealthBarOutline.Size = Vector2.new(barOutlineW, boxH + 2)
+
+            obj.HealthBar.Visible = true
+            obj.HealthBar.Position = Vector2.new(barX + 1, (boxY + boxH) - currentBarH)
+            obj.HealthBar.Size = Vector2.new(barW, currentBarH)
+            obj.HealthBar.Color = hpColor
+
+            if Hub.Settings.ESPHealth and hp < 100 then
+                obj.Health.Visible = true
+                obj.Health.Font = fontId
+                obj.Health.Size = math.max(10, subSize - 1)
+                obj.Health.Position = Vector2.new(barX - 22, (boxY + boxH) - currentBarH - 4)
+                obj.Health.Text = hp .. "%"
+                obj.Health.Color = hpColor
+            else
+                obj.Health.Visible = false
             end
+        else
+            obj.HealthBarOutline.Visible = false
+            obj.HealthBar.Visible = false
 
-            -- 6. Tracer
-            obj.Tracer.Visible = Hub.Settings.ESPTracers
-            obj.Tracer.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+            if Hub.Settings.ESPHealth then
+                obj.Health.Visible = true
+                obj.Health.Font = fontId
+                obj.Health.Size = subSize
+                obj.Health.Position = Vector2.new(centerX, boxY + boxH + 2)
+                obj.Health.Text = hp .. "% HP"
+                obj.Health.Color = hpColor
+            else
+                obj.Health.Visible = false
+            end
+        end
+
+        -- 4. Clean Weapon Footer (Single-line below Box with cached string)
+        local tool = char:FindFirstChildOfClass("Tool")
+        if Hub.Settings.ESPWeapon and tool and dist <= 250 then
+            local rawWeaponName = GetFormattedWeaponName(tool.Name)
+            obj.Weapon.Visible = true
+            obj.Weapon.Font = fontId
+            obj.Weapon.Size = subSize
+            local weaponY = (not Hub.Settings.ESPHealthBar and Hub.Settings.ESPHealth) and (boxY + boxH + subSize + 4) or (boxY + boxH + 3)
+            obj.Weapon.Position = Vector2.new(centerX, weaponY)
+            obj.Weapon.Text = rawWeaponName
+            obj.Weapon.Color = Color3.fromRGB(255, 215, 80)
+        else
+            obj.Weapon.Visible = false
+        end
+
+        -- 5. Tracer
+        if Hub.Settings.ESPTracers then
+            obj.Tracer.Visible = true
+            obj.Tracer.From = tracerOrigin
             obj.Tracer.To = bottomScreen
             obj.Tracer.Color = Hub.Settings.TracerColor
+        else
+            obj.Tracer.Visible = false
         end
     end
 end)
@@ -1303,166 +1620,166 @@ end
 
 
 -- ==============================================================
--- 🧟‍♂️ 12.1 ZOMBIE AUTO FARM, AUTO LOOT [E] & HITBOX ENGINE
+-- 🔫 12.1 HOOD NPC AUTO FARM, AUTO LOOT [E] & HITBOX ENGINE
 -- ==============================================================
-local ZombieESPStorage = {}
+local HoodESPStorage = {}
+local ZombieESPStorage = HoodESPStorage
 local vim = game:GetService("VirtualInputManager")
 
 task.spawn(function()
+    local lastHeadEnforce = 0
     while Hub.Running and genv._UrbanReloadScriptId == SCRIPT_ID do
-        task.wait(0.04)
+        -- If both Hood NPC features are disabled, idle sleep to save 100% CPU
+        local espActive = (Hub.Settings.HoodESP or Hub.Settings.ZombieESP) and not Hub._CasesOpen
+        local auraActive = Hub.Settings.HoodKillAura or Hub.Settings.ZombieKillAura
+        if not espActive and not auraActive then
+            for _, bb in pairs(HoodESPStorage) do
+                if bb and bb.Enabled then bb.Enabled = false end
+            end
+            task.wait(0.5)
+            continue
+        end
 
-        -- 1. Zombie Natural Head Size Enforcer (No Big Heads)
-        pcall(function()
-            local hoodLocal = Workspace:FindFirstChild("HoodLocal")
-            if hoodLocal then
-                local naturalSize = Vector3.new(0.792705, 1.214349, 0.902806)
-                for _, z in ipairs(hoodLocal:GetChildren()) do
-                    if z.Name:find("Zombie") then
-                        local head = z:FindFirstChild("Head")
-                        if head and head:IsA("BasePart") and head.Size.X > 1.8 then
-                            head.Size = naturalSize
-                            head.CanCollide = false
+        task.wait(0.1) -- 10 Hz smooth billboard update
+
+        local now = os.clock()
+        -- 1. Hood NPC Natural Head Size Enforcer (Run every 2s)
+        if now - lastHeadEnforce >= 2.0 then
+            lastHeadEnforce = now
+            pcall(function()
+                local hl = Workspace:FindFirstChild("HoodLocal")
+                if hl then
+                    local naturalSize = Vector3.new(0.792705, 1.214349, 0.902806)
+                    for _, z in ipairs(hl:GetChildren()) do
+                        if IsEnemyNPC(z) then
+                            local head = z:FindFirstChild("Head")
+                            if head and head:IsA("BasePart") and head.Size.X > 1.8 then
+                                head.Size = naturalSize
+                                head.CanCollide = false
+                            end
                         end
                     end
                 end
-            end
-        end)
+            end)
+        end
 
-        -- 2. Zombie Real-Time Visual ESP & Health Bar Update
+        -- 2. Hood NPC Real-Time Visual ESP (POOLED - Zero Allocation, Zero Flicker)
         pcall(function()
             local hoodLocal = Workspace:FindFirstChild("HoodLocal")
+            if not hoodLocal then return end
+
             local myChar = LocalPlayer.Character
             local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
             local myPos = (myHRP and myHRP.Position) or Camera.CFrame.Position
 
-            for model, bb in pairs(ZombieESPStorage) do
-                if not model.Parent or not Hub.Settings.ZombieESP then
+            -- Cleanup destroyed NPCs from storage
+            for model, bb in pairs(HoodESPStorage) do
+                if not model or not model.Parent then
                     pcall(function() bb:Destroy() end)
-                    ZombieESPStorage[model] = nil
+                    HoodESPStorage[model] = nil
                 end
             end
 
-            if Hub.Settings.ZombieESP and hoodLocal then
-                for _, z in ipairs(hoodLocal:GetChildren()) do
-                    if z.Name:find("Zombie") then
-                        local hp, maxHp, isDead = GetZombieRealtimeData(z)
-                        local head = z:FindFirstChild("Head")
-                        local zHrp = z:FindFirstChild("HumanoidRootPart")
-                        if not isDead and hp > 0 and head and zHrp and zHrp.Position.Y > -100 then
-                            local dist = math.floor((myPos - zHrp.Position).Magnitude)
-                            if dist <= (Hub.Settings.ZombieKillAuraRange or 250) then
-                                local bb = head:FindFirstChild("KrakenZombieESP") or ZombieESPStorage[z]
-                                if not bb or not bb.Parent or not bb:FindFirstChild("BarBg") then
-                                    if bb then pcall(function() bb:Destroy() end) end
-                                    bb = Instance.new("BillboardGui")
-                                    bb.Name = "KrakenZombieESP"
-                                    bb.AlwaysOnTop = true
-                                    bb.Size = UDim2.new(0, 130, 0, 42)
-                                    bb.StudsOffset = Vector3.new(0, 2.8, 0)
-                                    bb.Adornee = head
-                                    CollectionService:AddTag(bb, "OwnFX")
+            if not espActive then
+                for _, bb in pairs(HoodESPStorage) do
+                    if bb and bb.Enabled then bb.Enabled = false end
+                end
+                return
+            end
 
-                                    local title = Instance.new("TextLabel")
-                                    title.Name = "Title"
-                                    title.Size = UDim2.new(1, 0, 0, 16)
-                                    title.BackgroundTransparency = 1
-                                    title.Font = Enum.Font.GothamBold
-                                    title.TextSize = 12
-                                    title.TextColor3 = Color3.fromRGB(0, 255, 170)
-                                    title.TextStrokeTransparency = 0.2
-                                    title.Text = "🧟 " .. z.Name
-                                    title.Parent = bb
+            local auraDist = Hub.Settings.HoodKillAuraRange or Hub.Settings.ZombieKillAuraRange or 250
+            for _, z in ipairs(hoodLocal:GetChildren()) do
+                if IsEnemyNPC(z) then
+                    local head = z:FindFirstChild("Head") or z:FindFirstChild("HumanoidRootPart")
+                    local hp, maxHp, isDead = GetHoodRealtimeData(z)
+                    local bb = HoodESPStorage[z]
 
-                                    local sub = Instance.new("TextLabel")
-                                    sub.Name = "Sub"
-                                    sub.Position = UDim2.new(0, 0, 0, 16)
-                                    sub.Size = UDim2.new(1, 0, 0, 14)
-                                    sub.BackgroundTransparency = 1
-                                    sub.Font = Enum.Font.GothamMedium
-                                    sub.TextSize = 11
-                                    sub.TextColor3 = Color3.fromRGB(255, 255, 255)
-                                    sub.TextStrokeTransparency = 0.3
-                                    sub.Parent = bb
+                    if not isDead and hp > 0 and head and head.Position.Y > -100 then
+                        local dist = math.floor((myPos - head.Position).Magnitude)
+                        if dist <= auraDist then
+                            if not bb or not bb.Parent then
+                                bb = Instance.new("BillboardGui")
+                                bb.Name = "KrakenHoodESP"
+                                bb.Adornee = head
+                                bb.Size = UDim2.new(0, 140, 0, 36)
+                                bb.StudsOffset = Vector3.new(0, 2.2, 0)
+                                bb.AlwaysOnTop = true
+                                bb.MaxDistance = auraDist + 50
+                                bb.ResetOnSpawn = false
 
-                                    local barBg = Instance.new("Frame")
-                                    barBg.Name = "BarBg"
-                                    barBg.Position = UDim2.new(0.05, 0, 0, 32)
-                                    barBg.Size = UDim2.new(0.9, 0, 0, 5)
-                                    barBg.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-                                    barBg.BorderSizePixel = 0
-                                    barBg.Parent = bb
+                                local title = Instance.new("TextLabel")
+                                title.Name = "Title"
+                                title.Size = UDim2.new(1, 0, 0, 16)
+                                title.BackgroundTransparency = 1
+                                title.Font = Enum.Font.GothamBold
+                                title.TextSize = 13
+                                title.TextColor3 = Color3.fromRGB(255, 200, 50)
+                                title.TextStrokeTransparency = 0.2
+                                title.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+                                title.Parent = bb
 
-                                    local bgCorner = Instance.new("UICorner")
-                                    bgCorner.CornerRadius = UDim.new(0, 2)
-                                    bgCorner.Parent = barBg
+                                local sub = Instance.new("TextLabel")
+                                sub.Name = "Sub"
+                                sub.Size = UDim2.new(1, 0, 0, 13)
+                                sub.Position = UDim2.new(0, 0, 0, 16)
+                                sub.BackgroundTransparency = 1
+                                sub.Font = Enum.Font.GothamMedium
+                                sub.TextSize = 11
+                                sub.TextColor3 = Color3.fromRGB(100, 255, 120)
+                                sub.TextStrokeTransparency = 0.3
+                                sub.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+                                sub.Parent = bb
 
-                                    local barFill = Instance.new("Frame")
-                                    barFill.Name = "BarFill"
-                                    barFill.Size = UDim2.new(1, 0, 1, 0)
-                                    barFill.BackgroundColor3 = Color3.fromRGB(0, 255, 120)
-                                    barFill.BorderSizePixel = 0
-                                    barFill.Parent = barBg
+                                local barBg = Instance.new("Frame")
+                                barBg.Name = "BarBg"
+                                barBg.Size = UDim2.new(1, 0, 0, 4)
+                                barBg.Position = UDim2.new(0, 0, 0, 31)
+                                barBg.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+                                barBg.BorderSizePixel = 0
+                                barBg.Parent = bb
 
-                                    local fillCorner = Instance.new("UICorner")
-                                    fillCorner.CornerRadius = UDim.new(0, 2)
-                                    fillCorner.Parent = barFill
+                                local barFill = Instance.new("Frame")
+                                barFill.Name = "BarFill"
+                                barFill.Size = UDim2.new(1, 0, 1, 0)
+                                barFill.BackgroundColor3 = Color3.fromRGB(0, 255, 120)
+                                barFill.BorderSizePixel = 0
+                                barFill.Parent = barBg
 
-                                    bb.Parent = head
-                                    ZombieESPStorage[z] = bb
-                                end
+                                bb.Parent = head
+                                HoodESPStorage[z] = bb
+                            end
 
-                                -- Realtime HP and Health Bar update
-                                local pct = math.clamp(hp / math.max(maxHp, 1), 0, 1)
-                                local title = bb:FindFirstChild("Title")
-                                local sub = bb:FindFirstChild("Sub")
-                                local barBg = bb:FindFirstChild("BarBg")
-                                local barFill = barBg and barBg:FindFirstChild("BarFill")
+                            if not bb.Enabled then bb.Enabled = true end
 
-                                local isLosClear = IsZombieVisible(head, z)
-                                if title then
-                                    title.TextColor3 = isLosClear and Color3.fromRGB(0, 255, 170) or Color3.fromRGB(255, 140, 40)
-                                end
+                            local title = bb:FindFirstChild("Title")
+                            local sub = bb:FindFirstChild("Sub")
+                            local barBg = bb:FindFirstChild("BarBg")
+                            local barFill = barBg and barBg:FindFirstChild("BarFill")
+                            local pct = math.clamp(hp / math.max(maxHp, 1), 0, 1)
 
-                                if sub then
-                                    local statusTag = isLosClear and "[โล่ง]" or "[หลังกำแพง]"
-                                    sub.Text = string.format("HP: %d/%d | %dm %s", math.floor(hp), math.floor(maxHp), dist, statusTag)
-                                    if pct > 0.5 then
-                                        sub.TextColor3 = isLosClear and Color3.fromRGB(100, 255, 120) or Color3.fromRGB(255, 180, 80)
-                                    elseif pct > 0.25 then
-                                        sub.TextColor3 = Color3.fromRGB(255, 220, 60)
-                                    else
-                                        sub.TextColor3 = Color3.fromRGB(255, 70, 70)
-                                    end
-                                end
+                            if title then
+                                title.Text = "🔫 " .. z.Name .. " [" .. dist .. "m]"
+                            end
 
-                                if barFill then
-                                    barFill.Size = UDim2.new(pct, 0, 1, 0)
-                                    if pct > 0.5 then
-                                        barFill.BackgroundColor3 = Color3.fromRGB(0, 255, 120)
-                                    elseif pct > 0.25 then
-                                        barFill.BackgroundColor3 = Color3.fromRGB(255, 200, 50)
-                                    else
-                                        barFill.BackgroundColor3 = Color3.fromRGB(255, 60, 60)
-                                    end
-                                end
-                            else
-                                if ZombieESPStorage[z] then
-                                    pcall(function() ZombieESPStorage[z]:Destroy() end)
-                                    ZombieESPStorage[z] = nil
-                                end
-                                local oldBb = head:FindFirstChild("KrakenZombieESP")
-                                if oldBb then pcall(function() oldBb:Destroy() end) end
+                            if sub then
+                                sub.Text = math.floor(hp) .. " HP"
+                                sub.TextColor3 = (pct > 0.5 and Color3.fromRGB(100, 255, 120)) or (pct > 0.25 and Color3.fromRGB(255, 220, 60)) or Color3.fromRGB(255, 70, 70)
+                            end
+
+                            if barFill then
+                                barFill.Size = UDim2.new(pct, 0, 1, 0)
+                                barFill.BackgroundColor3 = (pct > 0.5 and Color3.fromRGB(0, 255, 120)) or (pct > 0.25 and Color3.fromRGB(255, 200, 40)) or Color3.fromRGB(255, 45, 45)
                             end
                         else
-                            if ZombieESPStorage[z] then
-                                pcall(function() ZombieESPStorage[z]:Destroy() end)
-                                ZombieESPStorage[z] = nil
+                            -- Out of range: just disable, NEVER DESTROY!
+                            if bb and bb.Enabled then
+                                bb.Enabled = false
                             end
-                            if head then
-                                local oldBb = head:FindFirstChild("KrakenZombieESP")
-                                if oldBb then pcall(function() oldBb:Destroy() end) end
-                            end
+                        end
+                    else
+                        -- Dead or despawned: disable
+                        if bb and bb.Enabled then
+                            bb.Enabled = false
                         end
                     end
                 end
@@ -1472,15 +1789,21 @@ task.spawn(function()
 end)
 
 -- ==============================================================
--- ⚔️ 12.2 ZOMBIE KILL AURA & AUTOMATIC MONEY LOOT ENGINE
--- Scans all alive zombies in farm zone, eliminates them in sequence
+-- ⚔️ 12.2 HOOD NPC KILL AURA & AUTOMATIC MONEY LOOT ENGINE
+-- Scans all alive Hood NPCs in farm zone, eliminates them in sequence
 -- with rapid headshots, loops on respawns, and loots cash instantly!
 -- ==============================================================
 task.spawn(function()
     while Hub.Running and genv._UrbanReloadScriptId == SCRIPT_ID do
+        local auraActive = Hub.Settings.HoodKillAura or Hub.Settings.ZombieKillAura
+        if not auraActive then
+            task.wait(0.4)
+            continue
+        end
+
         task.wait(0.02)
 
-        if Hub.Settings.ZombieKillAura then
+        if Hub.Settings.HoodKillAura or Hub.Settings.ZombieKillAura then
             -- 1. Ensure weapon is always equipped in hand
             local equippedTool = EnsureWeaponEquipped()
 
@@ -1489,23 +1812,30 @@ task.spawn(function()
             local myPos = (myHRP and myHRP.Position) or Camera.CFrame.Position
             local hoodLocal = Workspace:FindFirstChild("HoodLocal")
 
-            -- Find closest alive zombie using 100% Realtime HP
-            local targetZombie = nil
+            -- Find closest alive Hood NPC using 100% Realtime HP
+            local targetNpc = nil
             local targetHead = nil
             local targetNpcId = nil
             local minDist = math.huge
 
-            if hoodLocal then
-                for _, z in ipairs(hoodLocal:GetChildren()) do
-                    if z.Name:find("Zombie") then
-                        local hp, maxHp, isDead, id = GetZombieRealtimeData(z)
+            local enemyFolders = {}
+            local hl = Workspace:FindFirstChild("HoodLocal")
+            if hl then table.insert(enemyFolders, hl) end
+            local zf = Workspace:FindFirstChild("Zombies")
+            if zf then table.insert(enemyFolders, zf) end
+
+            local auraRange = Hub.Settings.HoodKillAuraRange or Hub.Settings.ZombieKillAuraRange or 250
+            for _, folder in ipairs(enemyFolders) do
+                for _, z in ipairs(folder:GetChildren()) do
+                    if IsEnemyNPC(z) then
+                        local hp, maxHp, isDead, id = GetHoodRealtimeData(z)
                         local head = z:FindFirstChild("Head")
                         local zHrp = z:FindFirstChild("HumanoidRootPart")
                         if not isDead and hp > 0 and head and zHrp and zHrp.Position.Y > -100 then
                             local dist = (myPos - head.Position).Magnitude
-                            if dist <= (Hub.Settings.ZombieKillAuraRange or 250) and dist < minDist then
+                            if dist <= auraRange and dist < minDist then
                                 minDist = dist
-                                targetZombie = z
+                                targetNpc = z
                                 targetHead = head
                                 targetNpcId = id
                             end
@@ -1514,9 +1844,9 @@ task.spawn(function()
                 end
             end
 
-            if targetZombie and targetHead and targetHead.Position.Y > -100 then
-                Hub.CurrentTarget = targetZombie
-                -- 1. Camera Aim: Continuously lock camera onto zombie head
+            if targetNpc and targetHead and targetHead.Position.Y > -100 then
+                Hub.CurrentTarget = targetNpc
+                -- 1. Camera Aim: Continuously lock camera onto Hood NPC head
                 Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetHead.Position)
 
                 if equippedTool then
@@ -1534,16 +1864,21 @@ task.spawn(function()
                             if ClientState and type(ClientState.HoodLootNow) == "function" then
                                 ClientState.HoodLootNow()
                             end
+                            local hoodRemote = HoodRemote or (ReplicatedStorage:FindFirstChild("HoodNPC") and ReplicatedStorage.HoodNPC:FindFirstChild("Remote"))
+                            if hoodRemote and targetNpcId then
+                                hoodRemote:FireServer("loot", targetNpcId, targetHead.Position)
+                            end
                             vim:SendKeyEvent(true, Enum.KeyCode.E, false, game)
                             task.wait(0.02)
                             vim:SendKeyEvent(false, Enum.KeyCode.E, false, game)
                         end)
                         task.wait(0.2)
                     else
-                        -- Check obstacle: if zombie is behind a wall or obstacle, HOLD FIRE!
+                        -- Check obstacle: if Hood NPC is behind a wall or obstacle, HOLD FIRE!
                         local isClearLOS = true
-                        if Hub.Settings.ZombieWallCheck then
-                            isClearLOS = IsZombieVisible(targetHead, targetZombie)
+                        local wallCheck = (Hub.Settings.HoodWallCheck ~= false) and (Hub.Settings.ZombieWallCheck ~= false)
+                        if wallCheck then
+                            isClearLOS = IsHoodVisible(targetHead, targetNpc)
                         end
 
                         if not isClearLOS then
@@ -1560,13 +1895,13 @@ task.spawn(function()
                             end
 
                             local shots = 0
-                            while Hub.Running and Hub.Settings.ZombieKillAura and targetHead and targetHead.Position.Y > -100 and shots < 6 do
-                                local curHp, _, isDeadNow = GetZombieRealtimeData(targetZombie)
+                            while Hub.Running and (Hub.Settings.HoodKillAura or Hub.Settings.ZombieKillAura) and targetHead and targetHead.Position.Y > -100 and shots < 6 do
+                                local curHp, _, isDeadNow = GetHoodRealtimeData(targetNpc)
                                 if isDeadNow or curHp <= 0 then
                                     break
                                 end
-                                -- Stop firing immediately if zombie steps behind an obstacle mid-burst
-                                if Hub.Settings.ZombieWallCheck and not IsZombieVisible(targetHead, targetZombie) then
+                                -- Stop firing immediately if NPC steps behind an obstacle mid-burst
+                                if wallCheck and not IsHoodVisible(targetHead, targetNpc) then
                                     break
                                 end
                                 shots = shots + 1
@@ -1604,7 +1939,7 @@ task.spawn(function()
                 end
             else
                 Hub.CurrentTarget = nil
-                -- No alive zombies currently in range (waiting for respawns)
+                -- No alive Hood NPCs currently in range (waiting for respawns)
                 if Controls and Controls.IsDown and Controls.IsDown("Aim") then
                     pcall(function() Controls.Press("Aim", false) end)
                 end
@@ -1623,24 +1958,6 @@ task.spawn(function()
         end
     end
 end)
-
--- Safe Locations Coordinates
-local SafePositions = {
-    ["Safe 1"] = Vector3.new(-70.7, 19.6, 881.6),
-    ["Safe 2"] = Vector3.new(-769.5, 6.6, 410.8),
-    ["Safe 3"] = Vector3.new(208.9, 12.1, 533.4),
-    ["Safe 4"] = Vector3.new(-732.9, 20.5, 729.7),
-}
-
-local function TeleportToSafe(safeName)
-    local pos = SafePositions[safeName]
-    local char = LocalPlayer.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if hrp and pos then
-        hrp.AssemblyLinearVelocity = Vector3.zero
-        hrp.CFrame = CFrame.new(pos + Vector3.new(0, 3, 0))
-    end
-end
 
 -- ==============================================================
 -- 🎨 13. MODERN MACLIB UI & FLOATING LOGO INTERFACE
@@ -1693,11 +2010,11 @@ local function InitUI()
         return "rbxasset://5059d143b75fc7c70a58a871660c4f16/k_community_logo.png"
     end
 
-    -- 🎨 2. LOAD MACLIB UI LIBRARY (WITH RED ACTIVE TOGGLE SWITCH PATCH)
+    -- 🎨 2. LOAD MACLIB UI LIBRARY (WITH RED ACTIVE TOGGLE, GREEN DOT & FONT SIZE PATCH)
     local MacLib = nil
     local ok, lib = pcall(function()
         local code = game:HttpGet("https://github.com/biggaboy212/Maclib/releases/latest/download/maclib.txt")
-        -- Patch toggle ON state to vibrant red Color3.fromRGB(235, 50, 50)
+        -- 1. Patch toggle ON state to vibrant red Color3.fromRGB(235, 50, 50)
         code = code:gsub(
             "Tween%(toggle1,%s*TweenSettings%.Info,%s*{%s*ImageTransparency%s*=%s*transparencyValues%[1%]%s*}%)",
             "Tween(toggle1, TweenSettings.Info, { ImageTransparency = transparencyValues[1], ImageColor3 = State and Color3.fromRGB(235, 50, 50) or Color3.fromRGB(87, 86, 86) })"
@@ -1706,6 +2023,52 @@ local function InitUI()
             "toggle1%.ImageColor3%s*=%s*Color3%.fromRGB%(87,%s*86,%s*86%)",
             "toggle1.ImageColor3 = togglebool and Color3.fromRGB(235, 50, 50) or Color3.fromRGB(87, 86, 86)"
         )
+        -- 2. Restore Green Dot (Maximize Button)
+        code = code:gsub("applyState%(maximize,%s*false%)", "applyState(maximize, true)")
+        code = code:gsub("maximize%.BackgroundColor3%s*=%s*Color3%.fromRGB%(119,%s*174,%s*94%)", "maximize.BackgroundColor3 = Color3.fromRGB(40, 205, 65)")
+
+        -- 3. Fix Slider Overlap: limit sliderName width and compact sliderElements
+        code = code:gsub(
+            "sliderName%.AutomaticSize%s*=%s*Enum%.AutomaticSize%.XY",
+            "sliderName.AutomaticSize = Enum.AutomaticSize.None\n\t\t\t\t\tsliderName.Size = UDim2.new(1, -145, 1, 0)\n\t\t\t\t\tsliderName.ClipsDescendants = true"
+        )
+        code = code:gsub(
+            "sliderBar%.Size%s*=%s*UDim2%.fromOffset%(123,%s*3%)",
+            "sliderBar.Size = UDim2.fromOffset(88, 3)"
+        )
+        code = code:gsub(
+            "sliderElementsUIListLayout%.Padding%s*=%s*UDim%.new%(0,%s*20%)",
+            "sliderElementsUIListLayout.Padding = UDim.new(0, 8)"
+        )
+        code = code:gsub(
+            "sliderValue%.Size%s*=%s*UDim2%.fromOffset%(41,%s*21%)",
+            "sliderValue.Size = UDim2.fromOffset(38, 20)"
+        )
+
+        -- 4. Fix Keybind Overlap: limit keybindName width and prevent text overlapping binderBox
+        code = code:gsub(
+            "keybindName%.AutomaticSize%s*=%s*Enum%.AutomaticSize%.XY",
+            "keybindName.AutomaticSize = Enum.AutomaticSize.None\n\t\t\t\t\tkeybindName.Size = UDim2.new(1, -100, 1, 0)\n\t\t\t\t\tkeybindName.ClipsDescendants = true"
+        )
+
+        -- 5. Partially censor UserInfo at bottom-left (Show avatar and partial masked name)
+        code = code:gsub(
+            "displayName%.Text%s*=%s*LocalPlayer%.DisplayName",
+            'local function _mask(s) if not s or #s <= 3 then return (s or ""):sub(1,1).."***" end return s:sub(1,2).."****"..s:sub(-2) end\n\tdisplayName.Text = _mask(LocalPlayer.DisplayName)'
+        )
+        code = code:gsub(
+            'username%.Text%s*=%s*"@"%s*%.%.%s*LocalPlayer%.Name',
+            'username.Text = "@" .. _mask(LocalPlayer.Name)'
+        )
+
+        -- 6. Increase font sizes across MacLib components for mobile readability
+        code = code:gsub("TextSize%s*=%s*11", "TextSize = 12")
+        code = code:gsub("TextSize%s*=%s*12", "TextSize = 13")
+        code = code:gsub("TextSize%s*=%s*13", "TextSize = 14")
+        code = code:gsub("TextSize%s*=%s*14", "TextSize = 15")
+        code = code:gsub("TextSize%s*=%s*15", "TextSize = 16")
+        code = code:gsub("TextSize%s*=%s*16", "TextSize = 17")
+
         return loadstring(code)()
     end)
     if ok and lib then
@@ -1738,7 +2101,7 @@ local function InitUI()
     })
     Hub.Window = Window
 
-    -- 🌟 Rock-Solid Neon Blue Window Border & Section Borders (กรอบสีฟ้านีออนค้างถาวร ไม่กระพริบ)
+    -- 🌟 Rock-Solid Neon Blue Window Border, Resize Grip & Green Dot Engine
     local _windowBorderHooked = false
     local function ApplyWindowBorder()
         pcall(function()
@@ -1747,7 +2110,7 @@ local function InitUI()
             if base then
                 base.ClipsDescendants = false
 
-                -- 1. สร้างกรอบ Overlay ชั้นบนสุด (ZIndex 9999) ลอยครอบหน้าต่างไว้ถาวร ไม่มีวันกระพริบหรือโดนบดบัง
+                -- 1. สร้างกรอบ Overlay ชั้นบนสุด (ZIndex 9999) ลอยครอบหน้าต่างไว้ถาวร
                 local overlay = base:FindFirstChild("KrakenBorderOverlay")
                 if not overlay then
                     overlay = Instance.new("Frame")
@@ -1783,7 +2146,379 @@ local function InitUI()
                     end
                 end
 
-                -- 2. ตั้งค่ากรอบ SectionUIStroke เฉพาะกล่องเนื้อหา ไม่แตะต้อง Tab หรือปุ่มอื่นๆ เพื่อตัดปัญหากระพริบ
+                -- 2. 🟢 Restore Green Maximize Dot (เพิ่มจุดสีเขียวที่หายไป + คลิกขยายเต็มจอ/คืนค่า)
+                local maxBtn = base:FindFirstChild("Maximize", true)
+                if maxBtn and maxBtn:IsA("TextButton") then
+                    maxBtn.Size = UDim2.fromOffset(8, 8)
+                    maxBtn.BackgroundTransparency = 0
+                    maxBtn.BackgroundColor3 = Color3.fromRGB(40, 205, 65)
+                    maxBtn.Active = true
+                    maxBtn.AutoButtonColor = true
+                    for _, ch in ipairs(maxBtn:GetChildren()) do
+                        if ch:IsA("UIStroke") then ch:Destroy() end
+                    end
+                    if not maxBtn:GetAttribute("MaxHooked") then
+                        maxBtn:SetAttribute("MaxHooked", true)
+                        local isMaximized = false
+                        local prevSize = nil
+                        local prevPos = nil
+                        maxBtn.Activated:Connect(function()
+                            local vp = (Camera and Camera.ViewportSize) or Vector2.new(1920, 1080)
+                            isMaximized = not isMaximized
+                            if isMaximized then
+                                prevSize = base.Size
+                                prevPos = base.Position
+                                local maxW = math.max(340, vp.X - (UserInputService.TouchEnabled and 24 or 50))
+                                local maxH = math.max(260, vp.Y - (UserInputService.TouchEnabled and 24 or 50))
+                                TweenService:Create(base, TweenInfo.new(0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+                                    Size = UDim2.fromOffset(maxW, maxH),
+                                    Position = UDim2.fromScale(0.5, 0.5)
+                                }):Play()
+                            else
+                                local restoreSize = prevSize or GetOptimalWindowSize()
+                                local restorePos = prevPos or UDim2.fromScale(0.5, 0.5)
+                                TweenService:Create(base, TweenInfo.new(0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+                                    Size = restoreSize,
+                                    Position = restorePos
+                                }):Play()
+                            end
+                        end)
+                    end
+                end
+
+                -- 3. 📐 Bottom-Right Corner Resize Grip (ด้ามจับปรับขนาดดีไซน์พรีเมียม สไตล์ Cyber Glass)
+                local oldGrip = base:FindFirstChild("KrakenResizeGrip")
+                if oldGrip then
+                    oldGrip:Destroy()
+                end
+
+                local gripContainer = Instance.new("Frame")
+                gripContainer.Name = "KrakenResizeGrip"
+                gripContainer.Size = UDim2.fromOffset(20, 20)
+                gripContainer.Position = UDim2.new(1, -5, 1, -5)
+                gripContainer.AnchorPoint = Vector2.new(1, 1)
+                gripContainer.BackgroundColor3 = Color3.fromRGB(14, 18, 26)
+                gripContainer.BackgroundTransparency = 0.35
+                gripContainer.BorderSizePixel = 0
+                gripContainer.ZIndex = 10001
+                gripContainer.Parent = base
+
+                local gripCorner = Instance.new("UICorner")
+                gripCorner.CornerRadius = UDim.new(0, 6)
+                gripCorner.Parent = gripContainer
+
+                local gripStroke = Instance.new("UIStroke")
+                gripStroke.Name = "GripStroke"
+                gripStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+                gripStroke.Color = Color3.fromRGB(0, 180, 255)
+                gripStroke.Thickness = 1.0
+                gripStroke.Transparency = 0.45
+                gripStroke.Parent = gripContainer
+
+                -- 3 Parallel Precision Neon Rungs (aligned at 45 deg inside badge)
+                local rungsData = {
+                    { size = 4, offset = -3, trans = 0.1 },
+                    { size = 8, offset = -7, trans = 0.25 },
+                    { size = 12, offset = -11, trans = 0.4 }
+                }
+
+                local rungFrames = {}
+                for i, r in ipairs(rungsData) do
+                    local bar = Instance.new("Frame")
+                    bar.Name = "GripRung_" .. i
+                    bar.Size = UDim2.fromOffset(r.size, 1.5)
+                    bar.AnchorPoint = Vector2.new(0.5, 0.5)
+                    bar.Position = UDim2.new(1, r.offset, 1, r.offset)
+                    bar.Rotation = -45
+                    bar.BackgroundColor3 = Color3.fromRGB(0, 210, 255)
+                    bar.BackgroundTransparency = r.trans
+                    bar.BorderSizePixel = 0
+                    bar.ZIndex = 10002
+                    local c = Instance.new("UICorner")
+                    c.CornerRadius = UDim.new(1, 0)
+                    c.Parent = bar
+                    bar.Parent = gripContainer
+                    table.insert(rungFrames, bar)
+                end
+
+                -- Generous mobile-friendly hitbox (28x28)
+                local gripButton = Instance.new("TextButton")
+                gripButton.Name = "GripHitbox"
+                gripButton.Size = UDim2.fromOffset(28, 28)
+                gripButton.Position = UDim2.new(1, 4, 1, 4)
+                gripButton.AnchorPoint = Vector2.new(1, 1)
+                gripButton.BackgroundTransparency = 1
+                gripButton.Text = ""
+                gripButton.ZIndex = 10005
+                gripButton.Parent = gripContainer
+
+                local resizing = false
+                local resizeStartInput = nil
+                local resizeStartSize = nil
+                local resizeStartPos = nil
+
+                local function SetGripVisualState(active, hovered)
+                    if active then
+                        TweenService:Create(gripContainer, TweenInfo.new(0.12), {
+                            BackgroundTransparency = 0.1,
+                            BackgroundColor3 = Color3.fromRGB(18, 26, 38)
+                        }):Play()
+                        TweenService:Create(gripStroke, TweenInfo.new(0.12), {
+                            Color = Color3.fromRGB(120, 240, 255),
+                            Transparency = 0,
+                            Thickness = 1.4
+                        }):Play()
+                        for _, rf in ipairs(rungFrames) do
+                            TweenService:Create(rf, TweenInfo.new(0.12), {
+                                BackgroundColor3 = Color3.fromRGB(160, 250, 255),
+                                BackgroundTransparency = 0
+                            }):Play()
+                        end
+                    elseif hovered then
+                        TweenService:Create(gripContainer, TweenInfo.new(0.15), {
+                            BackgroundTransparency = 0.2,
+                            BackgroundColor3 = Color3.fromRGB(16, 22, 32)
+                        }):Play()
+                        TweenService:Create(gripStroke, TweenInfo.new(0.15), {
+                            Color = Color3.fromRGB(60, 215, 255),
+                            Transparency = 0.2,
+                            Thickness = 1.2
+                        }):Play()
+                        for _, rf in ipairs(rungFrames) do
+                            TweenService:Create(rf, TweenInfo.new(0.15), {
+                                BackgroundColor3 = Color3.fromRGB(100, 235, 255),
+                                BackgroundTransparency = 0.1
+                            }):Play()
+                        end
+                    else
+                        TweenService:Create(gripContainer, TweenInfo.new(0.2), {
+                            BackgroundTransparency = 0.35,
+                            BackgroundColor3 = Color3.fromRGB(14, 18, 26)
+                        }):Play()
+                        TweenService:Create(gripStroke, TweenInfo.new(0.2), {
+                            Color = Color3.fromRGB(0, 180, 255),
+                            Transparency = 0.45,
+                            Thickness = 1.0
+                        }):Play()
+                        for idx, rf in ipairs(rungFrames) do
+                            local tr = (rungsData[idx] and rungsData[idx].trans) or 0.3
+                            TweenService:Create(rf, TweenInfo.new(0.2), {
+                                BackgroundColor3 = Color3.fromRGB(0, 210, 255),
+                                BackgroundTransparency = tr
+                            }):Play()
+                        end
+                    end
+                end
+
+                gripButton.MouseEnter:Connect(function()
+                    if not resizing then SetGripVisualState(false, true) end
+                end)
+                gripButton.MouseLeave:Connect(function()
+                    if not resizing then SetGripVisualState(false, false) end
+                end)
+
+                gripButton.InputBegan:Connect(function(input)
+                    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                        resizing = true
+                        resizeStartInput = input.Position
+                        resizeStartSize = Vector2.new(base.AbsoluteSize.X, base.AbsoluteSize.Y)
+                        resizeStartPos = base.Position
+                        SetGripVisualState(true, false)
+                    end
+                end)
+
+                local function DoResize(input)
+                    if resizing and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+                        local deltaX = input.Position.X - resizeStartInput.X
+                        local deltaY = input.Position.Y - resizeStartInput.Y
+
+                        local vp = (Camera and Camera.ViewportSize) or Vector2.new(1920, 1080)
+                        local minW = UserInputService.TouchEnabled and 320 or 440
+                        local minH = UserInputService.TouchEnabled and 240 or 320
+                        local maxW = math.max(minW, vp.X - 16)
+                        local maxH = math.max(minH, vp.Y - 16)
+
+                        local newW = math.clamp(resizeStartSize.X + deltaX, minW, maxW)
+                        local newH = math.clamp(resizeStartSize.Y + deltaY, minH, maxH)
+
+                        local actualDeltaW = newW - resizeStartSize.X
+                        local actualDeltaH = newH - resizeStartSize.Y
+
+                        base.Size = UDim2.fromOffset(newW, newH)
+                        base.Position = UDim2.new(
+                            resizeStartPos.X.Scale,
+                            resizeStartPos.X.Offset + (actualDeltaW / 2),
+                            resizeStartPos.Y.Scale,
+                            resizeStartPos.Y.Offset + (actualDeltaH / 2)
+                        )
+                    end
+                end
+                UserInputService.InputChanged:Connect(DoResize)
+
+                local function StopResize(input)
+                    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                        if resizing then
+                            resizing = false
+                            SetGripVisualState(false, false)
+                        end
+                    end
+                end
+                gripButton.InputEnded:Connect(StopResize)
+                UserInputService.InputEnded:Connect(StopResize)
+
+                -- 4. 🎚️ Fix Slider Overlap: จัดสัดส่วนตัวหนังสือและแถบเลื่อนไม่ให้ทับกันเด็ดขาด
+                local function FixSlider(inst)
+                    if not inst then return end
+                    local slider = (inst.Name == "Slider" and inst)
+                                or (inst.Parent and inst.Parent.Name == "Slider" and inst.Parent)
+                                or (inst:FindFirstChild("SliderName") and inst)
+                    if slider and slider:IsA("Frame") then
+                        local sliderName = slider:FindFirstChild("SliderName")
+                        local sliderElements = slider:FindFirstChild("SliderElements")
+                        if sliderName and sliderName:IsA("TextLabel") then
+                            sliderName.AutomaticSize = Enum.AutomaticSize.None
+                            sliderName.Size = UDim2.new(1, -145, 1, 0)
+                            sliderName.TextTruncate = Enum.TextTruncate.AtEnd
+                            sliderName.ClipsDescendants = true
+                            sliderName.TextSize = 13
+                        end
+                        if sliderElements and sliderElements:IsA("Frame") then
+                            local layout = sliderElements:FindFirstChildOfClass("UIListLayout")
+                            if layout then
+                                layout.Padding = UDim.new(0, 8)
+                            end
+                            local bar = sliderElements:FindFirstChild("SliderBar")
+                            if bar and bar:IsA("ImageLabel") then
+                                bar.Size = UDim2.fromOffset(88, 3)
+                            end
+                            local val = sliderElements:FindFirstChild("SliderValue")
+                            if val and val:IsA("TextBox") then
+                                val.Size = UDim2.fromOffset(38, 20)
+                                val.TextSize = 12
+                            end
+                        end
+                    end
+                end
+
+                for _, desc in ipairs(base:GetDescendants()) do
+                    FixSlider(desc)
+                end
+
+                -- 5. ⌨️ Fix Keybind Overlap: ป้องกันปุ่มคีย์ลัดทับกับชื่อหัวข้อ
+                local function FixKeybind(inst)
+                    if not inst then return end
+                    local keybind = (inst.Name == "Keybind" and inst)
+                                 or (inst.Parent and inst.Parent.Name == "Keybind" and inst.Parent)
+                                 or (inst:FindFirstChild("KeybindName") and inst)
+                    if keybind and keybind:IsA("Frame") then
+                        local nameLbl = keybind:FindFirstChild("KeybindName")
+                        local box = keybind:FindFirstChild("BinderBox")
+                        if nameLbl and nameLbl:IsA("TextLabel") then
+                            nameLbl.AutomaticSize = Enum.AutomaticSize.None
+                            nameLbl.Size = UDim2.new(1, -95, 1, 0)
+                            nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
+                            nameLbl.ClipsDescendants = true
+                            nameLbl.TextSize = 13
+                        end
+                        if box and box:IsA("TextBox") then
+                            box.TextSize = 12
+                            local t = box.Text
+                            if t == "RightControl" then box.Text = "RCtrl"
+                            elseif t == "LeftControl" then box.Text = "LCtrl"
+                            elseif t == "MouseButton2" then box.Text = "M2"
+                            elseif t == "MouseButton1" then box.Text = "M1"
+                            elseif t == "MouseButton3" then box.Text = "M3"
+                            elseif t == "RightShift" then box.Text = "RShift"
+                            elseif t == "LeftShift" then box.Text = "LShift"
+                            end
+                        end
+                    end
+                end
+
+                for _, desc in ipairs(base:GetDescendants()) do
+                    FixKeybind(desc)
+                end
+
+                -- 6. 🛡️ Mask UserInfo (แสดงรูปพร้อมจุดเขียวออนไลน์ และปิดบังตัวอักษรบางส่วน)
+                local function MaskUserInfo(uInfo)
+                    if not uInfo then return end
+                    pcall(function()
+                        local function MaskString(str)
+                            if not str or #str == 0 then return "***" end
+                            local len = #str
+                            if len <= 3 then
+                                return str:sub(1, 1) .. "***"
+                            elseif len <= 5 then
+                                return str:sub(1, 1) .. "***" .. str:sub(len)
+                            else
+                                return str:sub(1, 2) .. "****" .. str:sub(len - 1, len)
+                            end
+                        end
+
+                        local headshot = uInfo:FindFirstChild("Headshot", true)
+                        if headshot and headshot:IsA("ImageLabel") then
+                            headshot.ClipsDescendants = false
+                            local oldDot = headshot:FindFirstChild("OnlineStatusDot")
+                            if not oldDot then
+                                local dot = Instance.new("Frame")
+                                dot.Name = "OnlineStatusDot"
+                                dot.Size = UDim2.fromOffset(9, 9)
+                                dot.Position = UDim2.new(1, 1, 1, 1)
+                                dot.AnchorPoint = Vector2.new(1, 1)
+                                dot.BackgroundColor3 = Color3.fromRGB(35, 209, 96) -- Glowing online green
+                                dot.BorderSizePixel = 0
+                                dot.ZIndex = (headshot.ZIndex or 1) + 5
+
+                                local corner = Instance.new("UICorner")
+                                corner.CornerRadius = UDim.new(1, 0)
+                                corner.Parent = dot
+
+                                local stroke = Instance.new("UIStroke")
+                                stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+                                stroke.Color = Color3.fromRGB(15, 15, 18)
+                                stroke.Thickness = 1.8
+                                stroke.Parent = dot
+
+                                dot.Parent = headshot
+                            end
+                        end
+
+                        local disp = uInfo:FindFirstChild("DisplayName", true)
+                        if disp and disp:IsA("TextLabel") then
+                            disp.Text = MaskString(LocalPlayer.DisplayName)
+                        end
+                        local user = uInfo:FindFirstChild("Username", true)
+                        if user and user:IsA("TextLabel") then
+                            user.Text = "@" .. MaskString(LocalPlayer.Name)
+                        end
+                    end)
+                end
+
+                local uInfo = base:FindFirstChild("UserInfo", true)
+                if uInfo then MaskUserInfo(uInfo) end
+
+                -- 7. 🔤 Font Enhancer: ปรับขนาดตัวอักษรทุกตัวในเมนูให้พอดี ชัดเจนบนมือถือ
+                local function EnhanceFonts(inst)
+                    if inst:IsA("TextLabel") or inst:IsA("TextButton") or inst:IsA("TextBox") then
+                        if inst.Name == "SliderName" or inst.Name == "SliderValue" or inst.Name == "KeybindName" or inst.Name == "BinderBox" then
+                            return
+                        end
+                        if not inst:GetAttribute("FontBoosted") then
+                            inst:SetAttribute("FontBoosted", true)
+                            if inst.TextSize <= 12 then
+                                inst.TextSize = 13
+                            elseif inst.TextSize <= 14 then
+                                inst.TextSize = 14
+                            end
+                        end
+                    end
+                end
+
+                for _, desc in ipairs(base:GetDescendants()) do
+                    EnhanceFonts(desc)
+                end
+
+                -- 8. สไตล์ SectionUIStroke
                 local function StyleSection(secStroke)
                     if secStroke and secStroke:IsA("UIStroke") and secStroke.Name == "SectionUIStroke" then
                         secStroke.Color = Color3.fromRGB(0, 160, 255)
@@ -1802,6 +2537,12 @@ local function InitUI()
                 if not _windowBorderHooked then
                     _windowBorderHooked = true
                     base.DescendantAdded:Connect(function(desc)
+                        task.defer(FixSlider, desc)
+                        task.defer(FixKeybind, desc)
+                        task.defer(EnhanceFonts, desc)
+                        if desc.Name == "UserInfo" or (desc.Parent and desc.Parent.Name == "UserInfo") then
+                            task.defer(MaskUserInfo, desc.Name == "UserInfo" and desc or desc.Parent)
+                        end
                         if desc:IsA("UIStroke") and desc.Name == "SectionUIStroke" then
                             task.defer(StyleSection, desc)
                         end
@@ -2203,6 +2944,23 @@ local function InitUI()
                     end
 
                     if binderBox then
+                        local shortKeyMap = {
+                            RightControl = "RCtrl",
+                            LeftControl = "LCtrl",
+                            MouseButton1 = "M1",
+                            MouseButton2 = "M2",
+                            MouseButton3 = "M3",
+                            RightShift = "RShift",
+                            LeftShift = "LShift",
+                            RightAlt = "RAlt",
+                            LeftAlt = "LAlt",
+                        }
+                        local function FormatKey(k)
+                            local raw = (k and k.Name) or (typeof(k) == "EnumItem" and k.Name) or tostring(k or "None")
+                            return shortKeyMap[raw] or raw
+                        end
+                        binderBox.Text = FormatKey(defKey)
+
                         local isListening = false
                         binderBox.Focused:Connect(function()
                             isListening = true
@@ -2211,7 +2969,7 @@ local function InitUI()
                         binderBox.FocusLost:Connect(function()
                             isListening = false
                             local b = macKeybind:GetBind()
-                            binderBox.Text = (b and b.Name) or (typeof(b) == "EnumItem" and b.Name) or tostring(b or "None")
+                            binderBox.Text = FormatKey(b)
                         end)
 
                         local bindConn
@@ -2232,6 +2990,7 @@ local function InitUI()
                                     isListening = false
                                     macKeybind:Bind(chosenKey)
                                     macKeybind.Value = chosenKey
+                                    binderBox.Text = FormatKey(chosenKey)
                                     binderBox:ReleaseFocus()
                                     if cfg.Callback then pcall(cfg.Callback, chosenKey) end
                                     for _, fn in ipairs(changedCallbacks) do pcall(fn, chosenKey) end
@@ -2270,29 +3029,39 @@ local function InitUI()
         return adapter
     end
 
-    -- 📑 All Tabs with Icons (เพิ่มไอค่อนแถบข้างทั้งหมด)
+    -- 📑 All Tabs with Icons (หมวดต่อสู้แบบเดิมที่มี Silent Aim ครบครัน)
     local Tabs = {
-        Combat   = CreateTabAdapter(tabGroup:Tab({ Name = "ต่อสู้",       Image = "rbxassetid://10709818534" }), "Combat"),
-        Visuals  = CreateTabAdapter(tabGroup:Tab({ Name = "มองทะลุ",      Image = "rbxassetid://10747373176" }), "Visuals"),
-        Movement = CreateTabAdapter(tabGroup:Tab({ Name = "เคลื่อนที่",     Image = "rbxassetid://10734950020" }), "Movement"),
-        World    = CreateTabAdapter(tabGroup:Tab({ Name = "ฟาร์ม & โลก",  Image = "rbxassetid://10723405360" }), "World"),
-        Teleport = CreateTabAdapter(tabGroup:Tab({ Name = "วาร์ป",         Image = "rbxassetid://10734952479" }), "Teleport"),
-        Settings = CreateTabAdapter(tabGroup:Tab({ Name = "ตั้งค่า",       Image = "rbxassetid://10734950309" }), "Settings")
+        Combat    = CreateTabAdapter(tabGroup:Tab({ Name = "ต่อสู้",       Image = "rbxassetid://10709810948" }), "Combat"),
+        Visuals   = CreateTabAdapter(tabGroup:Tab({ Name = "มองทะลุ",      Image = "rbxassetid://10747373176" }), "Visuals"),
+        Character = CreateTabAdapter(tabGroup:Tab({ Name = "ตัวละคร",      Image = "rbxassetid://10747372702" }), "Character"),
+        World     = CreateTabAdapter(tabGroup:Tab({ Name = "ฟาร์ม & โลก",  Image = "rbxassetid://10723405360" }), "World"),
+        Settings  = CreateTabAdapter(tabGroup:Tab({ Name = "ตั้งค่า",       Image = "rbxassetid://10734950309" }), "Settings")
     }
+    -- Compatibility aliases
+    Tabs.Aimbot = Tabs.Combat
+    Tabs.SilentAim = Tabs.Combat
+    Tabs.FOV = Tabs.Combat
+    Tabs.GunMods = Tabs.Combat
 
     -- 🎨 Vibrant Themed Tab Icons Engine (ใส่สีสดใสในตัวไอค่อนแต่ละหมวด)
     local TabColors = {
-        ["ต่อสู้"] = Color3.fromRGB(255, 65, 65),       -- Crimson Red (Combat)
+        ["ช่วยเล็ง"] = Color3.fromRGB(255, 65, 65),       -- Crimson Red (Aimbot)
+        ["Aimbot"] = Color3.fromRGB(255, 65, 65),
+        ["กระสุนเลี้ยว"] = Color3.fromRGB(255, 140, 0),     -- Neon Orange (Silent Aim)
+        ["SilentAim"] = Color3.fromRGB(255, 140, 0),
+        ["วงกลมเล็ง"] = Color3.fromRGB(0, 220, 255),      -- Neon Cyan (FOV)
+        ["FOV"] = Color3.fromRGB(0, 220, 255),
+        ["ปรับแต่งปืน"] = Color3.fromRGB(255, 215, 0),     -- Gold (Weapons & Hitboxes)
+        ["GunMods"] = Color3.fromRGB(255, 215, 0),
+        ["ต่อสู้"] = Color3.fromRGB(255, 65, 65),
         ["Combat"] = Color3.fromRGB(255, 65, 65),
         ["มองทะลุ"] = Color3.fromRGB(0, 220, 255),      -- Neon Cyan (Visuals)
         ["Visuals"] = Color3.fromRGB(0, 220, 255),
-        ["เคลื่อนที่"] = Color3.fromRGB(255, 185, 35),   -- Amber Gold (Movement)
-        ["Movement"] = Color3.fromRGB(255, 185, 35),
+        ["ตัวละคร"] = Color3.fromRGB(0, 230, 180),      -- Mint Turquoise (Character)
+        ["Character"] = Color3.fromRGB(0, 230, 180),
         ["ฟาร์ม & โลก"] = Color3.fromRGB(50, 225, 110), -- Emerald Green (World)
         ["ฟาร์มและโลก"] = Color3.fromRGB(50, 225, 110),
         ["World"] = Color3.fromRGB(50, 225, 110),
-        ["วาร์ป"] = Color3.fromRGB(185, 95, 255),       -- Electric Purple (Teleport)
-        ["Teleport"] = Color3.fromRGB(185, 95, 255),
         ["ตั้งค่า"] = Color3.fromRGB(0, 160, 255),      -- Electric Blue (Settings)
         ["Settings"] = Color3.fromRGB(0, 160, 255),
     }
@@ -2325,7 +3094,6 @@ local function InitUI()
 
                                 imgLabel.ImageColor3 = targetColor
 
-                                -- Lock ImageColor3 permanently without fighting MacLib's transparency tween
                                 if not _hookedTabs[imgLabel] then
                                     _hookedTabs[imgLabel] = true
                                     local isApplying = false
@@ -2358,10 +3126,9 @@ local function InitUI()
     function Window:SelectTab(idx)
         if idx == 1 and Tabs.Combat then Tabs.Combat:Select()
         elseif idx == 2 and Tabs.Visuals then Tabs.Visuals:Select()
-        elseif idx == 3 and Tabs.Movement then Tabs.Movement:Select()
+        elseif idx == 3 and Tabs.Character then Tabs.Character:Select()
         elseif idx == 4 and Tabs.World then Tabs.World:Select()
-        elseif idx == 5 and Tabs.Teleport then Tabs.Teleport:Select()
-        elseif idx == 6 and Tabs.Settings then Tabs.Settings:Select()
+        elseif idx == 5 and Tabs.Settings then Tabs.Settings:Select()
         end
         task.delay(0.02, ApplyTabIconColors)
     end
@@ -2382,244 +3149,310 @@ local function InitUI()
     Hub.Fluent = Fluent
 
     -- ================================================
-    -- 🎯 COMBAT TAB (หมวดต่อสู้)
+    -- ⚔️ COMBAT TAB (หมวดต่อสู้ - ระบบกระสุนเลี้ยว & ม็อดปืน)
     -- ================================================
-    Tabs.Combat:AddSection("ระบบช่วยเล็ง (Aimbot)")
+    Tabs.Combat:AddSection("ระบบกระสุนเลี้ยว (Silent Aim Engine)")
 
     local HeadLock100Toggle = Tabs.Combat:AddToggle("HeadLock100Toggle", {
-        Title = "ล็อคหัว 100% & กระสุนตามหัว (Head Lock 100%)",
-        Description = "ล็อคเป้าหัวทันที 100% + กระสุนตรงเข้าหัวทุกนัด (ไร้แรงดีด + ปืนไม่ส่าย + ขยายหัว 14 studs)",
+        Title = "ล็อคหัว 100% & ปืนเทพ (Silent Head Lock 100%)",
+        Description = "กระสุนเลี้ยวเข้าหัวทุกนัด 100% (ไร้แรงดีด + ปืนไม่ส่าย + ยิงออโต้ + ขยายหัว 14 studs)",
         Default = true
     })
     HeadLock100Toggle:OnChanged(function(v)
         if v then
-            Hub.Settings.Aimbot = true
-            Hub.Settings.AimbotSmoothing = 0
-            Hub.Settings.AimbotBone = "Head"
+            Hub.Settings.SilentAim = true
+            Hub.Settings.SilentAimBone = "Head"
+            Hub.Settings.SilentAimHitChance = 100
             Hub.Settings.NoRecoil = true
             Hub.Settings.NoSpread = true
+            Hub.Settings.FullAuto = true
             Hub.Settings.HitboxExpander = true
             Hub.Settings.HitboxTarget = "Head"
             Hub.Settings.HitboxSize = 14
             ApplyWeaponMods()
-            if Options.AimToggle then Options.AimToggle:SetValue(true) end
-            if Options.SmoothSlider then Options.SmoothSlider:SetValue(0) end
-            if Options.BoneDrop then Options.BoneDrop:SetValue("ส่วนหัว (Head - แนะนำ)") end
+            if Options.SilentAimToggle then Options.SilentAimToggle:SetValue(true) end
+            if Options.SilentBoneDrop then Options.SilentBoneDrop:SetValue("ส่วนหัว (Head - แนะนำ)") end
+            if Options.SilentHitChanceSlider then Options.SilentHitChanceSlider:SetValue(100) end
             if Options.NoRecoilToggle then Options.NoRecoilToggle:SetValue(true) end
             if Options.NoSpreadToggle then Options.NoSpreadToggle:SetValue(true) end
+            if Options.FullAutoToggle then Options.FullAutoToggle:SetValue(true) end
             if Options.HitboxToggle then Options.HitboxToggle:SetValue(true) end
             if Options.HitboxTargetDrop then Options.HitboxTargetDrop:SetValue("ส่วนหัว (Head - แนะนำ)") end
             if Options.HitboxSizeSlider then Options.HitboxSizeSlider:SetValue(14) end
         end
     end)
 
-    local AimToggle = Tabs.Combat:AddToggle("AimToggle", {
-        Title = "เปิดใช้งานระบบช่วยเล็ง (Aimbot)",
-        Description = "ล็อคเป้าหมายที่อยู่ใกล้เคอร์เซอร์อัตโนมัติ (คลิกขวาเล็ง หรือ คลิกซ้ายยิง)",
-        Default = Hub.Settings.Aimbot
+    local SilentAimToggle = Tabs.Combat:AddToggle("SilentAimToggle", {
+        Title = "เปิดใช้งานกระสุนเลี้ยว (Silent Aim)",
+        Description = "กระสุนเลี้ยวเข้าเป้าหมายอัตโนมัติ โดยที่มุมกล้องไม่ขยับอิสระ 100%",
+        Default = Hub.Settings.SilentAim
     })
-    AimToggle:OnChanged(function(v)
-        Hub.Settings.Aimbot = v
+    SilentAimToggle:OnChanged(function(v)
+        Hub.Settings.SilentAim = v
     end)
 
-    local TriggerDrop = Tabs.Combat:AddDropdown("TriggerDrop", {
-        Title = "จังหวะการล็อคหัว (Aimbot Trigger)",
-        Description = "เลือกว่าจะให้ล็อคหัวตอนไหน (แนะนำ: ทั้งตอนเล็งและตอนยิง)",
-        Values = {"ทั้งตอนเล็งและตอนยิง (แนะนำ)", "ตอนคลิกขวาเล็งเท่านั้น", "ตอนคลิกซ้ายยิงเท่านั้น", "ปุ่มคีย์ลัดกำหนดเอง"},
-        Default = "ทั้งตอนเล็งและตอนยิง (แนะนำ)"
-    })
-    TriggerDrop:OnChanged(function(v)
-        if v:find("ทั้งตอนเล็ง") or v:find("Aim OR Shoot") then
-            Hub.Settings.AimbotTriggerMode = "Aim OR Shoot"
-        elseif v:find("เล็งเท่านั้น") or v:find("Right Click") then
-            Hub.Settings.AimbotTriggerMode = "Right Click"
-        elseif v:find("ยิงเท่านั้น") or v:find("Left Click") then
-            Hub.Settings.AimbotTriggerMode = "Left Click"
-        else
-            Hub.Settings.AimbotTriggerMode = "Keybind"
-        end
-    end)
-
-    local RedDmgToggle = Tabs.Combat:AddToggle("RedDmgToggle", {
-        Title = "บังคับตัวเลขดาเมจสีแดง 100% (Red Damage Numbers)",
-        Description = "บังคับให้ตัวเลขดาเมจและเป้าเล็งเป็นสีแดงสดทุกนัดที่ยิงเข้าหัว",
-        Default = Hub.Settings.RedDamageNumbers
-    })
-    RedDmgToggle:OnChanged(function(v)
-        Hub.Settings.RedDamageNumbers = v
-    end)
-
-    local FOVSlider = Tabs.Combat:AddSlider("FOVSlider", {
-        Title = "ขนาดวงกลมช่วยเล็ง (FOV Radius)",
-        Description = "รัศมีวงกลมการตรวจจับเป้าหมาย (แนะนำ 200)",
-        Default = Hub.Settings.AimbotFOV,
-        Min = 50,
-        Max = 600,
-        Rounding = 0
-    })
-    FOVSlider:OnChanged(function(v)
-        Hub.Settings.AimbotFOV = v
-        FOVCircle.Radius = v
-    end)
-
-    local SmoothSlider = Tabs.Combat:AddSlider("SmoothSlider", {
-        Title = "ความนุ่มนวลการเล็ง (Smoothing)",
-        Description = "0 = ล็อคหัวทันที 100% (ล็อคโหด) | 0.05 - 0.25 = นุ่มเนียนเหมือนคนเล่นจริง",
-        Default = Hub.Settings.AimbotSmoothing,
-        Min = 0,
-        Max = 0.95,
-        Rounding = 2
-    })
-    SmoothSlider:OnChanged(function(v)
-        Hub.Settings.AimbotSmoothing = v
-    end)
-
-    local BoneDrop = Tabs.Combat:AddDropdown("BoneDrop", {
-        Title = "ตำแหน่งที่ต้องการเล็ง (Target Bone)",
-        Description = "เลือกชิ้นส่วนร่างกายของเป้าหมายที่จะล็อค",
-        Values = {"ส่วนหัว (Head - แนะนำ)", "ลำตัวส่วนบน (UpperTorso)", "กลางตัว (HumanoidRootPart)"},
+    local SilentBoneDrop = Tabs.Combat:AddDropdown("SilentBoneDrop", {
+        Title = "ตำแหน่งกระสุนเข้า (Target Bone)",
+        Description = "เลือกชิ้นส่วนร่างกายที่ต้องการให้กระสุนเลี้ยวพุ่งเข้าชน",
+        Values = {"ส่วนหัว (Head - แนะนำ)", "ลำตัวส่วนบน (UpperTorso)", "สุ่มตำแหน่ง (Random)"},
         Default = "ส่วนหัว (Head - แนะนำ)"
     })
-    BoneDrop:OnChanged(function(v)
+    SilentBoneDrop:OnChanged(function(v)
         if v:find("ส่วนหัว") or v:find("Head") then
-            Hub.Settings.AimbotBone = "Head"
+            Hub.Settings.SilentAimBone = "Head"
         elseif v:find("ลำตัว") or v:find("UpperTorso") then
-            Hub.Settings.AimbotBone = "UpperTorso"
+            Hub.Settings.SilentAimBone = "UpperTorso"
         else
-            Hub.Settings.AimbotBone = "HumanoidRootPart"
+            Hub.Settings.SilentAimBone = "Random"
         end
     end)
 
-    local PriorityDrop = Tabs.Combat:AddDropdown("PriorityDrop", {
-        Title = "ลำดับความสำคัญเป้าหมาย (Target Priority)",
-        Description = "เลือกว่าจะล็อคศัตรูที่อยู่ใกล้ตัวเราสุด หรือใกล้กลางเป้าเล็งสุด",
-        Values = {"ศัตรูที่ใกล้ตัวเราที่สุด (แนะนำ)", "ผสมผสาน (ใกล้ตัว + กลางจอ)", "ศัตรูที่ใกล้กึ่งกลางเป้าเล็งที่สุด"},
-        Default = "ศัตรูที่ใกล้ตัวเราที่สุด (แนะนำ)"
+    local SilentHitChanceSlider = Tabs.Combat:AddSlider("SilentHitChanceSlider", {
+        Title = "โอกาสโดน (Hit Chance %)",
+        Description = "100% = โดนทุกลูก | ปรับลดลงถ้าต้องการให้ดูเนียนเหมือนคนเล่นจริง",
+        Default = Hub.Settings.SilentAimHitChance,
+        Min = 10,
+        Max = 100,
+        Rounding = 0
     })
-    PriorityDrop:OnChanged(function(v)
-        if v:find("ใกล้ตัวเราที่สุด") or v:find("Distance") then
-            Hub.Settings.AimbotPriority = "Distance"
-        elseif v:find("กึ่งกลาง") or v:find("Crosshair") then
-            Hub.Settings.AimbotPriority = "Crosshair"
-        elseif v:find("ผสมผสาน") or v:find("Smart") then
-            Hub.Settings.AimbotPriority = "Smart"
-        end
+    SilentHitChanceSlider:OnChanged(function(v)
+        Hub.Settings.SilentAimHitChance = v
     end)
 
-    local MaxDistSlider = Tabs.Combat:AddSlider("MaxDistSlider", {
-        Title = "ระยะล็อคเป้าหมายสูงสุด (Max Distance)",
-        Description = "ไม่ล็อคศัตรูที่อยู่ไกลเกินระยะนี้ (Studs)",
-        Default = Hub.Settings.AimbotMaxDist,
+    local SilentMaxDistSlider = Tabs.Combat:AddSlider("SilentMaxDistSlider", {
+        Title = "ระยะยิงสูงสุด (Max Distance)",
+        Description = "ไม่เลี้ยวกระสุนใส่ศัตรูที่อยู่ไกลเกินระยะนี้ (Studs)",
+        Default = Hub.Settings.SilentAimMaxDist,
         Min = 50,
         Max = 800,
         Rounding = 0
     })
-    MaxDistSlider:OnChanged(function(v)
-        Hub.Settings.AimbotMaxDist = v
+    SilentMaxDistSlider:OnChanged(function(v)
+        Hub.Settings.SilentAimMaxDist = v
     end)
 
-    local WallCheckToggle = Tabs.Combat:AddToggle("WallCheckToggle", {
+    local SilentPriorityDrop = Tabs.Combat:AddDropdown("SilentPriorityDrop", {
+        Title = "ลำดับเป้าหมาย (Priority)",
+        Description = "เลือกว่าจะเลี้ยวยิงศัตรูที่ใกล้กึ่งกลางเป้าเล็งสุด หรือใกล้ตัวเราที่สุด",
+        Values = {"ใกล้กึ่งกลางเป้าเล็งสุด (แนะนำ)", "ศัตรูที่ใกล้ตัวเราที่สุด"},
+        Default = "ใกล้กึ่งกลางเป้าเล็งสุด (แนะนำ)"
+    })
+    SilentPriorityDrop:OnChanged(function(v)
+        if v:find("กึ่งกลาง") or v:find("Crosshair") then
+            Hub.Settings.SilentAimPriority = "Crosshair"
+        else
+            Hub.Settings.SilentAimPriority = "Distance"
+        end
+    end)
+
+    Tabs.Combat:AddSection("การคัดกรองเป้าหมาย (Target Filters)")
+
+    local SilentWallCheckToggle = Tabs.Combat:AddToggle("SilentWallCheckToggle", {
         Title = "เช็คสิ่งกีดขวาง (Wall Check)",
-        Description = "ไม่ล็อคศัตรูที่แอบอยู่หลังกำแพงหรือสิ่งปลูกสร้าง",
-        Default = Hub.Settings.AimbotWallCheck
+        Description = "ไม่เลี้ยวกระสุนหากศัตรูแอบอยู่หลังกำแพงหรือสิ่งปลูกสร้าง",
+        Default = Hub.Settings.SilentAimWallCheck
     })
-    WallCheckToggle:OnChanged(function(v)
-        Hub.Settings.AimbotWallCheck = v
+    SilentWallCheckToggle:OnChanged(function(v)
+        Hub.Settings.SilentAimWallCheck = v
     end)
 
-    local SafeZoneToggle = Tabs.Combat:AddToggle("SafeZoneToggle", {
+    local SilentHoodToggle = Tabs.Combat:AddToggle("SilentHoodToggle", {
+        Title = "เลี้ยวยิงบอท Hood ด้วย (Target Hood NPCs)",
+        Description = "กระสุนเลี้ยวเข้าหัวบอท Hood ในโหมดฟาร์ม/อีเวนต์ด้วย",
+        Default = (Hub.Settings.SilentAimTargetHood ~= nil and Hub.Settings.SilentAimTargetHood) or Hub.Settings.SilentAimTargetZombies
+    })
+    SilentHoodToggle:OnChanged(function(v)
+        Hub.Settings.SilentAimTargetHood = v
+        Hub.Settings.SilentAimTargetZombies = v
+    end)
+
+    local SilentSafeZoneToggle = Tabs.Combat:AddToggle("SilentSafeZoneToggle", {
         Title = "ข้ามคนในเซฟโซน (Ignore SafeZone)",
-        Description = "ไม่ล็อคศัตรูที่อยู่ในพื้นที่ปลอดภัยหรือเปิด PvPSafe",
-        Default = Hub.Settings.AimbotIgnoreSafeZone
+        Description = "ไม่เลี้ยวกระสุนใส่คนในพื้นที่ปลอดภัยหรือเปิด PvPSafe",
+        Default = Hub.Settings.SilentAimIgnoreSafeZone
     })
-    SafeZoneToggle:OnChanged(function(v)
-        Hub.Settings.AimbotIgnoreSafeZone = v
+    SilentSafeZoneToggle:OnChanged(function(v)
+        Hub.Settings.SilentAimIgnoreSafeZone = v
     end)
 
-    local ShieldToggle = Tabs.Combat:AddToggle("ShieldToggle", {
+    local SilentShieldToggle = Tabs.Combat:AddToggle("SilentShieldToggle", {
         Title = "ข้ามคนเกิดใหม่มีเกราะ (Ignore Spawn Shield)",
-        Description = "ไม่ล็อคศัตรูที่มีเกราะกันดาเมจตอนเพิ่งเกิดใหม่",
-        Default = Hub.Settings.AimbotIgnoreShield
+        Description = "ไม่เลี้ยวกระสุนใส่คนที่มีเกราะกันดาเมจตอนเพิ่งเกิดใหม่",
+        Default = Hub.Settings.SilentAimIgnoreShield
     })
-    ShieldToggle:OnChanged(function(v)
-        Hub.Settings.AimbotIgnoreShield = v
+    SilentShieldToggle:OnChanged(function(v)
+        Hub.Settings.SilentAimIgnoreShield = v
     end)
 
-    local DownedToggle = Tabs.Combat:AddToggle("DownedToggle", {
+    local SilentDownedToggle = Tabs.Combat:AddToggle("SilentDownedToggle", {
         Title = "ข้ามศัตรูที่ล้มคลาน (Ignore Downed)",
-        Description = "ไม่ล็อคคนที่ถูกยิงล้มคลาน เพื่อโฟกัสยิงคนที่ยังยืนยิงเรา",
-        Default = Hub.Settings.AimbotIgnoreDowned
+        Description = "ไม่เลี้ยวกระสุนใส่คนที่ล้มคลาน เพื่อโฟกัสคนที่ยังยืนยิงเรา",
+        Default = Hub.Settings.SilentAimIgnoreDowned
     })
-    DownedToggle:OnChanged(function(v)
-        Hub.Settings.AimbotIgnoreDowned = v
+    SilentDownedToggle:OnChanged(function(v)
+        Hub.Settings.SilentAimIgnoreDowned = v
     end)
 
-    Tabs.Combat:AddKeybind("AimbotKeybind", {
-        Title = "ปุ่มคีย์ลัดช่วยเล็ง (Aimbot Keybind)",
-        Mode = "Hold",
-        Default = Hub.Settings.AimbotKey or Enum.UserInputType.MouseButton2,
-        Callback = function(key)
-            Hub.Settings.AimbotKey = key
-        end
-    })
+    Tabs.Combat:AddSection("วงกลมระยะเล็ง (Silent Aim FOV Circle)")
 
-    Tabs.Combat:AddSection("ขยายฮิตบ็อกซ์ (Hitbox Expander)")
-
-    local HitboxToggle = Tabs.Combat:AddToggle("HitboxToggle", {
-        Title = "เปิดขยายฮิตบ็อกซ์ (Hitbox Expander)",
-        Description = "ขยายขนาด Hitbox ศัตรู ยิงโดนหัวง่าย 100% แม้ยิงไม่ตรงเป้า",
-        Default = Hub.Settings.HitboxExpander
+    local SilentDrawFOVToggle = Tabs.Combat:AddToggle("SilentDrawFOVToggle", {
+        Title = "แสดงวงกลมกระสุนเลี้ยว (Draw Silent FOV)",
+        Description = "เปิด/ปิด การแสดงวงกลมระยะเลี้ยวของ Silent Aim บนหน้าจอ",
+        Default = Hub.Settings.SilentAimDrawFOV
     })
-    HitboxToggle:OnChanged(function(v)
-        Hub.Settings.HitboxExpander = v
-        if not v then
-            -- Reset hitboxes
-            local ch = Workspace:FindFirstChild("ClientHitboxes")
-            if ch then
-                for _, f in ipairs(ch:GetChildren()) do
-                    for _, p in ipairs(f:GetChildren()) do
-                        if p:IsA("BasePart") then p.Transparency = 1 end
-                    end
-                end
-            end
+    SilentDrawFOVToggle:OnChanged(function(v)
+        Hub.Settings.SilentAimDrawFOV = v
+        if SilentFOVCircle then
+            SilentFOVCircle.Visible = v
         end
     end)
 
-    local HitboxSizeSlider = Tabs.Combat:AddSlider("HitboxSizeSlider", {
-        Title = "ขนาดฮิตบ็อกซ์ (Hitbox Size)",
-        Description = "ขนาดของกล่องเป้าหมายที่ต้องการขยาย (Studs)",
-        Default = Hub.Settings.HitboxSize,
-        Min = 2,
-        Max = 20,
+    local SilentFOVSlider = Tabs.Combat:AddSlider("SilentFOVSlider", {
+        Title = "ขนาดวงกลมกระสุนเลี้ยว (Silent FOV Radius)",
+        Description = "รัศมีตรวจจับเป้าหมายที่จะเลี้ยวกระสุนเข้าใส่ (แนะนำ 180 - 250)",
+        Default = Hub.Settings.SilentAimFOV,
+        Min = 50,
+        Max = 800,
+        Rounding = 0
+    })
+    SilentFOVSlider:OnChanged(function(v)
+        Hub.Settings.SilentAimFOV = v
+        if SilentFOVCircle then
+            SilentFOVCircle.Radius = v
+        end
+    end)
+
+    local SilentColorDrop = Tabs.Combat:AddDropdown("SilentColorDrop", {
+        Title = "สีวงกลม Silent Aim (Preset Color)",
+        Description = "เลือกชุดสีมาตรฐานหรือเลือกปรับแต่งแม่สี RGB แยกเอง",
+        Values = {
+            "ส้มนีออน (Neon Orange - ค่าเริ่มต้น)",
+            "ฟ้าคราม (Cyan Blue)",
+            "แดงสด (Crimson Red)",
+            "เขียวนีออน (Neon Green)",
+            "ม่วงนีออน (Electric Purple)",
+            "เหลืองทอง (Gold)",
+            "ชมพูนีออน (Hot Pink)",
+            "ขาวสว่าง (Pure White)",
+            "กำหนดค่าสี RGB เอง"
+        },
+        Default = "ส้มนีออน (Neon Orange - ค่าเริ่มต้น)"
+    })
+
+    local SilentRainbowToggle = Tabs.Combat:AddToggle("SilentRainbowToggle", {
+        Title = "วงกลม Silent Aim สีรุ้ง (Rainbow RGB Cycle)",
+        Description = "ให้วงกลม Silent Aim สลับสีรุ้งเคลื่อนไหวอย่างสมูท",
+        Default = Hub.Settings.SilentAimFOVRainbow
+    })
+    SilentRainbowToggle:OnChanged(function(v)
+        Hub.Settings.SilentAimFOVRainbow = v
+    end)
+
+    local SilentRSlider = Tabs.Combat:AddSlider("SilentRSlider", {
+        Title = "สีแดง Silent Aim (Red)",
+        Description = "ปรับค่าแม่สีแดง (0 - 255)",
+        Default = Hub.Settings.SilentAimFOVR,
+        Min = 0,
+        Max = 255,
+        Rounding = 0
+    })
+
+    local SilentGSlider = Tabs.Combat:AddSlider("SilentGSlider", {
+        Title = "สีเขียว Silent Aim (Green)",
+        Description = "ปรับค่าแม่สีเขียว (0 - 255)",
+        Default = Hub.Settings.SilentAimFOVG,
+        Min = 0,
+        Max = 255,
+        Rounding = 0
+    })
+
+    local SilentBSlider = Tabs.Combat:AddSlider("SilentBSlider", {
+        Title = "สีน้ำเงิน Silent Aim (Blue)",
+        Description = "ปรับค่าแม่สีน้ำเงิน (0 - 255)",
+        Default = Hub.Settings.SilentAimFOVB,
+        Min = 0,
+        Max = 255,
+        Rounding = 0
+    })
+
+    local function UpdateSilentColorFromRGB()
+        Hub.Settings.SilentAimFOVColor = Color3.fromRGB(Hub.Settings.SilentAimFOVR, Hub.Settings.SilentAimFOVG, Hub.Settings.SilentAimFOVB)
+        if SilentFOVCircle then
+            SilentFOVCircle.Color = Hub.Settings.SilentAimFOVColor
+        end
+    end
+
+    SilentRSlider:OnChanged(function(v)
+        Hub.Settings.SilentAimFOVR = v
+        UpdateSilentColorFromRGB()
+    end)
+    SilentGSlider:OnChanged(function(v)
+        Hub.Settings.SilentAimFOVG = v
+        UpdateSilentColorFromRGB()
+    end)
+    SilentBSlider:OnChanged(function(v)
+        Hub.Settings.SilentAimFOVB = v
+        UpdateSilentColorFromRGB()
+    end)
+
+    SilentColorDrop:OnChanged(function(v)
+        if v:find("ส้มนีออน") or v:find("Orange") then
+            Hub.Settings.SilentAimFOVR, Hub.Settings.SilentAimFOVG, Hub.Settings.SilentAimFOVB = 255, 140, 0
+        elseif v:find("ฟ้าคราม") or v:find("Cyan") then
+            Hub.Settings.SilentAimFOVR, Hub.Settings.SilentAimFOVG, Hub.Settings.SilentAimFOVB = 0, 220, 255
+        elseif v:find("แดงสด") or v:find("Red") then
+            Hub.Settings.SilentAimFOVR, Hub.Settings.SilentAimFOVG, Hub.Settings.SilentAimFOVB = 255, 45, 45
+        elseif v:find("เขียว") or v:find("Green") then
+            Hub.Settings.SilentAimFOVR, Hub.Settings.SilentAimFOVG, Hub.Settings.SilentAimFOVB = 50, 255, 80
+        elseif v:find("ม่วง") or v:find("Purple") then
+            Hub.Settings.SilentAimFOVR, Hub.Settings.SilentAimFOVG, Hub.Settings.SilentAimFOVB = 180, 50, 255
+        elseif v:find("เหลือง") or v:find("Gold") then
+            Hub.Settings.SilentAimFOVR, Hub.Settings.SilentAimFOVG, Hub.Settings.SilentAimFOVB = 255, 215, 0
+        elseif v:find("ชมพู") or v:find("Pink") then
+            Hub.Settings.SilentAimFOVR, Hub.Settings.SilentAimFOVG, Hub.Settings.SilentAimFOVB = 255, 60, 180
+        elseif v:find("ขาว") or v:find("White") then
+            Hub.Settings.SilentAimFOVR, Hub.Settings.SilentAimFOVG, Hub.Settings.SilentAimFOVB = 255, 255, 255
+        end
+        UpdateSilentColorFromRGB()
+        if Options.SilentRSlider then Options.SilentRSlider:SetValue(Hub.Settings.SilentAimFOVR) end
+        if Options.SilentGSlider then Options.SilentGSlider:SetValue(Hub.Settings.SilentAimFOVG) end
+        if Options.SilentBSlider then Options.SilentBSlider:SetValue(Hub.Settings.SilentAimFOVB) end
+    end)
+
+    local FOVThicknessSlider = Tabs.Combat:AddSlider("FOVThicknessSlider", {
+        Title = "ความหนาเส้นวงกลม (Circle Thickness)",
+        Description = "ปรับความหนาของเส้นขอบวงกลม",
+        Default = Hub.Settings.FOVCircleThickness,
+        Min = 1,
+        Max = 6,
         Rounding = 1
     })
-    HitboxSizeSlider:OnChanged(function(v)
-        Hub.Settings.HitboxSize = v
+    FOVThicknessSlider:OnChanged(function(v)
+        Hub.Settings.FOVCircleThickness = v
+        if SilentFOVCircle then SilentFOVCircle.Thickness = v end
     end)
 
-    local HitboxTargetDrop = Tabs.Combat:AddDropdown("HitboxTargetDrop", {
-        Title = "ส่วนที่ต้องการขยาย (Target Part)",
-        Description = "เลือกส่วนของร่างกายศัตรูที่ต้องการขยายขนาด",
-        Values = {"ส่วนหัว (Head - แนะนำ)", "ลำตัวส่วนบน (UpperTorso)", "ทุกส่วน (All Parts)"},
-        Default = "ส่วนหัว (Head - แนะนำ)"
+    local FOVTransparencySlider = Tabs.Combat:AddSlider("FOVTransparencySlider", {
+        Title = "ความโปร่งใสของเส้นวงกลม (Circle Transparency)",
+        Description = "ปรับความเข้มชัดหรือโปร่งใสของเส้นวงกลม (0.1 - 1.0)",
+        Default = Hub.Settings.FOVCircleTransparency,
+        Min = 0.1,
+        Max = 1.0,
+        Rounding = 2
     })
-    HitboxTargetDrop:OnChanged(function(v)
-        if v:find("ส่วนหัว") or v:find("Head") then
-            Hub.Settings.HitboxTarget = "Head"
-        elseif v:find("ลำตัว") or v:find("UpperTorso") then
-            Hub.Settings.HitboxTarget = "UpperTorso"
-        else
-            Hub.Settings.HitboxTarget = "All"
-        end
+    FOVTransparencySlider:OnChanged(function(v)
+        Hub.Settings.FOVCircleTransparency = v
+        if SilentFOVCircle then SilentFOVCircle.Transparency = v end
     end)
 
-    local HitboxVisToggle = Tabs.Combat:AddToggle("HitboxVisToggle", {
-        Title = "แสดงกล่องฮิตบ็อกซ์เรืองแสง (Show Hitboxes)",
-        Description = "แสดงกล่องเรืองแสงของ Hitbox ศัตรูบนหน้าจอ",
-        Default = Hub.Settings.HitboxVisible
+    local FOVFilledToggle = Tabs.Combat:AddToggle("FOVFilledToggle", {
+        Title = "เติมสีเต็มวงกลม (Filled Circle)",
+        Description = "ระบายสีทึบภายในวงกลม",
+        Default = Hub.Settings.FOVCircleFilled
     })
-    HitboxVisToggle:OnChanged(function(v)
-        Hub.Settings.HitboxVisible = v
+    FOVFilledToggle:OnChanged(function(v)
+        Hub.Settings.FOVCircleFilled = v
+        if SilentFOVCircle then SilentFOVCircle.Filled = v end
     end)
 
     Tabs.Combat:AddSection("ปรับแต่งปืน (Weapon Modifications)")
@@ -2664,6 +3497,19 @@ local function InitUI()
         ApplyWeaponMods()
     end)
 
+    local RapidFireRPMSlider = Tabs.Combat:AddSlider("RapidFireRPMSlider", {
+        Title = "ความเร็วรอบลั่นกระสุน (RPM Rate)",
+        Description = "ปรับความเร็วการลั่นกระสุนต่อนาที (RPM)",
+        Default = Hub.Settings.RapidFireRPM or 1100,
+        Min = 600,
+        Max = 1800,
+        Rounding = 0
+    })
+    RapidFireRPMSlider:OnChanged(function(v)
+        Hub.Settings.RapidFireRPM = v
+        ApplyWeaponMods()
+    end)
+
     local InstantReloadToggle = Tabs.Combat:AddToggle("InstantReloadToggle", {
         Title = "รีโหลดกระสุนทันที (Instant Reload)",
         Description = "ลดเวลาบรรจุกระสุนลงเหลือ 0.05 วินาที รีโหลดแทบจะทันที",
@@ -2674,9 +3520,75 @@ local function InitUI()
         ApplyWeaponMods()
     end)
 
+    local RedDmgToggle = Tabs.Combat:AddToggle("RedDmgToggle", {
+        Title = "บังคับตัวเลขดาเมจสีแดง 100% (Red Damage Numbers)",
+        Description = "บังคับให้ตัวเลขดาเมจและเป้าเล็งเป็นสีแดงสดทุกนัดที่ยิงเข้าหัว",
+        Default = Hub.Settings.RedDamageNumbers
+    })
+    RedDmgToggle:OnChanged(function(v)
+        Hub.Settings.RedDamageNumbers = v
+    end)
+
+    Tabs.Combat:AddSection("ขยายฮิตบ็อกซ์ (Hitbox Expander)")
+
+    local HitboxToggle = Tabs.Combat:AddToggle("HitboxToggle", {
+        Title = "เปิดขยายฮิตบ็อกซ์ (Hitbox Expander)",
+        Description = "ขยายขนาด Hitbox ศัตรู ยิงโดนหัวง่าย 100% แม้ยิงไม่ตรงเป้า",
+        Default = Hub.Settings.HitboxExpander
+    })
+    HitboxToggle:OnChanged(function(v)
+        Hub.Settings.HitboxExpander = v
+        if not v then
+            local ch = Workspace:FindFirstChild("ClientHitboxes")
+            if ch then
+                for _, f in ipairs(ch:GetChildren()) do
+                    for _, p in ipairs(f:GetChildren()) do
+                        if p:IsA("BasePart") then p.Transparency = 1 end
+                    end
+                end
+            end
+        end
+    end)
+
+    local HitboxSizeSlider = Tabs.Combat:AddSlider("HitboxSizeSlider", {
+        Title = "ขนาดฮิตบ็อกซ์ (Hitbox Size)",
+        Description = "ขนาดของกล่องเป้าหมายที่ต้องการขยาย (Studs)",
+        Default = Hub.Settings.HitboxSize,
+        Min = 2,
+        Max = 25,
+        Rounding = 1
+    })
+    HitboxSizeSlider:OnChanged(function(v)
+        Hub.Settings.HitboxSize = v
+    end)
+
+    local HitboxTargetDrop = Tabs.Combat:AddDropdown("HitboxTargetDrop", {
+        Title = "ชิ้นส่วนเป้าหมาย (Target Part)",
+        Description = "เลือกส่วนของร่างกายศัตรูที่ต้องการขยายขนาด",
+        Values = {"ส่วนหัว (Head - แนะนำ)", "ลำตัวส่วนบน (UpperTorso)", "ทุกส่วน (All Parts)"},
+        Default = "ส่วนหัว (Head - แนะนำ)"
+    })
+    HitboxTargetDrop:OnChanged(function(v)
+        if v:find("ส่วนหัว") or v:find("Head") then
+            Hub.Settings.HitboxTarget = "Head"
+        elseif v:find("ลำตัว") or v:find("UpperTorso") then
+            Hub.Settings.HitboxTarget = "UpperTorso"
+        else
+            Hub.Settings.HitboxTarget = "All"
+        end
+    end)
+
+    local HitboxVisToggle = Tabs.Combat:AddToggle("HitboxVisToggle", {
+        Title = "แสดงกล่องฮิตบ็อกซ์เรืองแสง (Show Hitbox Visualizer)",
+        Description = "แสดงกล่องเรืองแสงของ Hitbox ศัตรูบนหน้าจอ",
+        Default = Hub.Settings.HitboxVisible
+    })
+    HitboxVisToggle:OnChanged(function(v)
+        Hub.Settings.HitboxVisible = v
+    end)
+
     -- Apply initial weapon mods
     ApplyWeaponMods()
-
     -- ================================================
     -- 👁️ VISUALS TAB (หมวดมองทะลุ)
     -- ================================================
@@ -2697,6 +3609,13 @@ local function InitUI()
         Default = Hub.Settings.ESPBox
     })
     ESPBoxToggle:OnChanged(function(v) Hub.Settings.ESPBox = v end)
+
+    local ESPChamsToggle = Tabs.Visuals:AddToggle("ESPChamsToggle", {
+        Title = "เรืองแสงตัวศัตรู (Chams)",
+        Description = "เรืองแสงไฮไลท์ขอบแดง ตัวแดงจาง มองทะลุกำแพงง่ายขึ้น",
+        Default = Hub.Settings.ESPChams
+    })
+    ESPChamsToggle:OnChanged(function(v) Hub.Settings.ESPChams = v end)
 
     local ESPNameToggle = Tabs.Visuals:AddToggle("ESPNameToggle", {
         Title = "แสดงชื่อผู้เล่น (Player Names)",
@@ -2752,11 +3671,18 @@ local function InitUI()
     end)
 
     local ESPHealthToggle = Tabs.Visuals:AddToggle("ESPHealthToggle", {
-        Title = "แสดงหลอดเลือดและพลังชีวิต (Health Bar)",
-        Description = "แสดงแถบเลือดและตัวเลข HP ของผู้เล่น",
+        Title = "แสดงตัวเลขพลังชีวิต (Health Text)",
+        Description = "แสดงตัวเลขเปอร์เซ็นต์เลือด HP ของศัตรู",
         Default = Hub.Settings.ESPHealth
     })
     ESPHealthToggle:OnChanged(function(v) Hub.Settings.ESPHealth = v end)
+
+    local ESPHealthBarToggle = Tabs.Visuals:AddToggle("ESPHealthBarToggle", {
+        Title = "หลอดเลือดข้างตัวศัตรู (Dynamic Health Bar)",
+        Description = "หลอดเลือดข้างตัวศัตรู ไล่ระดับสีตามเลือด (100% เขียว -> ส้ม -> 20% แดง)",
+        Default = Hub.Settings.ESPHealthBar
+    })
+    ESPHealthBarToggle:OnChanged(function(v) Hub.Settings.ESPHealthBar = v end)
 
     local ESPDistToggle = Tabs.Visuals:AddToggle("ESPDistToggle", {
         Title = "แสดงระยะห่าง (Distance)",
@@ -2764,6 +3690,18 @@ local function InitUI()
         Default = Hub.Settings.ESPDistance
     })
     ESPDistToggle:OnChanged(function(v) Hub.Settings.ESPDistance = v end)
+
+    local ESPMaxDistSlider = Tabs.Visuals:AddSlider("ESPMaxDistSlider", {
+        Title = "ระยะแสดงผล ESP (Max Distance)",
+        Description = "กำหนดระยะการมองเห็นผู้เล่น (Studs) ไกลเกินนี้จะไม่แสดง",
+        Default = Hub.Settings.ESPMaxDistance or 1500,
+        Min = 100,
+        Max = 3000,
+        Rounding = 0
+    })
+    ESPMaxDistSlider:OnChanged(function(v)
+        Hub.Settings.ESPMaxDistance = v
+    end)
 
     local ESPWeaponToggle = Tabs.Visuals:AddToggle("ESPWeaponToggle", {
         Title = "แสดงชื่อปืนที่ถือ (Equipped Weapon)",
@@ -2795,11 +3733,22 @@ local function InitUI()
     UpdateSafeESP()
 
     -- ================================================
-    -- 🏃 MOVEMENT TAB (หมวดเคลื่อนที่)
+    -- 👤 CHARACTER TAB (หมวดตัวละคร)
     -- ================================================
-    Tabs.Movement:AddSection("เกิดใหม่อัตโนมัติ & รีเซ็ตด่วน (Auto Respawn & Fast Reset)")
+    Tabs.Character:AddSection("การแสดงผลตัวละคร (Identity & Display)")
 
-    local AutoRespawnToggle = Tabs.Movement:AddToggle("AutoRespawnToggle", {
+    local HideNameToggle = Tabs.Character:AddToggle("HideNameToggle", {
+        Title = "ปิดชื่อตัวละครบนหัว (Hide Overhead Name)",
+        Description = "ซ่อนชื่อและแท็กแก๊งบนหัวตัวละครของเรา ไม่ให้คนอื่นเห็นหรืออัดคลิปติดชื่อ",
+        Default = Hub.Settings.HideCharacterName
+    })
+    HideNameToggle:OnChanged(function(v)
+        SetHideCharacterName(v)
+    end)
+
+    Tabs.Character:AddSection("เกิดใหม่อัตโนมัติ & รีเซ็ตด่วน (Auto Respawn & Fast Reset)")
+
+    local AutoRespawnToggle = Tabs.Character:AddToggle("AutoRespawnToggle", {
         Title = "เกิดใหม่อัตโนมัติ (Auto Respawn - ปุ่ม X)",
         Description = "กดปุ่ม X หรือเมื่อถูกยิงล้มคลาน/เลือดหมด จะเกิดใหม่และรีเซ็ตทันทีไม่ต้องรอคูลดาวน์",
         Default = Hub.Settings.AutoRespawn
@@ -2808,7 +3757,7 @@ local function InitUI()
         Hub.Settings.AutoRespawn = v
     end)
 
-    local RespawnKeybind = Tabs.Movement:AddKeybind("RespawnKeybind", {
+    local RespawnKeybind = Tabs.Character:AddKeybind("RespawnKeybind", {
         Title = "ปุ่มคีย์ลัดเกิดใหม่ (Respawn Key)",
         Default = Hub.Settings.RespawnKey,
         Callback = function(key)
@@ -2816,7 +3765,7 @@ local function InitUI()
         end
     })
 
-    Tabs.Movement:AddButton({
+    Tabs.Character:AddButton({
         Title = "กดเกิดใหม่ทันที (Force Respawn Now)",
         Description = "รีเซ็ตตัวละครและข้ามคูลดาวน์เกิดใหม่ทันที 1 ครั้ง",
         Callback = function()
@@ -2826,40 +3775,9 @@ local function InitUI()
         end
     })
 
-    Tabs.Movement:AddSection("ความเร็ว & สเตมิน่า (Speed & Stamina)")
+    Tabs.Character:AddSection("ค่าสถานะตัวละคร (Character Status)")
 
-    local SpeedToggle = Tabs.Movement:AddToggle("SpeedToggle", {
-        Title = "เปิดใช้งานเพิ่มความเร็ววิ่ง (Speed Hack)",
-        Description = "ปรับความเร็วการวิ่งผ่านระบบ Native Config & Humanoid",
-        Default = Hub.Settings.SpeedHack
-    })
-    SpeedToggle:OnChanged(function(v)
-        Hub.Settings.SpeedHack = v
-        if not v then
-            local char = LocalPlayer.Character
-            local hum = char and char:FindFirstChildOfClass("Humanoid")
-            if hum then hum.WalkSpeed = 18 end
-            if Config and Config.Global then
-                Config.Global.SprintSpeed = 26
-                Config.Global.WalkSpeed = 18
-                Config.Global.MoveSpeedMul = 0.95
-            end
-        end
-    end)
-
-    local SpeedSlider = Tabs.Movement:AddSlider("SpeedSlider", {
-        Title = "ระดับความเร็ววิ่ง (WalkSpeed Value)",
-        Description = "ตั้งค่าความเร็วในการเดินและวิ่ง",
-        Default = Hub.Settings.SpeedValue,
-        Min = 18,
-        Max = 65,
-        Rounding = 0
-    })
-    SpeedSlider:OnChanged(function(v)
-        Hub.Settings.SpeedValue = v
-    end)
-
-    local InfStaminaToggle = Tabs.Movement:AddToggle("InfStaminaToggle", {
+    local InfStaminaToggle = Tabs.Character:AddToggle("InfStaminaToggle", {
         Title = "สเตมิน่าไม่จำกัด (Infinite Stamina)",
         Description = "วิ่งได้ตลอดเวลา ไม่เหนื่อย ไม่หมดแรง ล็อค Stamina เต็ม 100%",
         Default = Hub.Settings.InfiniteStamina
@@ -2868,56 +3786,18 @@ local function InitUI()
         Hub.Settings.InfiniteStamina = v
     end)
 
-    local InfJumpToggle = Tabs.Movement:AddToggle("InfJumpToggle", {
-        Title = "กระโดดได้ไม่จำกัด (Infinite Jump)",
-        Description = "สามารถกระโดดซ้ำกลางอากาศได้ต่อเนื่องไม่จำกัดครั้ง",
-        Default = Hub.Settings.InfJump
-    })
-    InfJumpToggle:OnChanged(function(v) Hub.Settings.InfJump = v end)
-
-    local NoclipToggle = Tabs.Movement:AddToggle("NoclipToggle", {
-        Title = "เดินทะลุกำแพง (Noclip)",
-        Description = "ปิดการชนของตัวละคร เดินทะลุสิ่งกีดขวางและกำแพงได้",
-        Default = Hub.Settings.Noclip
-    })
-    NoclipToggle:OnChanged(function(v) Hub.Settings.Noclip = v end)
-
-    local FlyToggle = Tabs.Movement:AddToggle("FlyToggle", {
-        Title = "บินอิสระ (Fly - WASD + Space/Shift)",
-        Description = "เปิดระบบบินอิสระ บังคับทิศทางด้วย WASD และขึ้นลงด้วย Space/Shift",
-        Default = Hub.Settings.Fly
-    })
-    FlyToggle:OnChanged(function(v)
-        Hub.Settings.Fly = v
-        if v then StartFly() else StopFly() end
-    end)
-
-    local FlySpeedSlider = Tabs.Movement:AddSlider("FlySpeedSlider", {
-        Title = "ความเร็วในการบิน (Fly Speed)",
-        Description = "ปรับระดับความเร็วขณะเปิดโหมดบิน",
-        Default = Hub.Settings.FlySpeed,
-        Min = 20,
-        Max = 150,
-        Rounding = 0
-    })
-    FlySpeedSlider:OnChanged(function(v)
-        Hub.Settings.FlySpeed = v
-    end)
-
     -- ================================================
     -- 🌾 FARM & WORLD TAB (หมวดฟาร์ม & โลก)
     -- ================================================
-    -- ================================================
-    -- ⚔️ AUTO AIM & SHOOT ZOMBIES (เล็งและยิงซอมบี้อัตโนมัติ)
-    -- ================================================
-    Tabs.World:AddSection("⚔️ เล็งและยิงซอมบี้อัตโนมัติ (Auto Aim & Shoot Zombies)")
+    Tabs.World:AddSection("⚔️ เล็งและยิงบอท Hood อัตโนมัติ (Auto Aim & Shoot Hood NPCs)")
 
-    local ZombieKillAuraToggle = Tabs.World:AddToggle("ZombieKillAuraToggle", {
-        Title = "เริ่มเล็งและยิงซอมบี้อัตโนมัติ (Auto Aim & Shoot Zombies)",
-        Description = "เล็งหัวและยิงซอมบี้ทั้งหมดในจุดฟาร์มอัตโนมัติ วนลูปเกิดใหม่ก็ยิง + ดูดเงิน",
-        Default = Hub.Settings.ZombieKillAura
+    local HoodKillAuraToggle = Tabs.World:AddToggle("HoodKillAuraToggle", {
+        Title = "เริ่มเล็งและยิงบอท Hood อัตโนมัติ (Auto Aim & Shoot Hood NPCs)",
+        Description = "เล็งหัวและยิงบอท Hood ทั้งหมดในจุดฟาร์มอัตโนมัติ วนลูปเกิดใหม่ก็ยิง + เก็บเงินด่วน",
+        Default = (Hub.Settings.HoodKillAura ~= nil and Hub.Settings.HoodKillAura) or Hub.Settings.ZombieKillAura
     })
-    ZombieKillAuraToggle:OnChanged(function(v)
+    HoodKillAuraToggle:OnChanged(function(v)
+        Hub.Settings.HoodKillAura = v
         Hub.Settings.ZombieKillAura = v
         if v then
             task.spawn(function()
@@ -2943,33 +3823,36 @@ local function InitUI()
         end
     end)
 
-    local ZombieWallCheckToggle = Tabs.World:AddToggle("ZombieWallCheckToggle", {
-        Title = "ตรวจจับสิ่งกีดขวาง (Zombie Wall Check / LOS)",
-        Description = "ไม่ยิงสิ่งกีดขวาง รอให้ซอมบี้เดินออกมาในที่โล่งก่อนค่อยยิง (ประหยัดกระสุน)",
-        Default = Hub.Settings.ZombieWallCheck
+    local HoodWallCheckToggle = Tabs.World:AddToggle("HoodWallCheckToggle", {
+        Title = "ตรวจจับสิ่งกีดขวาง (Hood Wall Check / LOS)",
+        Description = "ไม่ยิงสิ่งกีดขวาง รอให้บอท Hood เดินออกมาในที่โล่งก่อนค่อยยิง (ประหยัดกระสุน)",
+        Default = (Hub.Settings.HoodWallCheck ~= nil and Hub.Settings.HoodWallCheck) or Hub.Settings.ZombieWallCheck
     })
-    ZombieWallCheckToggle:OnChanged(function(v)
+    HoodWallCheckToggle:OnChanged(function(v)
+        Hub.Settings.HoodWallCheck = v
         Hub.Settings.ZombieWallCheck = v
     end)
 
-    local ZombieKillAuraDistSlider = Tabs.World:AddSlider("ZombieKillAuraDistSlider", {
-        Title = "ระยะตรวจจับซอมบี้ (Target Range)",
-        Description = "ระยะสแกน เล็ง และสังหารซอมบี้รอบตัว (แนะนำ 250 studs)",
+    local HoodKillAuraDistSlider = Tabs.World:AddSlider("HoodKillAuraDistSlider", {
+        Title = "ระยะตรวจจับบอท (Range)",
+        Description = "ระยะสแกน เล็ง และสังหารบอท Hood รอบตัว (แนะนำ 250 studs)",
         Min = 50,
         Max = 400,
-        Default = Hub.Settings.ZombieKillAuraRange,
+        Default = Hub.Settings.HoodKillAuraRange or Hub.Settings.ZombieKillAuraRange,
         Rounding = 0
     })
-    ZombieKillAuraDistSlider:OnChanged(function(v)
+    HoodKillAuraDistSlider:OnChanged(function(v)
+        Hub.Settings.HoodKillAuraRange = v
         Hub.Settings.ZombieKillAuraRange = v
     end)
 
-    local ZombieESPToggle = Tabs.World:AddToggle("ZombieESPToggle", {
-        Title = "มองทะลุซอมบี้ (Zombie ESP)",
-        Description = "แสดงชื่อ ระยะ และหลอดเลือดซอมบี้แบบ Real-time",
-        Default = Hub.Settings.ZombieESP
+    local HoodESPToggle = Tabs.World:AddToggle("HoodESPToggle", {
+        Title = "มองทะลุบอท Hood (Hood NPC ESP)",
+        Description = "แสดงชื่อ ระยะ และหลอดเลือดบอท Hood แบบ Real-time",
+        Default = (Hub.Settings.HoodESP ~= nil and Hub.Settings.HoodESP) or Hub.Settings.ZombieESP
     })
-    ZombieESPToggle:OnChanged(function(v)
+    HoodESPToggle:OnChanged(function(v)
+        Hub.Settings.HoodESP = v
         Hub.Settings.ZombieESP = v
     end)
 
@@ -2995,63 +3878,6 @@ local function InitUI()
         end
     })
 
-    -- ================================================
-    -- 📍 TELEPORT TAB (หมวดวาร์ป)
-    -- ================================================
-    Tabs.Teleport:AddSection("จุดตู้เซฟทหาร ($5K - $50K)")
-
-    Tabs.Teleport:AddButton({
-        Title = "วาร์ปไปตู้เซฟจุดที่ 1 (Safe 1)",
-        Description = "(-71, 20, 882) ตู้เซฟทหารจุดที่ 1",
-        Callback = function() TeleportToSafe("Safe 1") end
-    })
-
-    Tabs.Teleport:AddButton({
-        Title = "วาร์ปไปตู้เซฟจุดที่ 2 (Safe 2)",
-        Description = "(-770, 7, 411) ตู้เซฟทหารจุดที่ 2",
-        Callback = function() TeleportToSafe("Safe 2") end
-    })
-
-    Tabs.Teleport:AddButton({
-        Title = "วาร์ปไปตู้เซฟจุดที่ 3 (Safe 3)",
-        Description = "(209, 12, 533) ตู้เซฟทหารจุดที่ 3",
-        Callback = function() TeleportToSafe("Safe 3") end
-    })
-
-    Tabs.Teleport:AddButton({
-        Title = "วาร์ปไปตู้เซฟจุดที่ 4 (Safe 4)",
-        Description = "(-733, 21, 730) ตู้เซฟทหารจุดที่ 4",
-        Callback = function() TeleportToSafe("Safe 4") end
-    })
-
-    Tabs.Teleport:AddSection("เซฟโซน & ร้านค้า (Safe Zones & Shops)")
-
-    local function TeleportTo(cf)
-        local char = LocalPlayer.Character
-        local hrp = char and char:FindFirstChild("HumanoidRootPart")
-        if hrp then
-            hrp.AssemblyLinearVelocity = Vector3.zero
-            hrp.CFrame = cf
-        end
-    end
-
-    Tabs.Teleport:AddButton({
-        Title = "วาร์ปไปร้านขายปืน (Gun Store)",
-        Description = "(-98, 18, 883) ร้านปืนหลักในเมือง",
-        Callback = function() TeleportTo(CFrame.new(-98, 18, 883)) end
-    })
-
-    Tabs.Teleport:AddButton({
-        Title = "วาร์ปไปร้านขายรถ (Car Dealer)",
-        Description = "(-721, 18, 694) ร้านซื้อยานพาหนะ",
-        Callback = function() TeleportTo(CFrame.new(-721, 18, 694)) end
-    })
-
-    Tabs.Teleport:AddButton({
-        Title = "วาร์ปไปโซนตู้ ATM (ATM Group)",
-        Description = "(-768, 5, 405) โซนตู้ฝาก-ถอนเงินสด",
-        Callback = function() TeleportTo(CFrame.new(-768, 5, 405)) end
-    })
 
     -- ================================================
     -- ⚙️ SETTINGS TAB (หมวดตั้งค่า)
@@ -3059,7 +3885,7 @@ local function InitUI()
     Tabs.Settings:AddSection("ปุ่มเปิด/ปิดเมนู (Menu Toggle)")
 
     Tabs.Settings:AddKeybind("MenuToggleKey", {
-        Title = "ปุ่มคีย์ลัดเปิด/ปิดเมนู (Open/Close Menu Keybind)",
+        Title = "ปุ่มเปิด/ปิดเมนู (Menu Key)",
         Mode = "Toggle",
         Default = Enum.KeyCode.RightControl,
         Callback = function(key)
@@ -3082,6 +3908,56 @@ local function InitUI()
             Hub.Settings.IconTheme = "Themed"
         end
         if Hub.ApplyTabIconColors then Hub.ApplyTabIconColors() end
+    end)
+
+    Tabs.Settings:AddSection("ระบบปรับแต่งสำหรับมือถือ (Mobile Optimization)")
+
+    Tabs.Settings:AddButton({
+        Title = "ปรับขนาดหน้าต่างให้พอดีจอมือถือ (Fit Mobile Screen)",
+        Description = "จัดตำแหน่งและปรับขนาดหน้าต่าง UI ให้เหมาะสมกับหน้าจอมือถือทันที",
+        Callback = function()
+            local base = (targetGuiParent and targetGuiParent:FindFirstChild("Base", true))
+                      or (CoreGui and CoreGui:FindFirstChild("Base", true))
+            if base then
+                local vp = (Workspace.CurrentCamera and Workspace.CurrentCamera.ViewportSize) or Vector2.new(1920, 1080)
+                local targetW = math.clamp(math.floor(vp.X * 0.88), 340, 680)
+                local targetH = math.clamp(math.floor(vp.Y * 0.82), 260, 460)
+                TweenService:Create(base, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+                    Size = UDim2.fromOffset(targetW, targetH),
+                    Position = UDim2.fromScale(0.5, 0.5)
+                }):Play()
+                Fluent:Notify({ Title = "KrakenHub", Content = "ปรับขนาดหน้าต่างให้พอดีกับหน้าจอแล้ว", Duration = 3 })
+            end
+        end
+    })
+
+    local MobileFPSToggle = Tabs.Settings:AddToggle("MobileFPSToggle", {
+        Title = "บูสต์ FPS มือถือ (Mobile FPS Booster)",
+        Description = "ลดทอนเอฟเฟกต์แสงเงาและหมอกที่ไม่จำเป็น ช่วยให้เกมลื่นขึ้น 60+ FPS บน Delta",
+        Default = false
+    })
+    MobileFPSToggle:OnChanged(function(enabled)
+        pcall(function()
+            local lighting = game:GetService("Lighting")
+            if enabled then
+                lighting.GlobalShadows = false
+                lighting.FogEnd = 9e9
+                for _, v in ipairs(lighting:GetChildren()) do
+                    if v:IsA("PostProcessEffect") or v:IsA("BlurEffect") or v:IsA("SunRaysEffect") or v:IsA("DepthOfFieldEffect") or v:IsA("BloomEffect") then
+                        v.Enabled = false
+                    end
+                end
+                if setfpscap then setfpscap(60) end
+                Fluent:Notify({ Title = "FPS Booster", Content = "เปิดโหมดประหยัดทรัพยากรสำหรับมือถือแล้ว", Duration = 3 })
+            else
+                lighting.GlobalShadows = true
+                for _, v in ipairs(lighting:GetChildren()) do
+                    if v:IsA("PostProcessEffect") or v:IsA("BlurEffect") or v:IsA("SunRaysEffect") or v:IsA("DepthOfFieldEffect") or v:IsA("BloomEffect") then
+                        v.Enabled = true
+                    end
+                end
+            end
+        end)
     end)
 
     Tabs.Settings:AddButton({
@@ -3136,9 +4012,12 @@ genv.UrbanReload_Cleanup = function()
     pcall(function() RunService:UnbindFromRenderStep("KrakenESP") end)
     pcall(function() RunService:UnbindFromRenderStep("KrakenAimbot") end)
 
-    -- Remove FOV Circle
+    -- Remove FOV Circles
     if FOVCircle then
         pcall(function() FOVCircle:Remove() end)
+    end
+    if SilentFOVCircle then
+        pcall(function() SilentFOVCircle:Remove() end)
     end
 
     -- Clear ESP
@@ -3197,12 +4076,7 @@ genv.UrbanReload_Cleanup = function()
 
     -- Restore Global Configs
     if Config and Config.Global then
-        Config.Global.SprintSpeed = 26
-        Config.Global.WalkSpeed = 18
-        Config.Global.MoveSpeedMul = 0.95
         Config.Global.BloomScale = 0.8
-        Config.Global.RollCooldown = 0.5
-        Config.Global.RollDistance = 1.2
     end
 
     if Controls and Controls.Press then
@@ -3212,28 +4086,39 @@ genv.UrbanReload_Cleanup = function()
         end)
     end
 
-    -- Restore Zombie Heads to natural size
-    local hoodLocal = Workspace:FindFirstChild("HoodLocal")
-    if hoodLocal then
-        local naturalSize = Vector3.new(0.792705, 1.214349, 0.902806)
-        for _, z in ipairs(hoodLocal:GetChildren()) do
-            if z.Name:find("Zombie") then
+    -- Restore Hood NPC Heads to natural size
+    local enemyFolders = {}
+    local hl = Workspace:FindFirstChild("HoodLocal")
+    if hl then table.insert(enemyFolders, hl) end
+    local zf = Workspace:FindFirstChild("Zombies")
+    if zf then table.insert(enemyFolders, zf) end
+
+    local naturalSize = Vector3.new(0.792705, 1.214349, 0.902806)
+    for _, folder in ipairs(enemyFolders) do
+        for _, z in ipairs(folder:GetChildren()) do
+            if IsEnemyNPC(z) then
                 local head = z:FindFirstChild("Head")
                 if head and head:IsA("BasePart") then
                     head.Size = naturalSize
                 end
-                local bb = head and head:FindFirstChild("KrakenZombieESP")
+                local bb = head and (head:FindFirstChild("KrakenHoodESP") or head:FindFirstChild("KrakenZombieESP"))
                 if bb then pcall(function() bb:Destroy() end) end
             end
         end
-        for _, desc in ipairs(hoodLocal:GetDescendants()) do
-            if desc:IsA("BillboardGui") and desc.Name == "KrakenZombieESP" then
+        for _, desc in ipairs(folder:GetDescendants()) do
+            if desc:IsA("BillboardGui") and (desc.Name == "KrakenHoodESP" or desc.Name == "KrakenZombieESP") then
                 pcall(function() desc:Destroy() end)
             end
         end
     end
 
-    if ZombieESPStorage then
+    if HoodESPStorage then
+        for model, bb in pairs(HoodESPStorage) do
+            pcall(function() bb:Destroy() end)
+        end
+        table.clear(HoodESPStorage)
+    end
+    if ZombieESPStorage and ZombieESPStorage ~= HoodESPStorage then
         for model, bb in pairs(ZombieESPStorage) do
             pcall(function() bb:Destroy() end)
         end
@@ -3241,7 +4126,9 @@ genv.UrbanReload_Cleanup = function()
     end
     LiveNpcTable = nil
 
-    StopFly()
+    if ApplyNametagVisibility then
+        pcall(ApplyNametagVisibility, false)
+    end
     print("[KrakenHub] Urban Reload Script cleanly unloaded.")
 end
 
@@ -3254,5 +4141,41 @@ task.spawn(function()
         warn("[KrakenHub] InitUI Error: " .. tostring(err))
     else
         print("[KrakenHub] Urban Reload UI & Combat Engine successfully initialized!")
+    end
+end)
+
+-- ==============================================================
+-- 📦 CASES MENU AUTO-OPTIMIZER (Anti-Lag / Anti-Stencil Thrash)
+-- Relieves GPU Swapchain Present stalls when viewing 37+ ViewportFrames
+-- ==============================================================
+task.spawn(function()
+    local playerGui = LocalPlayer:WaitForChild("PlayerGui", 10)
+    local casesGui = playerGui and playerGui:WaitForChild("Cases", 10)
+    if not casesGui then return end
+
+    local menu = casesGui:FindFirstChild("Menu")
+    if not menu then return end
+
+    Hub._CasesOpen = false
+
+    while Hub.Running and genv._UrbanReloadScriptId == SCRIPT_ID do
+        local isOpen = casesGui.Enabled and menu.Visible
+        if isOpen ~= Hub._CasesOpen then
+            Hub._CasesOpen = isOpen
+            if isOpen then
+                -- Disable all Chams highlights while Cases UI is open to save GPU swapchain
+                for _, obj in pairs(Hub.ESP) do
+                    if obj.Highlight and obj.Highlight.Enabled then
+                        obj.Highlight.Enabled = false
+                    end
+                end
+                for _, bb in pairs(HoodESPStorage) do
+                    if bb and bb.Enabled then
+                        bb.Enabled = false
+                    end
+                end
+            end
+        end
+        task.wait(0.2)
     end
 end)
