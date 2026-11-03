@@ -95,3 +95,4 @@ fs.writeFileSync(outPath, outputContent, 'utf8');
 console.log('[KrakenHub Shield] Legit Protection build successful!');
 console.log('Source: ' + srcPath + ' (' + rawCode.length + ' bytes)');
 console.log('Output: ' + outPath + ' (' + outputContent.length + ' bytes)');
+

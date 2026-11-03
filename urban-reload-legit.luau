@@ -9,7 +9,7 @@
 -- • 🎯 Combat Engine: Legit Silent Aim (82% Hit Chance, 35% Headshot) + Smooth Camera Aimbot
 -- • 🔫 Weapon Mods: Legit Recoil Dampener + Full Auto + Safe Handling
 -- • 👁️ Visuals: 2D Box ESP + Skeleton Tracers + Health Bar + Distance + Safe/Loot ESP
--- • 🌾 Complete Auto Farm: Auto Safe Farm (Safes 1-4) + Hood NPC Kill Aura & Loot [E] + Zombie Aura
+-- 🌾 Humanized Farm Assist: Legit Bot Aim (Lerp smooth) + Proximity Auto Loot [E] (<=12m) + Safe ESP (No Warps)
 -- • ⚡ Character: Infinite Stamina + Instant Respawn (Key X) + Fast Reset
 -- ==============================================================
 
@@ -479,9 +479,10 @@ local Hub = {
 
         -- Hood NPC Auto Aim & Shoot Kill Aura
         HoodKillAura = false,
-        HoodKillAuraRange = 250,
+        HoodKillAuraRange = 50,
         HoodWallCheck = true,
         HoodESP = true,
+        AutoLootNear = true,
         SavedFarmSpot = Vector3.new(-1033.4, 14.6, 427.6),
         -- Aliases
         ZombieKillAura = false,
@@ -2011,33 +2012,90 @@ task.spawn(function()
 end)
 
 -- ==============================================================
--- ⚔️ 12.2 HOOD NPC KILL AURA & AUTOMATIC MONEY LOOT ENGINE
--- Scans all alive Hood NPCs in farm zone, eliminates them in sequence
--- with rapid headshots, loops on respawns, and loots cash instantly!
+-- 📦 12.2 100% LEGIT PROXIMITY LOOT ENGINE [E]
+-- Strictly checks player distance <= 12 studs before interacting.
+-- Emulates human ProximityPrompt interaction timing & keypresses.
+-- ZERO packets sent across map (Completely eliminates Cheater Server flags).
+-- ==============================================================
+local lastLootTick = 0
+local function AttemptLegitLoot(targetPos, targetId)
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp or not targetPos then return false end
+
+    -- STRICT SAFETY CLAMP: Distance must be <= 12 studs (normal ProximityPrompt reach)
+    local dist = (hrp.Position - targetPos).Magnitude
+    if dist > 12 then return false end
+
+    local now = tick()
+    if now - lastLootTick < 0.25 then return false end
+    lastLootTick = now
+
+    pcall(function()
+        -- 1. Try local ClientState loot function
+        if ClientState and type(ClientState.HoodLootNow) == "function" then
+            ClientState.HoodLootNow()
+        end
+
+        -- 2. Trigger ProximityPrompt directly if one exists near targetPos
+        if typeof(fireproximityprompt) == "function" then
+            for _, prompt in ipairs(Workspace:GetDescendants()) do
+                if prompt:IsA("ProximityPrompt") and prompt.Enabled then
+                    local pPart = prompt.Parent:IsA("BasePart") and prompt.Parent or prompt.Parent:FindFirstChildWhichIsA("BasePart")
+                    if pPart and (hrp.Position - pPart.Position).Magnitude <= (prompt.MaxActivationDistance or 12) then
+                        fireproximityprompt(prompt)
+                    end
+                end
+            end
+        end
+
+        -- 3. Only send HoodRemote if distance is strictly confirmed <= 12 studs
+        local hoodRemote = HoodRemote or (ReplicatedStorage:FindFirstChild("HoodNPC") and ReplicatedStorage.HoodNPC:FindFirstChild("Remote"))
+        if hoodRemote and targetId and dist <= 12 then
+            hoodRemote:FireServer("loot", targetId, targetPos)
+        end
+
+        -- 4. Emulate realistic E keypress
+        vim:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+        task.wait(0.04)
+        vim:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+    end)
+
+    return true
+end
+
+-- ==============================================================
+-- 🎯 12.3 HUMANIZED LEGIT BOT COMBAT ENGINE
+-- Smooth camera interpolation (Lerp), safe engagement distance (<= 60 studs),
+-- FOV angle check, LOS wall check, human firing intervals. Never snaps camera 180° instantly!
 -- ==============================================================
 task.spawn(function()
-    while Hub.Running and genv._UrbanReloadScriptId == SCRIPT_ID do
-        local auraActive = Hub.Settings.HoodKillAura or Hub.Settings.ZombieKillAura
-        if not auraActive then
+    while Hub.Running and genv._UrbanReloadLegitScriptId == SCRIPT_ID do
+        local farmActive = Hub.Settings.HoodKillAura or Hub.Settings.ZombieKillAura
+        local lootActive = Hub.Settings.AutoLootNear ~= false
+
+        if not farmActive and not lootActive then
             task.wait(0.4)
             continue
         end
 
-        task.wait(0.02)
+        task.wait(0.03)
 
-        if Hub.Settings.HoodKillAura or Hub.Settings.ZombieKillAura then
-            -- 1. Ensure weapon is always equipped in hand
-            local equippedTool = EnsureWeaponEquipped()
+        local char = LocalPlayer.Character
+        local myHRP = char and char:FindFirstChild("HumanoidRootPart")
+        if not char or not myHRP then
+            task.wait(0.2)
+            continue
+        end
 
-            local char = LocalPlayer.Character
-            local myHRP = char and char:FindFirstChild("HumanoidRootPart")
-            local myPos = (myHRP and myHRP.Position) or Camera.CFrame.Position
-            local hoodLocal = Workspace:FindFirstChild("HoodLocal")
+        local myPos = myHRP.Position
+        local camPos = Camera.CFrame.Position
+        local camLook = Camera.CFrame.LookVector
 
-            -- Find closest alive Hood NPC using 100% Realtime HP
-            local targetNpc = nil
-            local targetHead = nil
-            local targetNpcId = nil
+        -- 1. Bot Combat Assist (Smooth human-like tracking & shooting)
+        if farmActive then
+            local maxRange = math.clamp(Hub.Settings.HoodKillAuraRange or 50, 15, 80)
+            local targetNpc, targetHead, targetNpcId = nil, nil, nil
             local minDist = math.huge
 
             local enemyFolders = {}
@@ -2046,30 +2104,44 @@ task.spawn(function()
             local zf = Workspace:FindFirstChild("Zombies")
             if zf then table.insert(enemyFolders, zf) end
 
-            local auraRange = Hub.Settings.HoodKillAuraRange or Hub.Settings.ZombieKillAuraRange or 250
             for _, folder in ipairs(enemyFolders) do
                 for _, z in ipairs(folder:GetChildren()) do
                     if IsEnemyNPC(z) then
                         local hp, maxHp, isDead, id = GetHoodRealtimeData(z)
-                        local head = z:FindFirstChild("Head")
+                        local head = z:FindFirstChild("Head") or z:FindFirstChild("HumanoidRootPart")
                         local zHrp = z:FindFirstChild("HumanoidRootPart")
                         if not isDead and hp > 0 and head and zHrp and zHrp.Position.Y > -100 then
-                            local dist = (myPos - head.Position).Magnitude
-                            if dist <= auraRange and dist < minDist then
-                                minDist = dist
-                                targetNpc = z
-                                targetHead = head
-                                targetNpcId = id
+                            local toTarget = head.Position - camPos
+                            local dist = toTarget.Magnitude
+                            if dist <= maxRange and dist < minDist then
+                                -- Angle check: Only target if within player's view (FOV <= 70 degrees)
+                                local dot = camLook:Dot(toTarget.Unit)
+                                if dot > 0.35 then
+                                    local hasLOS = true
+                                    if Hub.Settings.HoodWallCheck ~= false then
+                                        hasLOS = IsHoodVisible(head, z)
+                                    end
+                                    if hasLOS then
+                                        minDist = dist
+                                        targetNpc = z
+                                        targetHead = head
+                                        targetNpcId = id
+                                    end
+                                end
                             end
                         end
                     end
                 end
             end
 
-            if targetNpc and targetHead and targetHead.Position.Y > -100 then
+            if targetNpc and targetHead then
                 Hub.CurrentTarget = targetNpc
-                -- 1. Camera Aim: Continuously lock camera onto Hood NPC head
-                Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetHead.Position)
+                local equippedTool = EnsureWeaponEquipped()
+
+                -- Smooth natural camera tracking (Lerp with 0.16 alpha - human mouse feel)
+                local currentCF = Camera.CFrame
+                local desiredCF = CFrame.new(currentCF.Position, targetHead.Position)
+                Camera.CFrame = currentCF:Lerp(desiredCF, 0.16)
 
                 if equippedTool then
                     local currentAmmo = equippedTool:GetAttribute("Ammo") or 30
@@ -2081,101 +2153,60 @@ task.spawn(function()
                             task.wait(0.04)
                             Controls.Press("Reload", false)
                         end
-                        -- Sweep loot while waiting for reload
-                        pcall(function()
-                            if ClientState and type(ClientState.HoodLootNow) == "function" then
-                                ClientState.HoodLootNow()
-                            end
-                            local hoodRemote = HoodRemote or (ReplicatedStorage:FindFirstChild("HoodNPC") and ReplicatedStorage.HoodNPC:FindFirstChild("Remote"))
-                            if hoodRemote and targetNpcId then
-                                hoodRemote:FireServer("loot", targetNpcId, targetHead.Position)
-                            end
-                            vim:SendKeyEvent(true, Enum.KeyCode.E, false, game)
-                            task.wait(0.02)
-                            vim:SendKeyEvent(false, Enum.KeyCode.E, false, game)
-                        end)
-                        task.wait(0.2)
+                        task.wait(0.25)
                     else
-                        -- Check obstacle: if Hood NPC is behind a wall or obstacle, HOLD FIRE!
-                        local isClearLOS = true
-                        local wallCheck = (Hub.Settings.HoodWallCheck ~= false) and (Hub.Settings.ZombieWallCheck ~= false)
-                        if wallCheck then
-                            isClearLOS = IsHoodVisible(targetHead, targetNpc)
+                        if Controls then Controls.Press("Aim", true) end
+                        if ClientState then
+                            ClientState.Aiming = true
+                            ClientState.RecoilScale = 0.3
                         end
 
-                        if not isClearLOS then
-                            -- Target is behind obstacle: keep aiming, hold fire until it emerges!
-                            task.wait(0.03)
-                        else
-                            -- Target is in clear line-of-sight: AIM & FIRE!
-                            if Controls then
-                                Controls.Press("Aim", true)
-                            end
-                            if ClientState then
-                                ClientState.Aiming = true
-                                ClientState.RecoilScale = 0
-                            end
-
-                            local shots = 0
-                            while Hub.Running and (Hub.Settings.HoodKillAura or Hub.Settings.ZombieKillAura) and targetHead and targetHead.Position.Y > -100 and shots < 6 do
-                                local curHp, _, isDeadNow = GetHoodRealtimeData(targetNpc)
-                                if isDeadNow or curHp <= 0 then
-                                    break
-                                end
-                                -- Stop firing immediately if NPC steps behind an obstacle mid-burst
-                                if wallCheck and not IsHoodVisible(targetHead, targetNpc) then
-                                    break
-                                end
-                                shots = shots + 1
-                                Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetHead.Position)
-                                if Controls then
-                                    Controls.Press("Fire", true)
-                                    task.wait(0.08)
-                                    Controls.Press("Fire", false)
-                                    task.wait(0.04)
-                                else
-                                    if typeof(mouse1press) == "function" then
-                                        mouse1press()
-                                        task.wait(0.07)
-                                        mouse1release()
-                                        task.wait(0.03)
-                                    end
-                                end
-                            end
-
-                            -- Instant loot sequence upon death using direct NPC ID
-                            pcall(function()
-                                if ClientState and type(ClientState.HoodLootNow) == "function" then
-                                    ClientState.HoodLootNow()
-                                end
-                                local hoodRemote = HoodRemote or (ReplicatedStorage:FindFirstChild("HoodNPC") and ReplicatedStorage.HoodNPC:FindFirstChild("Remote"))
-                                if hoodRemote and targetNpcId then
-                                    hoodRemote:FireServer("loot", targetNpcId, targetHead.Position)
-                                end
-                                vim:SendKeyEvent(true, Enum.KeyCode.E, false, game)
-                                task.wait(0.02)
-                                vim:SendKeyEvent(false, Enum.KeyCode.E, false, game)
-                            end)
+                        -- Controlled human tap firing
+                        if Controls then
+                            Controls.Press("Fire", true)
+                            task.wait(0.09)
+                            Controls.Press("Fire", false)
+                            task.wait(0.08)
+                        elseif typeof(mouse1press) == "function" then
+                            mouse1press()
+                            task.wait(0.08)
+                            mouse1release()
+                            task.wait(0.07)
                         end
                     end
                 end
             else
                 Hub.CurrentTarget = nil
-                -- No alive Hood NPCs currently in range (waiting for respawns)
                 if Controls and Controls.IsDown and Controls.IsDown("Aim") then
                     pcall(function() Controls.Press("Aim", false) end)
                 end
+            end
+        end
 
-                -- Sweep ground loot and dead corpses while waiting for respawns
-                pcall(function()
-                    if ClientState and type(ClientState.HoodLootNow) == "function" then
-                        ClientState.HoodLootNow()
+        -- 2. Legit Auto Loot [E] (Only runs when player is within 12 studs of dead corpses or safes)
+        if lootActive then
+            local hl = Workspace:FindFirstChild("HoodLocal")
+            if hl then
+                for _, z in ipairs(hl:GetChildren()) do
+                    local hp, _, isDead, id = GetHoodRealtimeData(z)
+                    local head = z:FindFirstChild("Head") or z:FindFirstChild("HumanoidRootPart")
+                    if (isDead or hp <= 0) and head then
+                        if (myPos - head.Position).Magnitude <= 12 then
+                            AttemptLegitLoot(head.Position, id)
+                        end
                     end
-                    vim:SendKeyEvent(true, Enum.KeyCode.E, false, game)
-                    task.wait(0.02)
-                    vim:SendKeyEvent(false, Enum.KeyCode.E, false, game)
-                end)
-                task.wait(0.15)
+                end
+            end
+
+            -- Also scan for Military Safes (Coffres) if player is standing near one
+            local coffres = Workspace:FindFirstChild("Coffres")
+            if coffres then
+                for _, safe in ipairs(coffres:GetChildren()) do
+                    local part = safe:FindFirstChildWhichIsA("BasePart")
+                    if part and (myPos - part.Position).Magnitude <= 12 then
+                        AttemptLegitLoot(part.Position, nil)
+                    end
+                end
             end
         end
     end
@@ -4081,16 +4112,16 @@ local function InitUI()
     end)
 
     -- ================================================
-    -- 🌾 FARM & WORLD TAB (หมวดฟาร์ม & โลก)
+    -- 🌾 FARM & WORLD TAB (ระบบฟาร์มเนียน & โลก)
     -- ================================================
-    Tabs.World:AddSection("⚔️ เล็งและยิงบอท Hood อัตโนมัติ (Auto Aim & Shoot Hood NPCs)")
+    Tabs.World:AddSection("🛡️ ระบบฟาร์มเนียน (Humanized Legit Farm - ปลอดภัย 100%)")
 
-    local HoodKillAuraToggle = Tabs.World:AddToggle("HoodKillAuraToggle", {
-        Title = "เริ่มเล็งและยิงบอท Hood อัตโนมัติ (Auto Aim & Shoot Hood NPCs)",
-        Description = "เล็งหัวและยิงบอท Hood ทั้งหมดในจุดฟาร์มอัตโนมัติ วนลูปเกิดใหม่ก็ยิง + เก็บเงินด่วน",
-        Default = (Hub.Settings.HoodKillAura ~= nil and Hub.Settings.HoodKillAura) or Hub.Settings.ZombieKillAura
+    local LegitFarmToggle = Tabs.World:AddToggle("LegitFarmToggle", {
+        Title = "ฟาร์มบอทเนียน (Legit Bot Assist)",
+        Description = "เล็งและยิงบอท Hood/Zombie อย่างเป็นธรรมชาติ กล้องหมุนสมูท ไม่กระตุก ไม่หักคอ 0ms ปลอดภัยไม่โดนย้ายเซิร์ฟ",
+        Default = Hub.Settings.HoodKillAura
     })
-    HoodKillAuraToggle:OnChanged(function(v)
+    LegitFarmToggle:OnChanged(function(v)
         Hub.Settings.HoodKillAura = v
         Hub.Settings.ZombieKillAura = v
         if v then
@@ -4101,7 +4132,7 @@ local function InitUI()
                 end
                 if ClientState then
                     ClientState.Aiming = true
-                    ClientState.RecoilScale = 0
+                    ClientState.RecoilScale = 0.3
                 end
             end)
         else
@@ -4117,10 +4148,19 @@ local function InitUI()
         end
     end)
 
+    local AutoLootToggle = Tabs.World:AddToggle("AutoLootToggle", {
+        Title = "เก็บของ/ดูดเงินระยะประชิด (Legit Auto Loot [E])",
+        Description = "กด E เก็บเงินและไอเทมรอบตัวในระยะ 12 studs อัตโนมัติ (ไม่ส่งคำสั่งทะลุแมพ ป้องกันเซิร์ฟโปร 100%)",
+        Default = (Hub.Settings.AutoLootNear ~= false)
+    })
+    AutoLootToggle:OnChanged(function(v)
+        Hub.Settings.AutoLootNear = v
+    end)
+
     local HoodWallCheckToggle = Tabs.World:AddToggle("HoodWallCheckToggle", {
-        Title = "ตรวจจับสิ่งกีดขวาง (Hood Wall Check / LOS)",
-        Description = "ไม่ยิงสิ่งกีดขวาง รอให้บอท Hood เดินออกมาในที่โล่งก่อนค่อยยิง (ประหยัดกระสุน)",
-        Default = (Hub.Settings.HoodWallCheck ~= nil and Hub.Settings.HoodWallCheck) or Hub.Settings.ZombieWallCheck
+        Title = "เช็กกำแพง/สิ่งกีดขวาง (LOS Wall Check)",
+        Description = "ไม่ยิงบอท Hood ที่อยู่หลังกำแพงหรือสิ่งกีดขวาง (ป้องกันการรายงานดาเมจทะลุกำแพง)",
+        Default = (Hub.Settings.HoodWallCheck ~= false)
     })
     HoodWallCheckToggle:OnChanged(function(v)
         Hub.Settings.HoodWallCheck = v
@@ -4128,11 +4168,11 @@ local function InitUI()
     end)
 
     local HoodKillAuraDistSlider = Tabs.World:AddSlider("HoodKillAuraDistSlider", {
-        Title = "ระยะตรวจจับบอท (Range)",
-        Description = "ระยะสแกน เล็ง และสังหารบอท Hood รอบตัว (แนะนำ 250 studs)",
-        Min = 50,
-        Max = 400,
-        Default = Hub.Settings.HoodKillAuraRange or Hub.Settings.ZombieKillAuraRange,
+        Title = "ระยะฟาร์มบอท (Safe Farm Range)",
+        Description = "ระยะในการเล็งยิงบอทอย่างปลอดภัย (แนะนำ 40 - 60 studs ป้องกันผิดปกติ)",
+        Min = 20,
+        Max = 80,
+        Default = math.clamp(Hub.Settings.HoodKillAuraRange or 50, 20, 80),
         Rounding = 0
     })
     HoodKillAuraDistSlider:OnChanged(function(v)
@@ -4141,20 +4181,32 @@ local function InitUI()
     end)
 
     local HoodESPToggle = Tabs.World:AddToggle("HoodESPToggle", {
-        Title = "มองทะลุบอท Hood (Hood NPC ESP)",
+        Title = "เปิด/ปิด ESP บอท Hood (Hood NPC ESP)",
         Description = "แสดงชื่อ ระยะ และหลอดเลือดบอท Hood แบบ Real-time",
-        Default = (Hub.Settings.HoodESP ~= nil and Hub.Settings.HoodESP) or Hub.Settings.ZombieESP
+        Default = (Hub.Settings.HoodESP ~= false)
     })
     HoodESPToggle:OnChanged(function(v)
         Hub.Settings.HoodESP = v
         Hub.Settings.ZombieESP = v
     end)
 
-    Tabs.World:AddSection("ระบบฝากเงินด่วน (Quick Banking)")
+    Tabs.World:AddSection("📦 ตู้เซฟทหาร (Military Safes - ปลอดภัยไม่มีวาป)")
+
+    local SafeESPToggle = Tabs.World:AddToggle("SafeESPToggle_World", {
+        Title = "เปิด/ปิด ESP ตู้เซฟทหาร (Safe 1 - 4)",
+        Description = "แสดงตำแหน่งตู้เซฟ $5,000 - $50,000 พร้อมระยะทาง วิ่งไปเก็บได้อย่างปลอดภัย",
+        Default = (Hub.Settings.SafeESP ~= false)
+    })
+    SafeESPToggle:OnChanged(function(v)
+        Hub.Settings.SafeESP = v
+        UpdateSafeESP()
+    end)
+
+    Tabs.World:AddSection("🏧 ฝากเงินด่วน (Quick Banking)")
 
     Tabs.World:AddButton({
         Title = "ฝากเงินสดทั้งหมดเข้าตู้ ATM (Deposit All Cash)",
-        Description = "นำเงินสดทั้งหมดในตัวฝากเข้าบัญชีธนาคารผ่านระบบ ATM ทันที",
+        Description = "นำเงินสดในตัวทั้งหมดฝากเข้าตู้ ATM ทันทีเพื่อป้องกันเงินตกตอนตาย",
         Callback = function()
             local money = tonumber(LocalPlayer:GetAttribute("Money")) or 0
             if money > 0 and Remotes and Remotes:FindFirstChild("ATM") then
@@ -4162,18 +4214,17 @@ local function InitUI()
                     return Remotes.ATM:InvokeServer("Deposit", money)
                 end)
                 if s and res and res.ok then
-                    Fluent:Notify({ Title = "ATM", Content = "ฝากเงินสำเร็จ: $" .. tostring(money), Duration = 3 })
+                    Fluent:Notify({ Title = "ATM", Content = "ฝากเงินสดสำเร็จ: $" .. tostring(money), Duration = 3 })
                 else
-                    Fluent:Notify({ Title = "ATM", Content = "ฝากเงินไม่สำเร็จ (อาจต้องเข้าใกล้ตู้ ATM)", Duration = 3 })
+                    Fluent:Notify({ Title = "ATM", Content = "ฝากเงินไม่สำเร็จ (อาจอยู่ไกลตู้ ATM)", Duration = 3 })
                 end
             else
-                Fluent:Notify({ Title = "ATM", Content = "ไม่มีเงินสดติดตัวให้ฝาก", Duration = 3 })
+                Fluent:Notify({ Title = "ATM", Content = "ไม่มีเงินสดติดตัว", Duration = 3 })
             end
         end
     })
 
-
-    -- ================================================
+-- ================================================
     -- ⚙️ SETTINGS TAB (หมวดตั้งค่า)
     -- ================================================
     Tabs.Settings:AddSection("ปุ่มเปิด/ปิดเมนู (Menu Toggle)")

@@ -2040,7 +2040,10 @@ task.spawn(function()
                                 ClientState.HoodLootNow()
                             end
                             local hoodRemote = HoodRemote or (ReplicatedStorage:FindFirstChild("HoodNPC") and ReplicatedStorage.HoodNPC:FindFirstChild("Remote"))
-                            if hoodRemote and targetNpcId then
+                            local myChar = LocalPlayer.Character
+                            local myHrp = myChar and myChar:FindFirstChild("HumanoidRootPart")
+                            local distToLoot = (myHrp and targetHead and (myHrp.Position - targetHead.Position).Magnitude) or 999
+                            if distToLoot <= 12 and hoodRemote and targetNpcId then
                                 hoodRemote:FireServer("loot", targetNpcId, targetHead.Position)
                             end
                             vim:SendKeyEvent(true, Enum.KeyCode.E, false, game)
@@ -2102,9 +2105,12 @@ task.spawn(function()
                                     ClientState.HoodLootNow()
                                 end
                                 local hoodRemote = HoodRemote or (ReplicatedStorage:FindFirstChild("HoodNPC") and ReplicatedStorage.HoodNPC:FindFirstChild("Remote"))
-                                if hoodRemote and targetNpcId then
-                                    hoodRemote:FireServer("loot", targetNpcId, targetHead.Position)
-                                end
+                                local myChar = LocalPlayer.Character
+                            local myHrp = myChar and myChar:FindFirstChild("HumanoidRootPart")
+                            local distToLoot = (myHrp and targetHead and (myHrp.Position - targetHead.Position).Magnitude) or 999
+                            if distToLoot <= 12 and hoodRemote and targetNpcId then
+                                hoodRemote:FireServer("loot", targetNpcId, targetHead.Position)
+                            end
                                 vim:SendKeyEvent(true, Enum.KeyCode.E, false, game)
                                 task.wait(0.02)
                                 vim:SendKeyEvent(false, Enum.KeyCode.E, false, game)
