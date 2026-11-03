@@ -50,69 +50,160 @@ if genv.UrbanReload_Cleanup then
 end
 
 -- ==============================================================
--- 🛡️ 1. ADVANCED ANTI-DETECTION & NETBEAT GUARDIAN
--- Urban Reload runs `NetBeatClient` which monitors:
--- 1. `namecallRatio()`: Compares `game:GetService` via __namecall vs direct C call.
---    Hooking `game.__namecall` on mobile executors severely slows it down,
---    failing the benchmark and triggering Kick: "Script executor detected".
---    WE NEVER HOOK `game.__namecall`.
--- 2. `NetBeatCamStart` / `NetBeatCamEnd`: Snapping camera aimbot detector.
---    We unbind both rendersteps cleanly so aimbot angles are never monitored.
--- 3. `u28` Report Queue: All anomaly codes (7501, 7503, 7701, 7704, 7801)
---    are queued into `u28` before being sent via `Beat:FireServer`.
---    We locate `u28` in memory, clear it, and lock it so no anomaly report
---    can ever be sent. The server receives 100% clean heartbeat pings (0/1).
--- 4. Safe No Recoil: We set `ClientState.RecoilScale = 0` (native engine multiplier)
---    instead of writing to protected RecoilPitch/RecoilYaw or unfreezing tables.
+-- 🛡️ 1. ADVANCED ANTI-DETECTION & NETBEAT GUARDIAN (ULTIMATE UNPATCHABLE SHIELD)
+-- Completely neutralizes all detection vectors in Urban Reload:
+-- 1. NetBeat Anomaly Queue (`u28`): Found via GC upvalues, cleared, and metatable-locked.
+-- 2. NetBeat Anomaly Reporter (`report`): Hooked to no-op & filter table (`u103`) forced true.
+-- 3. Namecall Ratio Benchmark (`namecallRatio`): Hooked to return 0.5 (normal ratio).
+--    CRITICAL: WE NEVER HOOK `game.__namecall` (hooking it causes namecall benchmark lag).
+-- 4. NetBeat Packet Encoder (`bencode`): Hooked to force code to 0 (clean heartbeat ping).
+-- 5. Weapon Watchlist (`u140`) & Bait (`u177`): Cleared from GC so table freeze / sig checks never run.
+-- 6. ESP Class Blacklist (`u180`): Cleared so Highlight/BillboardGui are ignored.
+-- 7. Tag All Visuals with `OwnFX`: Native NetBeat whitelist tag applied to all ESP objects.
+-- 8. Anti-Hitbox Remote (`HHeartbeatB`): Blocked and neutralized at remote and closure level.
+-- 9. AdminTools Honeypot (`Beat` code >= 7000): Blocked at remote level.
+-- 10. NetBeat Cam Rendersteps: Unbound from RunService continuously.
 -- ==============================================================
 local CollectionService = game:GetService("CollectionService")
 local BeatRemote = ReplicatedStorage:WaitForChild("Remotes", 5) and ReplicatedStorage.Remotes:FindFirstChild("Beat")
+local RemoteEvents = ReplicatedStorage:FindFirstChild("RemoteEvents")
+local HHeartbeatB = RemoteEvents and RemoteEvents:FindFirstChild("HHeartbeatB")
 
--- 1.0 Client-Side Anti-Kick Guardian (Delta Executor & Mobile Ready)
+-- 1.0 Client-Side Anti-Kick Guardian
 pcall(function()
     local lp = game:GetService("Players").LocalPlayer
     if lp and typeof(hookfunction) == "function" and typeof(lp.Kick) == "function" then
-        local oldKick = nil
-        oldKick = hookfunction(lp.Kick, function(self, reason, ...)
+        hookfunction(lp.Kick, function(self, reason, ...)
             warn("[KrakenHub Anti-Kick] Blocked LocalPlayer:Kick! Reason: " .. tostring(reason))
             return nil
         end)
     end
 end)
 
--- 1.1 Neutralize Camera Anti-Cheat Rendersteps
+-- 1.1 Neutralize Camera Anti-Cheat Rendersteps & Spoof camExcused
 local function SilenceCameraAntiCheat()
     pcall(function() RunService:UnbindFromRenderStep("NetBeatCamStart") end)
     pcall(function() RunService:UnbindFromRenderStep("NetBeatCamEnd") end)
 end
 SilenceCameraAntiCheat()
 
--- 1.2 Locate and Lock the Anomaly Queue (u28) in NetBeatClient (Safe on Delta & Mobile)
+if ClientState and type(ClientState) == "table" then
+    pcall(function()
+        ClientState.RobloxCamera = true
+        ClientState.RecoilScale = 0
+    end)
+end
+
+-- 1.2 In-Memory NetBeat & Anti-Cheat Neutralizer via GC
 local NetBeatQueue = nil
+local NetBeatReportFn = nil
+local NetBeatFilter = nil
+local NetBeatWatchList = nil
+local NetBeatBaitList = nil
+local NetBeatBencode = nil
+local NetBeatRatioFn = nil
+local NetBeatESPList = nil
+local AntiHitboxFn = nil
+
 pcall(function()
-    local get_info = getinfo or (debug and debug.getinfo)
     local get_upvalues = getupvalues or (debug and debug.getupvalues)
     local is_l = islclosure or is_l_closure or function(f) return type(f) == "function" end
     local is_exec = isexecutorclosure or is_executor_closure or checkcaller or function() return false end
 
     if typeof(getgc) == "function" and typeof(get_upvalues) == "function" then
-        for _, fn in ipairs(getgc()) do
+        local gc = getgc()
+
+        -- Pass 1: Find closures containing Beat or HHeartbeatB
+        for _, fn in ipairs(gc) do
             if type(fn) == "function" and is_l(fn) and not is_exec(fn) then
-                local inf = get_info and get_info(fn)
-                if inf and inf.source and inf.source:find("NetBeatClient") then
-                    local ups = get_upvalues(fn)
+                local ups = get_upvalues(fn)
+                if ups then
                     local hasBeat = false
-                    local cand = nil
+                    local candQueue = nil
+                    local candBencode = nil
+
                     for _, val in pairs(ups) do
-                        if typeof(val) == "Instance" and val.Name == "Beat" then
-                            hasBeat = true
+                        if typeof(val) == "Instance" then
+                            if val.Name == "Beat" then
+                                hasBeat = true
+                            elseif val.Name == "HHeartbeatB" then
+                                AntiHitboxFn = fn
+                            end
                         elseif type(val) == "table" and #val == 0 then
-                            cand = val
+                            candQueue = val
+                        elseif type(val) == "function" then
+                            candBencode = val
                         end
                     end
-                    if hasBeat and cand then
-                        NetBeatQueue = cand
-                        break
+
+                    if hasBeat and candQueue then
+                        NetBeatQueue = candQueue
+                        if candBencode then
+                            NetBeatBencode = candBencode
+                        end
+                    end
+                end
+            end
+        end
+
+        -- Pass 2: Using NetBeatQueue, find report(), filter table (u103), and watchlists
+        for _, fn in ipairs(gc) do
+            if type(fn) == "function" and is_l(fn) and not is_exec(fn) then
+                local ups = get_upvalues(fn)
+                if ups then
+                    local hasQueue = false
+                    local candFilter = nil
+                    local numCount = 0
+
+                    for _, val in pairs(ups) do
+                        if val == NetBeatQueue then
+                            hasQueue = true
+                        elseif type(val) == "table" and val ~= NetBeatQueue then
+                            candFilter = val
+                        elseif type(val) == "number" then
+                            numCount = numCount + 1
+                        end
+                    end
+
+                    if hasQueue and candFilter and numCount >= 1 then
+                        NetBeatReportFn = fn
+                        NetBeatFilter = candFilter
+                    end
+
+                    for _, val in pairs(ups) do
+                        if type(val) == "table" and #val > 0 then
+                            local first = val[1]
+                            if type(first) == "table" and first.name ~= nil and first.s ~= nil and first.t ~= nil then
+                                NetBeatWatchList = val
+                            elseif type(first) == "table" and (first.FireRate ~= nil or first.WalkSpeed ~= nil) then
+                                NetBeatBaitList = val
+                            end
+                        elseif type(val) == "table" and val.Highlight == true and val.BillboardGui == true then
+                            NetBeatESPList = val
+                        end
+                    end
+                end
+            end
+        end
+
+        -- Pass 3: Find the check loop (which has NetBeatReportFn as upvalue) to hook namecallRatio
+        if NetBeatReportFn then
+            for _, fn in ipairs(gc) do
+                if type(fn) == "function" and is_l(fn) and not is_exec(fn) then
+                    local ups = get_upvalues(fn)
+                    if ups then
+                        local hasReport = false
+                        local candRatio = nil
+                        for _, val in pairs(ups) do
+                            if val == NetBeatReportFn then
+                                hasReport = true
+                            elseif type(val) == "function" and val ~= NetBeatReportFn then
+                                candRatio = val
+                            end
+                        end
+                        if hasReport and candRatio then
+                            NetBeatRatioFn = candRatio
+                        end
                     end
                 end
             end
@@ -120,59 +211,124 @@ pcall(function()
     end
 end)
 
+-- 1.2 Lock & Neutralize Anomaly Queue (u28)
 if NetBeatQueue then
     pcall(table.clear, NetBeatQueue)
     pcall(setmetatable, NetBeatQueue, {
-        __newindex = function() return end
+        __newindex = function() return end,
+        __index = function() return nil end
     })
 end
 
--- 1.3 Safe Honeypot Blocker via Beat.FireServer (WITHOUT touching game.__namecall for other services)
-local BeatBlocked = false
+-- 1.3 Neutralize Report Filter (u103) & report() function
+if NetBeatFilter then
+    pcall(table.clear, NetBeatFilter)
+    pcall(setmetatable, NetBeatFilter, {
+        __index = function() return true end
+    })
+end
+
+if NetBeatReportFn and typeof(hookfunction) == "function" then
+    pcall(function()
+        hookfunction(NetBeatReportFn, function(...) return end)
+    end)
+end
+
+-- 1.4 Clear Weapon Watchlist (u140) & Bait (u177)
+if NetBeatWatchList then
+    pcall(table.clear, NetBeatWatchList)
+end
+if NetBeatBaitList then
+    pcall(table.clear, NetBeatBaitList)
+end
+
+-- 1.5 Clear ESP Blacklist (u180)
+if NetBeatESPList then
+    pcall(table.clear, NetBeatESPList)
+end
+
+-- 1.6 Hook namecallRatio to always return clean 0.5 (Neutralize 7801 detection)
+if NetBeatRatioFn and typeof(hookfunction) == "function" then
+    pcall(function()
+        hookfunction(NetBeatRatioFn, function() return 0.5 end)
+    end)
+end
+
+-- 1.7 Hook bencode to force all heartbeat anomaly codes to 0
+if NetBeatBencode and typeof(hookfunction) == "function" then
+    pcall(function()
+        local oldBencode = NetBeatBencode
+        hookfunction(NetBeatBencode, function(p15, p16, p17, p18)
+            if p17 ~= 0 and p17 ~= 1 then
+                p17 = 0
+                p18 = ""
+            end
+            return oldBencode(p15, p16, p17, p18)
+        end)
+    end)
+end
+
+-- 1.8 Hook HHeartbeatB (Anti-Hitbox Remote)
+if HHeartbeatB and typeof(hookfunction) == "function" then
+    pcall(function()
+        hookfunction(HHeartbeatB.FireServer, function(...) return nil end)
+    end)
+end
+if AntiHitboxFn and typeof(hookfunction) == "function" then
+    pcall(function()
+        hookfunction(AntiHitboxFn, function(...) return false, nil end)
+    end)
+end
+
+-- 1.9 Direct Beat:FireServer Hook (Honeypot & Buffer Scrubbing - ZERO NAMECALL HOOKS)
 if BeatRemote and typeof(hookfunction) == "function" then
     pcall(function()
         local oldBeatFire = nil
         oldBeatFire = hookfunction(BeatRemote.FireServer, function(self, ...)
             local args = {...}
-            -- Drop AdminTools / Admin honeypots: Beat:FireServer(code, { p = ..., v = ... })
-            if typeof(args[2]) == "table" and args[2].p ~= nil then
-                return nil
-            end
+            -- 1. Drop number-code honeypots (AdminTools 7312, 7419, 7420, etc.)
             if typeof(args[1]) == "number" and args[1] >= 7000 then
                 return nil
             end
-            return oldBeatFire(self, ...)
-        end)
-        BeatBlocked = true
-    end)
-end
-
--- Fallback for Delta Executor if hookfunction on Instance method is unsupported
-if not BeatBlocked and BeatRemote and typeof(hookmetamethod) == "function" then
-    pcall(function()
-        local oldNamecall = nil
-        oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-            if self == BeatRemote then
-                local method = getnamecallmethod()
-                if method == "FireServer" or method == "fireServer" then
-                    local args = {...}
-                    if typeof(args[2]) == "table" and args[2].p ~= nil then return nil end
-                    if typeof(args[1]) == "number" and args[1] >= 7000 then return nil end
+            if typeof(args[2]) == "table" and args[2].p ~= nil then
+                return nil
+            end
+            -- 2. Scrub buffer packets (if code at offset 4 is an anomaly report)
+            if typeof(args[1]) == "buffer" then
+                local buf = args[1]
+                if buffer.len(buf) >= 6 then
+                    local code = buffer.readu16(buf, 4)
+                    if code >= 7000 or (code ~= 0 and code ~= 1) then
+                        buffer.writeu16(buf, 4, 0)
+                        buffer.writeu8(buf, 6, 0)
+                    end
                 end
             end
-            return oldNamecall(self, ...)
+            return oldBeatFire(self, ...)
         end)
     end)
 end
 
--- 1.4 Continuous Background Guardian
+-- 1.10 Continuous Background Guardian
 task.spawn(function()
     while Hub and Hub.Running and genv._UrbanReloadScriptId == SCRIPT_ID do
         SilenceCameraAntiCheat()
         if NetBeatQueue then
             pcall(table.clear, NetBeatQueue)
         end
-        task.wait(0.5)
+        if NetBeatWatchList then
+            pcall(table.clear, NetBeatWatchList)
+        end
+        if NetBeatBaitList then
+            pcall(table.clear, NetBeatBaitList)
+        end
+        if NetBeatESPList then
+            pcall(table.clear, NetBeatESPList)
+        end
+        if ClientState and type(ClientState) == "table" then
+            ClientState.RobloxCamera = true
+        end
+        task.wait(1)
     end
 end)
 
@@ -262,7 +418,7 @@ local Hub = {
 
         -- Hitbox Expander (Bullet Tracking into Head)
         HitboxExpander = true,
-        HitboxSize = 14,
+        HitboxSize = 10,
         HitboxTarget = "Head", -- Focus directly on Head
         HitboxVisible = false,
         HitboxTransparency = 0.65,
@@ -936,7 +1092,7 @@ local function UpdateHitboxes()
     local clientHitboxes = Workspace:FindFirstChild("ClientHitboxes")
     if not clientHitboxes then return end
 
-    local hSize = Hub.Settings.HitboxSize or 14
+    local hSize = Hub.Settings.HitboxSize or 10
     local targetSize = Vector3.new(hSize, hSize, hSize)
     local isVisible = Hub.Settings.HitboxVisible == true
     local targetTrans = isVisible and (Hub.Settings.HitboxTransparency or 0.65) or 1
@@ -1724,6 +1880,7 @@ task.spawn(function()
                                 bb.AlwaysOnTop = true
                                 bb.MaxDistance = auraDist + 50
                                 bb.ResetOnSpawn = false
+                                CollectionService:AddTag(bb, "OwnFX")
 
                                 local title = Instance.new("TextLabel")
                                 title.Name = "Title"
@@ -3217,7 +3374,7 @@ local function InitUI()
             Hub.Settings.FullAuto = true
             Hub.Settings.HitboxExpander = true
             Hub.Settings.HitboxTarget = "Head"
-            Hub.Settings.HitboxSize = 14
+            Hub.Settings.HitboxSize = 10
             ApplyWeaponMods()
             if Options.SilentAimToggle then Options.SilentAimToggle:SetValue(true) end
             if Options.SilentBoneDrop then Options.SilentBoneDrop:SetValue("ส่วนหัว (Head - แนะนำ)") end
@@ -3227,7 +3384,7 @@ local function InitUI()
             if Options.FullAutoToggle then Options.FullAutoToggle:SetValue(true) end
             if Options.HitboxToggle then Options.HitboxToggle:SetValue(true) end
             if Options.HitboxTargetDrop then Options.HitboxTargetDrop:SetValue("ส่วนหัว (Head - แนะนำ)") end
-            if Options.HitboxSizeSlider then Options.HitboxSizeSlider:SetValue(14) end
+            if Options.HitboxSizeSlider then Options.HitboxSizeSlider:SetValue(10) end
         end
     end)
 
