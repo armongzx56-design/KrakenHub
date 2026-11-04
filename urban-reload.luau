@@ -4563,41 +4563,54 @@ local function InitUI()
     local wm = Instance.new("WorldModel")
     wm.Parent = vp
 
-    -- โหลดตัวละครเทสเป็น "ตัวเบค่อน โรบอก" (Bacon Hair Roblox Dummy - 119929949)
-    local dummy = nil
-    pcall(function()
-        dummy = Players:CreateHumanoidModelFromUserId(119929949)
-    end)
-
-    if not dummy then
-        pcall(function()
-            local lpChar = LocalPlayer.Character
-            if lpChar then
-                local oldArch = lpChar.Archivable
-                lpChar.Archivable = true
-                dummy = lpChar:Clone()
-                lpChar.Archivable = oldArch
-            end
-        end)
-    end
-
-    if not dummy then
-        dummy = Instance.new("Model")
-        local hrp = Instance.new("Part")
-        hrp.Name = "HumanoidRootPart"
-        hrp.Size = Vector3.new(2, 2, 1)
-        hrp.Position = Vector3.new(0, 0, 0)
-        hrp.Parent = dummy
-        local hum = Instance.new("Humanoid")
-        hum.Parent = dummy
-    end
-
+    -- โมเดลจำลอง R6 แบบเนทีฟ (Native Clean Parts - 100% Crash-Proof ไม่มีบั๊ก Layered Clothing หรือ Highlight Stencil)
+    local dummy = Instance.new("Model")
     dummy.Name = "BaconPreviewDummy"
-    for _, d in ipairs(dummy:GetDescendants()) do
-        if d:IsA("LuaSourceContainer") or d:IsA("Sound") or d:IsA("Tool") or d:IsA("BillboardGui") then
-            pcall(function() d:Destroy() end)
-        end
+
+    local function makeLimb(name, size, cf, col)
+        local p = Instance.new("Part")
+        p.Name = name
+        p.Size = size
+        p.CFrame = cf
+        p.Color = col
+        p.Material = Enum.Material.SmoothPlastic
+        p.CanCollide = false
+        p.Anchored = true
+        p.Parent = dummy
+        return p
     end
+
+    local skinCol = Color3.fromRGB(234, 184, 146)
+    local shirtCol = Color3.fromRGB(35, 110, 180)
+    local pantsCol = Color3.fromRGB(45, 55, 45)
+    local hairCol = Color3.fromRGB(140, 85, 45)
+
+    local hrp = makeLimb("HumanoidRootPart", Vector3.new(2, 2, 1), CFrame.new(0, 0, 0), shirtCol)
+    hrp.Transparency = 1
+    dummy.PrimaryPart = hrp
+
+    local torso = makeLimb("Torso", Vector3.new(2, 2, 1), CFrame.new(0, 0, 0), shirtCol)
+    local head = makeLimb("Head", Vector3.new(1.25, 1.25, 1.25), CFrame.new(0, 1.5, 0), skinCol)
+    local headMesh = Instance.new("SpecialMesh")
+    headMesh.MeshType = Enum.MeshType.Head
+    headMesh.Scale = Vector3.new(1.25, 1.25, 1.25)
+    headMesh.Parent = head
+
+    local hair = makeLimb("Hair", Vector3.new(1.35, 0.5, 1.35), CFrame.new(0, 2.05, 0), hairCol)
+    local hairMesh = Instance.new("SpecialMesh")
+    hairMesh.MeshType = Enum.MeshType.Sphere
+    hairMesh.Scale = Vector3.new(1.2, 0.8, 1.2)
+    hairMesh.Parent = hair
+
+    local leftArm = makeLimb("Left Arm", Vector3.new(1, 2, 1), CFrame.new(-1.5, 0, 0), skinCol)
+    local rightArm = makeLimb("Right Arm", Vector3.new(1, 2, 1), CFrame.new(1.5, 0, 0), skinCol)
+    local leftLeg = makeLimb("Left Leg", Vector3.new(1, 2, 1), CFrame.new(-0.5, -2, 0), pantsCol)
+    local rightLeg = makeLimb("Right Leg", Vector3.new(1, 2, 1), CFrame.new(0.5, -2, 0), pantsCol)
+
+    local hum = Instance.new("Humanoid")
+    hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+    hum.Parent = dummy
+
     dummy.Parent = wm
     dummy:PivotTo(CFrame.new(0, -0.45, 0))
 
@@ -4610,16 +4623,6 @@ local function InitUI()
             originalMaterials[p] = p.Material
         end
     end
-
-    -- ไฮไลท์เรืองแสง Chams
-    local previewHighlight = Instance.new("Highlight")
-    previewHighlight.Name = "PreviewHighlight"
-    previewHighlight.FillColor = Color3.fromRGB(255, 60, 60)
-    previewHighlight.FillTransparency = 0.65
-    previewHighlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-    previewHighlight.OutlineTransparency = 0.2
-    previewHighlight.Enabled = false
-    previewHighlight.Parent = dummy
 
     -- มุมกล้องซูมออกให้เห็นทั้งตัวตั้งแต่หัวถึงปลายเท้าพอดีเป๊ะ
     local cam = Instance.new("Camera")
@@ -4795,10 +4798,6 @@ local function InitUI()
 
         -- 3. Chams (ไฮไลท์เรืองแสงโมเดลจำลอง ทำงานได้ทันทีเมื่อเปิด)
         local showChams = (Hub.Settings.ESPChams == true)
-        if previewHighlight then
-            previewHighlight.Enabled = showChams
-            previewHighlight.FillColor = col
-        end
         for part, origMat in pairs(originalMaterials) do
             if part and part.Parent then
                 if showChams then
