@@ -108,10 +108,6 @@ const footer = `    }
 
     local _0xFn, _0xErr = _0xLoader(_0xCode, "@KrakenHub_UrbanReload")
     _0xCode = nil -- Clear plaintext source reference from memory
-    
-    if typeof(collectgarbage) == "function" then
-        collectgarbage("collect")
-    end
 
     if not _0xFn then
         error("[KrakenHub Protection] Payload integrity error: " .. tostring(_0xErr), 2)
