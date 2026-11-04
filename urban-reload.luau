@@ -106,103 +106,74 @@ local AntiHitboxFn = nil
 
 pcall(function()
     local get_upvalues = getupvalues or (debug and debug.getupvalues)
+    local get_constants = getconstants or (debug and debug.getconstants)
     local is_l = islclosure or is_l_closure or function(f) return type(f) == "function" end
     local is_exec = isexecutorclosure or is_executor_closure or checkcaller or function() return false end
 
-    if typeof(getgc) == "function" and typeof(get_upvalues) == "function" then
-        local gc = getgc()
+    if typeof(getgc) == "function" then
+        local gc = getgc(true)
 
-        -- Pass 1: Find closures containing Beat or HHeartbeatB
-        for _, fn in ipairs(gc) do
-            if type(fn) == "function" and is_l(fn) and not is_exec(fn) then
-                local ups = get_upvalues(fn)
-                if ups then
-                    local hasBeat = false
-                    local candQueue = nil
-                    local candBencode = nil
-
-                    for _, val in pairs(ups) do
-                        if typeof(val) == "Instance" then
-                            if val.Name == "Beat" then
-                                hasBeat = true
-                            elseif val.Name == "HHeartbeatB" then
-                                AntiHitboxFn = fn
+        -- Pass 1: Scan GC objects for NetBeat bencode, report, and ESP tables
+        for _, item in ipairs(gc) do
+            if type(item) == "function" and is_l(item) and not is_exec(item) then
+                -- A. Identify bencode by mathematical constant 1831565813 or 181
+                if typeof(get_constants) == "function" then
+                    local consts = get_constants(item)
+                    if consts then
+                        for _, c in pairs(consts) do
+                            if c == 1831565813 or c == 181 then
+                                NetBeatBencode = item
+                            elseif c == 7701 then
+                                NetBeatReportFn = item
                             end
-                        elseif type(val) == "table" and #val == 0 then
-                            candQueue = val
-                        elseif type(val) == "function" then
-                            candBencode = val
-                        end
-                    end
-
-                    if hasBeat and candQueue then
-                        NetBeatQueue = candQueue
-                        if candBencode then
-                            NetBeatBencode = candBencode
                         end
                     end
                 end
-            end
-        end
 
-        -- Pass 2: Using NetBeatQueue, find report(), filter table (u103), and watchlists
-        for _, fn in ipairs(gc) do
-            if type(fn) == "function" and is_l(fn) and not is_exec(fn) then
-                local ups = get_upvalues(fn)
-                if ups then
-                    local hasQueue = false
-                    local candFilter = nil
-                    local numCount = 0
-
-                    for _, val in pairs(ups) do
-                        if val == NetBeatQueue then
-                            hasQueue = true
-                        elseif type(val) == "table" and val ~= NetBeatQueue then
-                            candFilter = val
-                        elseif type(val) == "number" then
-                            numCount = numCount + 1
-                        end
-                    end
-
-                    if hasQueue and candFilter and numCount >= 1 then
-                        NetBeatReportFn = fn
-                        NetBeatFilter = candFilter
-                    end
-
-                    for _, val in pairs(ups) do
-                        if type(val) == "table" and #val > 0 then
-                            local first = val[1]
-                            if type(first) == "table" and first.name ~= nil and first.s ~= nil and first.t ~= nil then
-                                NetBeatWatchList = val
-                            elseif type(first) == "table" and (first.FireRate ~= nil or first.WalkSpeed ~= nil) then
-                                NetBeatBaitList = val
-                            end
-                        elseif type(val) == "table" and val.Highlight == true and val.BillboardGui == true then
-                            NetBeatESPList = val
-                        end
-                    end
-                end
-            end
-        end
-
-        -- Pass 3: Find the check loop (which has NetBeatReportFn as upvalue) to hook namecallRatio
-        if NetBeatReportFn then
-            for _, fn in ipairs(gc) do
-                if type(fn) == "function" and is_l(fn) and not is_exec(fn) then
-                    local ups = get_upvalues(fn)
+                -- B. Inspect upvalues for Beat, HHeartbeatB, and report queue
+                if typeof(get_upvalues) == "function" then
+                    local ups = get_upvalues(item)
                     if ups then
-                        local hasReport = false
-                        local candRatio = nil
                         for _, val in pairs(ups) do
-                            if val == NetBeatReportFn then
-                                hasReport = true
-                            elseif type(val) == "function" and val ~= NetBeatReportFn then
-                                candRatio = val
+                            if typeof(val) == "Instance" then
+                                if val.Name == "Beat" and not NetBeatBencode then
+                                    for _, u in pairs(ups) do
+                                        if type(u) == "function" then
+                                            NetBeatBencode = u
+                                        end
+                                    end
+                                elseif val.Name == "HHeartbeatB" then
+                                    AntiHitboxFn = item
+                                end
+                            elseif type(val) == "table" and val.Highlight == true and val.BillboardGui == true then
+                                NetBeatESPList = val
+                                pcall(table.clear, val)
                             end
                         end
-                        if hasReport and candRatio then
-                            NetBeatRatioFn = candRatio
-                        end
+                    end
+                end
+            elseif type(item) == "table" then
+                -- Clear NetBeat ESP blacklist tables unconditionally
+                if rawget(item, "Highlight") == true or rawget(item, "BillboardGui") == true then
+                    pcall(table.clear, item)
+                end
+                -- Clear NetBeat weapon watchlist
+                local first = rawget(item, 1)
+                if type(first) == "table" and rawget(first, "name") ~= nil and rawget(first, "s") ~= nil then
+                    NetBeatWatchList = item
+                    pcall(table.clear, item)
+                end
+            end
+        end
+
+        -- Pass 2: Extract NetBeatQueue directly from NetBeatReportFn upvalues
+        if NetBeatReportFn and typeof(get_upvalues) == "function" then
+            local rups = get_upvalues(NetBeatReportFn)
+            if rups then
+                for _, u in pairs(rups) do
+                    if type(u) == "table" and u ~= NetBeatReportFn then
+                        NetBeatQueue = u
+                        pcall(table.clear, u)
                     end
                 end
             end
@@ -256,83 +227,72 @@ end
 -- 1.7 Hook bencode to force all heartbeat anomaly codes to 0
 if NetBeatBencode and typeof(hookfunction) == "function" then
     pcall(function()
-        local oldBencode = NetBeatBencode
-        hookfunction(NetBeatBencode, function(p15, p16, p17, p18)
+        local oldBencode = nil
+        oldBencode = hookfunction(NetBeatBencode, function(p15, p16, p17, p18)
             if p17 ~= 0 and p17 ~= 1 then
+                print(string.format("[Kraken Shield] [SHIELDED] Anomaly code %s intercepted -> forced to 0 (Clean Heartbeat)", tostring(p17)))
                 p17 = 0
                 p18 = ""
             end
-            return oldBencode(p15, p16, p17, p18)
+            if oldBencode then
+                return oldBencode(p15, p16, p17, p18)
+            end
         end)
     end)
 end
 
--- 1.8 Hook HHeartbeatB (Anti-Hitbox Remote)
-if HHeartbeatB and typeof(hookfunction) == "function" then
-    pcall(function()
-        hookfunction(HHeartbeatB.FireServer, function(...) return nil end)
-    end)
-end
+-- 1.8 Anti-Hitbox Closure Neutralizer
 if AntiHitboxFn and typeof(hookfunction) == "function" then
     pcall(function()
         hookfunction(AntiHitboxFn, function(...) return false, nil end)
     end)
 end
 
--- 1.9 Universal Remote Packet Guardian (Full Support for Delta, Fluxus, Codex & PC)
+-- 1.9 Universal Remote Packet Guardian (__namecall - Safe from RTTI Violations)
 local oldNamecall = nil
 if typeof(hookmetamethod) == "function" then
     pcall(function()
         oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
             local method = getnamecallmethod()
+            if method == "InvokeServer" or method == "invokeServer" then
+                if self.Name == "Roll" then
+                    local res = oldNamecall(self, ...)
+                    if Hub and Hub.Settings and Hub.Settings.AutoSkipGacha and typeof(res) == "table" and res.ok and res.rollId and type(res.results) == "table" and #res.results == 1 then
+                        task.delay(0.05, function()
+                            pcall(function()
+                                local gacha = ReplicatedStorage:FindFirstChild("Gacha")
+                                local claim = gacha and gacha:FindFirstChild("Claim")
+                                if claim then
+                                    claim:FireServer(res.rollId)
+                                end
+                            end)
+                        end)
+                    end
+                    return res
+                end
+            end
             if method == "FireServer" or method == "fireServer" then
-                -- 1. Drop HHeartbeatB (Anti-Hitbox Ban Remote)
-                if HHeartbeatB and self == HHeartbeatB then
+                -- 1. Drop HHeartbeatB (Anti-Hitbox Ban Remote - unconditional match by name or reference)
+                if self.Name == "HHeartbeatB" or (HHeartbeatB and self == HHeartbeatB) then
+                    print("[Kraken Shield] [BLOCKED] HHeartbeatB call dropped (Anti-Hitbox Ban Remote)")
                     return nil
                 end
-                -- 2. Drop Honeypots & Scrub NetBeat buffer packets
-                if BeatRemote and self == BeatRemote then
+                -- 2. Drop AdminTools Honeypots & Rogue Anomaly Calls on Beat
+                if self.Name == "Beat" or (BeatRemote and self == BeatRemote) then
                     local arg1 = ...
-                    -- Drop number-code honeypots (AdminTools 7312, 7411, 7412, 7419, 7420, etc.)
                     if typeof(arg1) == "number" and arg1 >= 7000 then
+                        print(string.format("[Kraken Shield] [BLOCKED] Honeypot Beat call dropped: code %s", tostring(arg1)))
                         return nil
                     end
                     local arg2 = select(2, ...)
                     if typeof(arg2) == "table" and arg2.p ~= nil then
+                        print("[Kraken Shield] [BLOCKED] Honeypot Beat proof table dropped")
                         return nil
-                    end
-                    -- Scrub buffer packets: force any anomaly code >= 7000 to clean heartbeat 0
-                    if typeof(arg1) == "buffer" and buffer.len(arg1) >= 6 then
-                        local bCode = buffer.readu16(arg1, 4)
-                        if bCode >= 7000 or (bCode ~= 0 and bCode ~= 1) then
-                            buffer.writeu16(arg1, 4, 0)
-                            buffer.writeu8(arg1, 6, 0)
-                        end
                     end
                 end
             end
             return oldNamecall(self, ...)
         end))
-    end)
-end
-
--- Fallback Instance hook
-if BeatRemote and typeof(hookfunction) == "function" then
-    pcall(function()
-        local oldBeatFire = nil
-        oldBeatFire = hookfunction(BeatRemote.FireServer, function(self, ...)
-            local args = {...}
-            if typeof(args[1]) == "number" and args[1] >= 7000 then return nil end
-            if typeof(args[2]) == "table" and args[2].p ~= nil then return nil end
-            if typeof(args[1]) == "buffer" and buffer.len(args[1]) >= 6 then
-                local bCode = buffer.readu16(args[1], 4)
-                if bCode >= 7000 or (bCode ~= 0 and bCode ~= 1) then
-                    buffer.writeu16(args[1], 4, 0)
-                    buffer.writeu8(args[1], 6, 0)
-                end
-            end
-            return oldBeatFire(self, ...)
-        end)
     end)
 end
 
@@ -374,6 +334,8 @@ if WeaponData then
     for name, data in pairs(WeaponData) do
         if type(data) == "table" then
             OriginalWeaponData[name] = {
+                RecoilTable = data.Recoil,
+                BloomTable = data.Bloom,
                 Recoil = data.Recoil and {
                     Up = data.Recoil.Up,
                     Side = data.Recoil.Side,
@@ -387,6 +349,7 @@ if WeaponData then
                     Hip = data.Bloom.Hip,
                     PerShot = data.Bloom.PerShot,
                     Aim = data.Bloom.Aim,
+                    Recovery = data.Bloom.Recovery,
                 },
                 Fire = data.Fire and {
                     RPM = data.Fire.RPM,
@@ -434,7 +397,6 @@ local Hub = {
         SilentAimFOVR = 255,
         SilentAimFOVG = 140,
         SilentAimFOVB = 0,
-        RedDamageNumbers = true,
         IconTheme = "Themed", -- "Themed", "ElectricBlue"
 
         -- FOV Circle Styles
@@ -488,8 +450,12 @@ local Hub = {
         HealthColor = Color3.fromRGB(60, 255, 60),
         TracerColor = Color3.fromRGB(0, 200, 255),
 
+        -- Fast Skip Animations (Gacha / Weapon Cases / Car Garage / Shop Rolls)
+        AutoSkipGacha = true,
+
         -- Character
         HideCharacterName = false,
+        AntiAFK = true,
 
         -- World ESP
         SafeESP = true,
@@ -676,16 +642,25 @@ local function IsEnemyNPC(model)
     return false
 end
 
--- Fast Line-of-Sight Check for Hood NPCs (Capped to 3 iterations)
-local function IsHoodVisible(targetHead, targetNpc)
-    if not targetHead or not targetNpc then return false end
+-- Fast Line-of-Sight Check for Hood NPCs (Capped to 4 iterations, ignores players, accessories, tools)
+local function IsHoodVisible(targetPart, targetNpc)
+    if not targetPart or not targetNpc then return false end
 
     local origin = Camera.CFrame.Position
-    local destination = targetHead.Position
+    local destination = targetPart.Position
     local direction = destination - origin
     if direction.Magnitude < 0.2 then return true end
 
-    local ignoreList = {Camera, LocalPlayer.Character}
+    local ignoreList = {Camera}
+    -- Exclude all player characters (other players and teammates on roofs never block bullet line-of-sight)
+    local players = Players:GetPlayers()
+    for _, p in ipairs(players) do
+        local pc = p.Character
+        if pc then
+            table.insert(ignoreList, pc)
+        end
+    end
+
     local ch = Workspace:FindFirstChild("ClientHitboxes")
     if ch then table.insert(ignoreList, ch) end
     local gl = Workspace:FindFirstChild("GroundLoot")
@@ -710,14 +685,19 @@ local function IsHoodVisible(targetHead, targetNpc)
 
     SharedRayParams.FilterDescendantsInstances = ignoreList
 
-    for _ = 1, 3 do
+    for _ = 1, 4 do
         local result = Workspace:Raycast(origin, direction, SharedRayParams)
         if not result then return true end
         local inst = result.Instance
         if inst:IsDescendantOf(targetNpc) then return true end
 
+        local parent = inst.Parent
+        local isCharItem = inst:FindFirstAncestorOfClass("Tool")
+            or inst:FindFirstAncestorOfClass("Accessory")
+            or (parent and parent:FindFirstChildOfClass("Humanoid"))
+
         local nameLower = inst.Name:lower()
-        if (not inst.CanCollide) or inst.Transparency >= 0.7 or inst.Name == "Hitbox"
+        if isCharItem or (not inst.CanCollide) or inst.Transparency >= 0.7 or inst.Name == "Hitbox"
            or nameLower:find("door") or nameLower:find("gate") or nameLower:find("fence")
            or nameLower:find("glass") or nameLower:find("window") or nameLower:find("bar")
            or nameLower:find("prop") or nameLower:find("debris") or nameLower:find("mesh") then
@@ -728,6 +708,23 @@ local function IsHoodVisible(targetHead, targetNpc)
         end
     end
     return false
+end
+
+local function CheckHoodTargetLOS(targetNpc)
+    if not targetNpc then return false, nil end
+    local head = targetNpc:FindFirstChild("Head")
+    if head and IsHoodVisible(head, targetNpc) then
+        return true, head
+    end
+    local hrp = targetNpc:FindFirstChild("HumanoidRootPart")
+    if hrp and IsHoodVisible(hrp, targetNpc) then
+        return true, hrp
+    end
+    local ut = targetNpc:FindFirstChild("UpperTorso") or targetNpc:FindFirstChild("Torso")
+    if ut and IsHoodVisible(ut, targetNpc) then
+        return true, ut
+    end
+    return false, head
 end
 local IsZombieVisible = IsHoodVisible
 
@@ -1026,73 +1023,162 @@ end
 pcall(InitSilentAimHooks)
 
 local function makeWritable(tbl)
-    if type(tbl) == "table" and typeof(setreadonly) == "function" then
-        pcall(setreadonly, tbl, false)
+    if type(tbl) == "table" then
+        if typeof(setreadonly) == "function" then
+            pcall(setreadonly, tbl, false)
+        end
+        if typeof(make_writeable) == "function" then
+            pcall(make_writeable, tbl)
+        end
     end
     return tbl
 end
+
+-- ==============================================================
+-- ⚡ 5.5 ENGINE-LEVEL WEAPON INTERCEPTORS (PERFECT ZERO RECOIL & ZERO SPREAD)
+-- 1. Hook addRecoil closure in-place (preserves ClientState table reference for NetBeat)
+-- 2. Direct subtable replacement in WeaponData with pre-frozen tables
+-- ==============================================================
+local _origAddRecoil = nil
+local _recoilHooked = false
+
+local function HookAddRecoil()
+    if _recoilHooked then return end
+    if not (ClientState and type(ClientState.RecoilKey) == "function") then return end
+    local rKey = ClientState.RecoilKey()
+    if not rKey then return end
+    local rFn = rawget(ClientState, rKey)
+    if not (rFn and type(rFn) == "function") then return end
+
+    local hook_fn = hookfunction or replaceclosure
+    if typeof(hook_fn) ~= "function" then return end
+
+    _origAddRecoil = hook_fn(rFn, function(p94, p95)
+        if Hub and Hub.Settings and Hub.Settings.NoRecoil then
+            -- Zero recoil active: absorb camera pitch/yaw kick, return true for NetBeat check
+            return true
+        end
+        if _origAddRecoil then
+            return _origAddRecoil(p94, p95)
+        end
+        return true
+    end)
+    _recoilHooked = true
+end
+pcall(HookAddRecoil)
+task.spawn(function()
+    for _ = 1, 10 do
+        task.wait(1)
+        pcall(HookAddRecoil)
+        if _recoilHooked then break end
+    end
+end)
+
+local _zeroRecoilTable = table.freeze({
+    Up = 0,
+    Side = 0,
+    Return = 100,
+    AimScale = 0
+})
+
+local _zeroBloomTable = table.freeze({
+    Air = 0,
+    Move = 0,
+    Max = 0,
+    Hip = 0,
+    PerShot = 0,
+    Aim = 0,
+    Recovery = 100
+})
 
 -- ================================================
 -- ⚡ 6. WEAPON & COMBAT ENGINE ENFORCER
 -- Applies values from ssss.txt and live mod tables
 -- ================================================
 local function ApplyWeaponMods()
-    if not WeaponData then return end
+    pcall(HookAddRecoil)
+
+    if not WeaponData or type(WeaponData) ~= "table" then return end
+
+    makeWritable(WeaponData)
 
     for name, weapon in pairs(WeaponData) do
         if type(weapon) == "table" then
             pcall(function()
-                -- 1. Safe Native Zero Recoil (Does not tamper with frozen tables)
-                if ClientState and type(ClientState) == "table" then
-                    ClientState.RecoilScale = Hub.Settings.NoRecoil and 0 or (Hub.Settings.RecoilScale or 1)
+                makeWritable(weapon)
+
+                -- 1. 100% No Recoil (Replaces table pointer - bypasses Luau frozen tables)
+                if Hub.Settings.NoRecoil then
+                    weapon.Recoil = _zeroRecoilTable
+                elseif OriginalWeaponData[name] and OriginalWeaponData[name].RecoilTable then
+                    weapon.Recoil = OriginalWeaponData[name].RecoilTable
+                elseif OriginalWeaponData[name] and OriginalWeaponData[name].Recoil then
+                    weapon.Recoil = OriginalWeaponData[name].Recoil
                 end
 
-                -- 2. No Spread / Perfect Bloom
-                if weapon.Bloom then
-                    makeWritable(weapon.Bloom)
-                    if Hub.Settings.NoSpread then
-                        weapon.Bloom.Air = 0
-                        weapon.Bloom.Move = 0
-                        weapon.Bloom.Max = 0
-                        weapon.Bloom.Hip = 0
-                        weapon.Bloom.PerShot = 0
-                        weapon.Bloom.Aim = 0
-                    elseif OriginalWeaponData[name] and OriginalWeaponData[name].Bloom then
-                        weapon.Bloom.Air = OriginalWeaponData[name].Bloom.Bloom and OriginalWeaponData[name].Bloom.Air or 0
-                        weapon.Bloom.Move = OriginalWeaponData[name].Bloom.Move or 0
-                        weapon.Bloom.Max = OriginalWeaponData[name].Bloom.Max or 0
-                        weapon.Bloom.Hip = OriginalWeaponData[name].Bloom.Hip or 0
-                        weapon.Bloom.PerShot = OriginalWeaponData[name].Bloom.PerShot or 0
-                        weapon.Bloom.Aim = OriginalWeaponData[name].Bloom.Aim or 0
-                    end
+                -- 2. 100% No Spread / Perfect Bloom
+                if Hub.Settings.NoSpread then
+                    weapon.Bloom = _zeroBloomTable
+                elseif OriginalWeaponData[name] and OriginalWeaponData[name].BloomTable then
+                    weapon.Bloom = OriginalWeaponData[name].BloomTable
+                elseif OriginalWeaponData[name] and OriginalWeaponData[name].Bloom then
+                    weapon.Bloom = OriginalWeaponData[name].Bloom
                 end
 
-                -- 3. Rapid Fire & Full Auto
-                if weapon.Fire then
-                    makeWritable(weapon.Fire)
-                    if Hub.Settings.FullAuto then
-                        weapon.Fire.Mode = "Auto"
-                    elseif OriginalWeaponData[name] and OriginalWeaponData[name].Fire then
-                        weapon.Fire.Mode = OriginalWeaponData[name].Fire.Mode
+                -- 3. Full Auto & Rapid Fire
+                if Hub.Settings.FullAuto then
+                    if type(weapon.Fire) == "table" then
+                        makeWritable(weapon.Fire)
+                        pcall(function() weapon.Fire.Mode = "Auto" end)
+                        if weapon.Fire.Mode ~= "Auto" then
+                            local newFire = table.clone(weapon.Fire)
+                            newFire.Mode = "Auto"
+                            weapon.Fire = newFire
+                        end
                     end
+                elseif OriginalWeaponData[name] and OriginalWeaponData[name].Fire then
+                    pcall(function() weapon.Fire.Mode = OriginalWeaponData[name].Fire.Mode end)
+                end
 
-                    if Hub.Settings.RapidFire then
-                        weapon.Fire.RPM = Hub.Settings.RapidFireRPM
-                    elseif OriginalWeaponData[name] and OriginalWeaponData[name].Fire then
-                        weapon.Fire.RPM = OriginalWeaponData[name].Fire.RPM
+                if Hub.Settings.RapidFire then
+                    if type(weapon.Fire) == "table" then
+                        makeWritable(weapon.Fire)
+                        local targetRPM = Hub.Settings.RapidFireRPM or 1100
+                        pcall(function() weapon.Fire.RPM = targetRPM end)
+                        if weapon.Fire.RPM ~= targetRPM then
+                            local newFire = table.clone(weapon.Fire)
+                            newFire.RPM = targetRPM
+                            weapon.Fire = newFire
+                        end
                     end
+                elseif OriginalWeaponData[name] and OriginalWeaponData[name].Fire then
+                    pcall(function() weapon.Fire.RPM = OriginalWeaponData[name].Fire.RPM end)
                 end
 
                 -- 4. Fast Reload
-                if weapon.Ammo then
-                    makeWritable(weapon.Ammo)
-                    if Hub.Settings.InstantReload then
-                        weapon.Ammo.ReloadTime = 0.05
-                    elseif Hub.Settings.FastReloadRatio < 1 and OriginalWeaponData[name] and OriginalWeaponData[name].Ammo then
-                        weapon.Ammo.ReloadTime = OriginalWeaponData[name].Ammo.ReloadTime * Hub.Settings.FastReloadRatio
-                    elseif OriginalWeaponData[name] and OriginalWeaponData[name].Ammo then
-                        weapon.Ammo.ReloadTime = OriginalWeaponData[name].Ammo.ReloadTime
+                if Hub.Settings.InstantReload then
+                    if type(weapon.Ammo) == "table" then
+                        makeWritable(weapon.Ammo)
+                        pcall(function() weapon.Ammo.ReloadTime = 0.05 end)
+                        if weapon.Ammo.ReloadTime ~= 0.05 then
+                            local newAmmo = table.clone(weapon.Ammo)
+                            newAmmo.ReloadTime = 0.05
+                            weapon.Ammo = newAmmo
+                        end
                     end
+                elseif Hub.Settings.FastReloadRatio < 1 and OriginalWeaponData[name] and OriginalWeaponData[name].Ammo then
+                    local targetReload = OriginalWeaponData[name].Ammo.ReloadTime * Hub.Settings.FastReloadRatio
+                    if type(weapon.Ammo) == "table" then
+                        makeWritable(weapon.Ammo)
+                        pcall(function() weapon.Ammo.ReloadTime = targetReload end)
+                        if weapon.Ammo.ReloadTime ~= targetReload then
+                            local newAmmo = table.clone(weapon.Ammo)
+                            newAmmo.ReloadTime = targetReload
+                            weapon.Ammo = newAmmo
+                        end
+                    end
+                elseif OriginalWeaponData[name] and OriginalWeaponData[name].Ammo then
+                    pcall(function() weapon.Ammo.ReloadTime = OriginalWeaponData[name].Ammo.ReloadTime end)
                 end
             end)
         end
@@ -1157,7 +1243,13 @@ Hub.Connections.CoreEnforcer = RunService.RenderStepped:Connect(function(dt)
 
     -- 1. Native Camera Recoil & Stamina (Direct table writes - Zero Overhead)
     if ClientState then
-        ClientState.RecoilScale = Hub.Settings.NoRecoil and 0 or 1
+        if Hub.Settings.NoRecoil then
+            ClientState.ScopeShake = nil
+            if not _recoilHooked then
+                pcall(HookAddRecoil)
+            end
+        end
+
         if Hub.Settings.InfiniteStamina then
             ClientState.Stamina = ClientState.StaminaMax or 150
             ClientState.Exhausted = false
@@ -1165,48 +1257,9 @@ Hub.Connections.CoreEnforcer = RunService.RenderStepped:Connect(function(dt)
         end
         ClientState.Frozen = false
 
-        if Hub.Settings.RedDamageNumbers and not ClientState._HookedRedDamage then
-            ClientState._HookedRedDamage = true
-            local oldShow = ClientState.ShowDamageNumber
-            if type(oldShow) == "function" then
-                ClientState.ShowDamageNumber = function(hitData)
-                    if type(hitData) == "table" and Hub.Settings.RedDamageNumbers then
-                        if Hub.Settings.SilentAimBone == "Head" or hitData.Headshot == true then
-                            hitData.Headshot = true
-                        end
-                    end
-                    return oldShow(hitData)
-                end
-            end
-        end
     end
 
     local now = os.clock()
-
-    -- 2. Damage Numbers UI Check (Throttled to once every 2 seconds, no per-frame DOM search)
-    if Hub.Settings.RedDamageNumbers and (now - _lastDamageCheck >= 2.0) then
-        _lastDamageCheck = now
-        pcall(function()
-            local starterGui = game:GetService("StarterGui")
-            local wui = starterGui:FindFirstChild("WorldUI")
-            local dn = wui and wui:FindFirstChild("DamageNumber")
-            local text = dn and dn:FindFirstChild("Text")
-            if text and text:GetAttribute("HeadColor") ~= Color3.fromRGB(255, 30, 30) then
-                text:SetAttribute("HeadColor", Color3.fromRGB(255, 30, 30))
-            end
-
-            if not _cachedHitmarker or not _cachedHitmarker.Parent then
-                local pg = LocalPlayer:FindFirstChild("PlayerGui")
-                _cachedHitmarker = pg and pg:FindFirstChild("Hitmarker", true)
-            end
-            if _cachedHitmarker then
-                if _cachedHitmarker:GetAttribute("HeadshotColor") ~= Color3.fromRGB(255, 30, 30) then
-                    _cachedHitmarker:SetAttribute("HeadshotColor", Color3.fromRGB(255, 30, 30))
-                    _cachedHitmarker:SetAttribute("KillColor", Color3.fromRGB(255, 30, 30))
-                end
-            end
-        end)
-    end
 
     -- Hitbox Expander update (Throttled to 10 Hz to prevent physics stutter)
     if Hub.Settings.HitboxExpander and (now - _lastHitboxUpdate >= 0.1) then
@@ -1381,6 +1434,65 @@ local nameHiderConn = LocalPlayer.CharacterAdded:Connect(function(char)
     end
 end)
 table.insert(Hub.Connections, nameHiderConn)
+
+-- ==============================================================
+-- 🛡️ 9.5 BULLETPROOF ANTI-AFK ENGINE (กันหลุด 100% ใช้งานได้จริง)
+-- Triple-Guard Protection:
+-- 1. Disables all native CoreGui Idled connections via getconnections
+-- 2. Intercepts Idled event and simulates VirtualUser click to reset idle timer
+-- 3. Background heartbeat every 120s keeps connection alive even when window minimized
+-- ==============================================================
+local VirtualUser = game:GetService("VirtualUser")
+local _antiAfkConnection = nil
+local _disabledIdledConns = {}
+
+local function DisableNativeIdled()
+    pcall(function()
+        if typeof(getconnections) == "function" then
+            for _, conn in ipairs(getconnections(LocalPlayer.Idled)) do
+                if conn.Function ~= nil or conn.State ~= nil then
+                    if conn.Disable then
+                        conn:Disable()
+                        table.insert(_disabledIdledConns, conn)
+                    elseif conn.Disconnect then
+                        conn:Disconnect()
+                    end
+                end
+            end
+        end
+    end)
+end
+
+local function InitAntiAFK()
+    DisableNativeIdled()
+
+    if not _antiAfkConnection then
+        _antiAfkConnection = LocalPlayer.Idled:Connect(function()
+            if Hub and Hub.Running and Hub.Settings and Hub.Settings.AntiAFK then
+                pcall(function()
+                    VirtualUser:CaptureController()
+                    VirtualUser:ClickButton2(Vector2.zero)
+                end)
+            end
+        end)
+        table.insert(Hub.Connections, _antiAfkConnection)
+    end
+end
+pcall(InitAntiAFK)
+
+-- Continuous Keep-Alive Heartbeat (Runs every 120s - completely prevents idle detection even when minimized)
+task.spawn(function()
+    while Hub and Hub.Running do
+        task.wait(120)
+        if Hub.Settings and Hub.Settings.AntiAFK then
+            DisableNativeIdled()
+            pcall(function()
+                VirtualUser:CaptureController()
+                VirtualUser:ClickButton2(Vector2.zero)
+            end)
+        end
+    end
+end)
 
 -- ================================================
 -- 👁️ 10. DRAWING API PLAYER ESP
@@ -1768,41 +1880,91 @@ local function UpdateSafeESP()
     ClearSafeESP()
     if not Hub.Settings.SafeESP then return end
 
+    local function AddSafeZoneMarker(part, name)
+        if not part or not part:IsA("BasePart") then return end
+        local bb = Instance.new("BillboardGui")
+        bb.Name = "KrakenSafeZoneESP"
+        bb.Adornee = part
+        bb.Size = UDim2.new(0, 150, 0, 36)
+        bb.StudsOffset = Vector3.new(0, 3.5, 0)
+        bb.AlwaysOnTop = true
+        CollectionService:AddTag(bb, "OwnFX")
+
+        local title = Instance.new("TextLabel", bb)
+        title.Size = UDim2.new(1, 0, 0, 18)
+        title.BackgroundTransparency = 1
+        title.Font = Enum.Font.GothamBold
+        title.TextSize = 13
+        title.TextColor3 = Color3.fromRGB(0, 255, 130)
+        title.TextStrokeTransparency = 0.2
+        title.Text = "🛡️ เซฟโซน: " .. (name or "Safe Zone")
+
+        local sub = Instance.new("TextLabel", bb)
+        sub.Size = UDim2.new(1, 0, 0, 16)
+        sub.Position = UDim2.new(0, 0, 0, 18)
+        sub.BackgroundTransparency = 1
+        sub.Font = Enum.Font.GothamMedium
+        sub.TextSize = 11
+        sub.TextColor3 = Color3.fromRGB(150, 255, 180)
+        sub.TextStrokeTransparency = 0.2
+        sub.Text = "[ โซนปลอดภัย - ห้ามยิง ]"
+
+        bb.Parent = part
+        table.insert(Hub.SafeESP, bb)
+    end
+
+    -- Scan Workspace for SafeZone parts / models
+    for _, obj in ipairs(Workspace:GetChildren()) do
+        if obj.Name:lower():find("safezone") or obj.Name:lower():find("safe_zone") then
+            local p = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
+            if p then AddSafeZoneMarker(p, obj.Name) end
+        end
+    end
+    local map = Workspace:FindFirstChild("Map")
+    if map then
+        for _, obj in ipairs(map:GetDescendants()) do
+            if obj.Name:lower():find("safezone") or obj.Name:lower():find("safe_zone") then
+                local p = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
+                if p then AddSafeZoneMarker(p, obj.Name) end
+            end
+        end
+    end
+
     local coffres = Workspace:FindFirstChild("Coffres")
-    if not coffres then return end
+    if coffres then
+        for _, safe in ipairs(coffres:GetChildren()) do
+            local part = safe:FindFirstChildWhichIsA("BasePart")
+            if part then
+                local bb = Instance.new("BillboardGui")
+                bb.Name = "KrakenSafeESP"
+                bb.Adornee = part
+                bb.Size = UDim2.new(0, 150, 0, 36)
+                bb.StudsOffset = Vector3.new(0, 3.5, 0)
+                bb.AlwaysOnTop = true
+                CollectionService:AddTag(bb, "OwnFX")
 
-    for _, safe in ipairs(coffres:GetChildren()) do
-        local part = safe:FindFirstChildWhichIsA("BasePart")
-        if part then
-            local bb = Instance.new("BillboardGui")
-            bb.Name = "KrakenSafeESP"
-            bb.Adornee = part
-            bb.Size = UDim2.new(0, 150, 0, 36)
-            bb.StudsOffset = Vector3.new(0, 3.5, 0)
-            bb.AlwaysOnTop = true
-            CollectionService:AddTag(bb, "OwnFX")
+                local title = Instance.new("TextLabel", bb)
+                title.Size = UDim2.new(1, 0, 0, 18)
+                title.BackgroundTransparency = 1
+                title.Font = Enum.Font.GothamBold
+                title.TextSize = 13
+                title.TextColor3 = Color3.fromRGB(0, 230, 255)
+                title.TextStrokeTransparency = 0.2
+                title.Text = "💎 เซฟโซน: " .. safe.Name:gsub("MilitaryCase_", "")
 
-            local title = Instance.new("TextLabel", bb)
-            title.Size = UDim2.new(1, 0, 0, 18)
-            title.BackgroundTransparency = 1
-            title.Font = Enum.Font.GothamBold
-            title.TextSize = 13
-            title.TextColor3 = Color3.fromRGB(0, 230, 255)
-            title.TextStrokeTransparency = 0.2
-            title.Text = "💎 ตู้เซฟทหาร: " .. safe.Name:gsub("MilitaryCase_", "")
+                local sub = Instance.new("TextLabel", bb)
+                sub.Size = UDim2.new(1, 0, 0, 16)
+                sub.Position = UDim2.new(0, 0, 0, 18)
+                sub.BackgroundTransparency = 1
+                sub.Font = Enum.Font.GothamMedium
+                sub.TextSize = 11
+                sub.TextColor3 = Color3.fromRGB(255, 215, 0)
+                sub.TextStrokeTransparency = 0.2
+                sub.Text = "เงินรางวัล: $5,000 - $50,000"
 
-            local sub = Instance.new("TextLabel", bb)
-            sub.Size = UDim2.new(1, 0, 0, 16)
-            sub.Position = UDim2.new(0, 0, 0, 18)
-            sub.BackgroundTransparency = 1
-            sub.Font = Enum.Font.GothamMedium
-            sub.TextSize = 11
-            sub.TextColor3 = Color3.fromRGB(255, 215, 0)
-            sub.TextStrokeTransparency = 0.2
-            sub.Text = "เงินรางวัล: $5,000 - $50,000"
-
-            bb.Parent = part
-            table.insert(Hub.SafeESP, bb)
+                bb.Parent = part
+                table.insert(Hub.SafeESP, bb)
+            end
         end
     end
 end
@@ -1980,171 +2142,239 @@ end)
 
 -- ==============================================================
 -- ⚔️ 12.2 HOOD NPC KILL AURA & AUTOMATIC MONEY LOOT ENGINE
--- Scans all alive Hood NPCs in farm zone, eliminates them in sequence
--- with rapid headshots, loops on respawns, and loots cash instantly!
+-- Overhauled: Anti-Stall, Smart Reload Guard, Zero Interruption
 -- ==============================================================
+local HoodTargetBlacklist = {}
+local HoodTargetFails = {}
+
 task.spawn(function()
     while Hub.Running and genv._UrbanReloadScriptId == SCRIPT_ID do
         local auraActive = Hub.Settings.HoodKillAura or Hub.Settings.ZombieKillAura
         if not auraActive then
-            task.wait(0.4)
+            if Controls and Controls.IsDown and Controls.IsDown("Aim") then
+                pcall(function() Controls.Press("Aim", false) end)
+            end
+            task.wait(0.3)
             continue
         end
 
         task.wait(0.02)
 
-        if Hub.Settings.HoodKillAura or Hub.Settings.ZombieKillAura then
-            -- 1. Ensure weapon is always equipped in hand
-            local equippedTool = EnsureWeaponEquipped()
+        -- 1. Ensure firearm is equipped in hand
+        local equippedTool = EnsureWeaponEquipped()
 
-            local char = LocalPlayer.Character
-            local myHRP = char and char:FindFirstChild("HumanoidRootPart")
-            local myPos = (myHRP and myHRP.Position) or Camera.CFrame.Position
-            local hoodLocal = Workspace:FindFirstChild("HoodLocal")
+        -- 2. RELOAD & AMMO GUARD (Fixes Infinite Reload Interruption / Freezing!)
+        local isReloading = (ClientState and ClientState.Reloading == true)
+        local currentAmmo = 30
+        if equippedTool then
+            local attrAmmo = equippedTool:GetAttribute("Ammo")
+            if typeof(attrAmmo) == "number" then
+                currentAmmo = attrAmmo
+            end
+        end
 
-            -- Find closest alive Hood NPC using 100% Realtime HP
-            local targetNpc = nil
-            local targetHead = nil
-            local targetNpcId = nil
-            local minDist = math.huge
+        -- If currently in the middle of reloading: RELEASE ALL CONTROLS and let it finish!
+        if isReloading then
+            if Controls then
+                Controls.Press("Aim", false)
+                Controls.Press("Fire", false)
+            end
+            -- Sweep loot while waiting for reload
+            pcall(function()
+                if ClientState and type(ClientState.HoodLootNow) == "function" then
+                    ClientState.HoodLootNow()
+                end
+                vim:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+                task.wait(0.02)
+                vim:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+            end)
+            task.wait(0.1)
+            continue
+        end
 
-            local enemyFolders = {}
-            local hl = Workspace:FindFirstChild("HoodLocal")
-            if hl then table.insert(enemyFolders, hl) end
-            local zf = Workspace:FindFirstChild("Zombies")
-            if zf then table.insert(enemyFolders, zf) end
+        -- If out of ammo, trigger reload ONCE and let it reload without firing
+        if currentAmmo <= 0 then
+            if Controls then
+                Controls.Press("Aim", false)
+                Controls.Press("Fire", false)
+                Controls.Press("Reload", true)
+                task.wait(0.04)
+                Controls.Press("Reload", false)
+            end
+            task.wait(0.15)
+            continue
+        end
 
-            local auraRange = Hub.Settings.HoodKillAuraRange or Hub.Settings.ZombieKillAuraRange or 250
-            for _, folder in ipairs(enemyFolders) do
-                for _, z in ipairs(folder:GetChildren()) do
-                    if IsEnemyNPC(z) then
-                        local hp, maxHp, isDead, id = GetHoodRealtimeData(z)
-                        local head = z:FindFirstChild("Head")
-                        local zHrp = z:FindFirstChild("HumanoidRootPart")
-                        if not isDead and hp > 0 and head and zHrp and zHrp.Position.Y > -100 then
-                            local dist = (myPos - head.Position).Magnitude
-                            if dist <= auraRange and dist < minDist then
-                                minDist = dist
-                                targetNpc = z
-                                targetHead = head
-                                targetNpcId = id
+        local char = LocalPlayer.Character
+        local myHRP = char and char:FindFirstChild("HumanoidRootPart")
+        local myHead = char and char:FindFirstChild("Head")
+        local myPos = (myHead and myHead.Position) or (myHRP and myHRP.Position) or Camera.CFrame.Position
+        local now = os.clock()
+
+        -- 3. Clean up expired blacklists
+        for npc, expire in pairs(HoodTargetBlacklist) do
+            if now >= expire then
+                HoodTargetBlacklist[npc] = nil
+                HoodTargetFails[npc] = nil
+            end
+        end
+
+        -- 4. Target Acquisition
+        local enemyFolders = {}
+        local hl = Workspace:FindFirstChild("HoodLocal")
+        if hl then table.insert(enemyFolders, hl) end
+        local zf = Workspace:FindFirstChild("Zombies")
+        if zf then table.insert(enemyFolders, zf) end
+
+        local wallCheck = (Hub.Settings.HoodWallCheck ~= false) and (Hub.Settings.ZombieWallCheck ~= false)
+        local auraRange = Hub.Settings.HoodKillAuraRange or Hub.Settings.ZombieKillAuraRange or 250
+
+        local bestVisibleNpc = nil
+        local bestVisibleHead = nil
+        local bestVisibleId = nil
+        local minVisDist = math.huge
+
+        local bestFallbackNpc = nil
+        local bestFallbackHead = nil
+        local bestFallbackId = nil
+        local minFallbackDist = math.huge
+
+        for _, folder in ipairs(enemyFolders) do
+            for _, z in ipairs(folder:GetChildren()) do
+                -- Exclude dead, downed, lootable bodies and blacklisted targets
+                if IsEnemyNPC(z) and not HoodTargetBlacklist[z] then
+                    local hp, maxHp, isDead, id = GetHoodRealtimeData(z)
+                    local head = z:FindFirstChild("Head")
+                    local zHrp = z:FindFirstChild("HumanoidRootPart")
+                    if not isDead and hp > 0 and head and zHrp and zHrp.Position.Y > -100 then
+                        local dist = (myPos - head.Position).Magnitude
+                        if dist <= auraRange then
+                            if dist < minFallbackDist then
+                                minFallbackDist = dist
+                                bestFallbackNpc = z
+                                bestFallbackHead = head
+                                bestFallbackId = id
+                            end
+
+                            if wallCheck then
+                                local hasLOS, hitPart = CheckHoodTargetLOS(z)
+                                if hasLOS and dist < minVisDist then
+                                    minVisDist = dist
+                                    bestVisibleNpc = z
+                                    bestVisibleHead = hitPart or head
+                                    bestVisibleId = id
+                                end
                             end
                         end
                     end
                 end
             end
+        end
 
-            if targetNpc and targetHead and targetHead.Position.Y > -100 then
-                Hub.CurrentTarget = targetNpc
-                -- 1. Camera Aim: Continuously lock camera onto Hood NPC head
-                Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetHead.Position)
+        -- Target Selection:
+        -- 1. Prioritize visible targets
+        -- 2. If no visible target, but a target is close (< 45 studs), fall back to it (bullets penetrate thin props)
+        local targetNpc = nil
+        local targetHead = nil
+        local targetNpcId = nil
 
-                if equippedTool then
-                    local currentAmmo = equippedTool:GetAttribute("Ammo") or 30
-                    local isReloading = equippedTool:GetAttribute("Reloading") == true
+        if bestVisibleNpc then
+            targetNpc = bestVisibleNpc
+            targetHead = bestVisibleHead
+            targetNpcId = bestVisibleId
+        elseif not wallCheck then
+            targetNpc = bestFallbackNpc
+            targetHead = bestFallbackHead
+            targetNpcId = bestFallbackId
+        elseif bestFallbackNpc and minFallbackDist <= 45 then
+            -- Close proximity fallback: shoot through fence/railing
+            targetNpc = bestFallbackNpc
+            targetHead = bestFallbackHead
+            targetNpcId = bestFallbackId
+        end
 
-                    if currentAmmo <= 0 or isReloading then
-                        if not isReloading and Controls then
-                            Controls.Press("Reload", true)
-                            task.wait(0.04)
-                            Controls.Press("Reload", false)
-                        end
-                        -- Sweep loot while waiting for reload
-                        pcall(function()
-                            if ClientState and type(ClientState.HoodLootNow) == "function" then
-                                ClientState.HoodLootNow()
-                            end
-                            local hoodRemote = HoodRemote or (ReplicatedStorage:FindFirstChild("HoodNPC") and ReplicatedStorage.HoodNPC:FindFirstChild("Remote"))
-                            if hoodRemote and targetNpcId then
-                                hoodRemote:FireServer("loot", targetNpcId, targetHead.Position)
-                            end
-                            vim:SendKeyEvent(true, Enum.KeyCode.E, false, game)
-                            task.wait(0.02)
-                            vim:SendKeyEvent(false, Enum.KeyCode.E, false, game)
-                        end)
-                        task.wait(0.2)
+        if targetNpc and targetHead and targetHead.Position.Y > -100 then
+            Hub.CurrentTarget = targetNpc
+            Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetHead.Position)
+
+            if equippedTool then
+                if Controls then
+                    Controls.Press("Aim", true)
+                end
+                if ClientState then
+                    ClientState.Aiming = true
+                    ClientState.RecoilScale = 0
+                end
+
+                local startHp = GetHoodRealtimeData(targetNpc)
+                local shots = 0
+                while Hub.Running and (Hub.Settings.HoodKillAura or Hub.Settings.ZombieKillAura) and targetHead and targetHead.Position.Y > -100 and shots < 5 do
+                    -- Check if reload started or ammo empty
+                    if (ClientState and ClientState.Reloading == true) or (equippedTool:GetAttribute("Ammo") or 30) <= 0 then
+                        break
+                    end
+                    local curHp, _, isDeadNow = GetHoodRealtimeData(targetNpc)
+                    if isDeadNow or curHp <= 0 or targetNpc:GetAttribute("Lootable") == true then
+                        break
+                    end
+                    shots = shots + 1
+                    Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetHead.Position)
+                    if Controls then
+                        Controls.Press("Fire", true)
+                        task.wait(0.08)
+                        Controls.Press("Fire", false)
+                        task.wait(0.04)
                     else
-                        -- Check obstacle: if Hood NPC is behind a wall or obstacle, HOLD FIRE!
-                        local isClearLOS = true
-                        local wallCheck = (Hub.Settings.HoodWallCheck ~= false) and (Hub.Settings.ZombieWallCheck ~= false)
-                        if wallCheck then
-                            isClearLOS = IsHoodVisible(targetHead, targetNpc)
-                        end
-
-                        if not isClearLOS then
-                            -- Target is behind obstacle: keep aiming, hold fire until it emerges!
+                        if typeof(mouse1press) == "function" then
+                            mouse1press()
+                            task.wait(0.07)
+                            mouse1release()
                             task.wait(0.03)
-                        else
-                            -- Target is in clear line-of-sight: AIM & FIRE!
-                            if Controls then
-                                Controls.Press("Aim", true)
-                            end
-                            if ClientState then
-                                ClientState.Aiming = true
-                                ClientState.RecoilScale = 0
-                            end
-
-                            local shots = 0
-                            while Hub.Running and (Hub.Settings.HoodKillAura or Hub.Settings.ZombieKillAura) and targetHead and targetHead.Position.Y > -100 and shots < 6 do
-                                local curHp, _, isDeadNow = GetHoodRealtimeData(targetNpc)
-                                if isDeadNow or curHp <= 0 then
-                                    break
-                                end
-                                -- Stop firing immediately if NPC steps behind an obstacle mid-burst
-                                if wallCheck and not IsHoodVisible(targetHead, targetNpc) then
-                                    break
-                                end
-                                shots = shots + 1
-                                Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetHead.Position)
-                                if Controls then
-                                    Controls.Press("Fire", true)
-                                    task.wait(0.08)
-                                    Controls.Press("Fire", false)
-                                    task.wait(0.04)
-                                else
-                                    if typeof(mouse1press) == "function" then
-                                        mouse1press()
-                                        task.wait(0.07)
-                                        mouse1release()
-                                        task.wait(0.03)
-                                    end
-                                end
-                            end
-
-                            -- Instant loot sequence upon death using direct NPC ID
-                            pcall(function()
-                                if ClientState and type(ClientState.HoodLootNow) == "function" then
-                                    ClientState.HoodLootNow()
-                                end
-                                local hoodRemote = HoodRemote or (ReplicatedStorage:FindFirstChild("HoodNPC") and ReplicatedStorage.HoodNPC:FindFirstChild("Remote"))
-                                if hoodRemote and targetNpcId then
-                                    hoodRemote:FireServer("loot", targetNpcId, targetHead.Position)
-                                end
-                                vim:SendKeyEvent(true, Enum.KeyCode.E, false, game)
-                                task.wait(0.02)
-                                vim:SendKeyEvent(false, Enum.KeyCode.E, false, game)
-                            end)
                         end
                     end
                 end
-            else
-                Hub.CurrentTarget = nil
-                -- No alive Hood NPCs currently in range (waiting for respawns)
-                if Controls and Controls.IsDown and Controls.IsDown("Aim") then
-                    pcall(function() Controls.Press("Aim", false) end)
+
+                -- Anti-Stall Health Check: If target took multiple bursts without losing HP, blacklist it for 3s
+                local endHp, _, endDead = GetHoodRealtimeData(targetNpc)
+                if not endDead and endHp >= startHp and shots >= 4 then
+                    HoodTargetFails[targetNpc] = (HoodTargetFails[targetNpc] or 0) + 1
+                    if HoodTargetFails[targetNpc] >= 2 then
+                        HoodTargetBlacklist[targetNpc] = os.clock() + 3.0
+                    end
+                else
+                    HoodTargetFails[targetNpc] = nil
                 end
 
-                -- Sweep ground loot and dead corpses while waiting for respawns
+                -- Instant loot sequence upon death using direct NPC ID
                 pcall(function()
                     if ClientState and type(ClientState.HoodLootNow) == "function" then
                         ClientState.HoodLootNow()
+                    end
+                    local hoodRemote = HoodRemote or (ReplicatedStorage:FindFirstChild("HoodNPC") and ReplicatedStorage.HoodNPC:FindFirstChild("Remote"))
+                    if hoodRemote and targetNpcId then
+                        hoodRemote:FireServer("loot", targetNpcId, targetHead.Position)
                     end
                     vim:SendKeyEvent(true, Enum.KeyCode.E, false, game)
                     task.wait(0.02)
                     vim:SendKeyEvent(false, Enum.KeyCode.E, false, game)
                 end)
-                task.wait(0.15)
             end
+        else
+            Hub.CurrentTarget = nil
+            if Controls and Controls.IsDown and Controls.IsDown("Aim") then
+                pcall(function() Controls.Press("Aim", false) end)
+            end
+
+            -- Sweep ground loot and dead corpses while waiting
+            pcall(function()
+                if ClientState and type(ClientState.HoodLootNow) == "function" then
+                    ClientState.HoodLootNow()
+                end
+                vim:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+                task.wait(0.02)
+                vim:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+            end)
+            task.wait(0.1)
         end
     end
 end)
@@ -3255,7 +3485,7 @@ local function InitUI()
         Combat    = CreateTabAdapter(tabGroup:Tab({ Name = "ต่อสู้",       Image = "rbxassetid://10709810948" }), "Combat"),
         Visuals   = CreateTabAdapter(tabGroup:Tab({ Name = "มองทะลุ",      Image = "rbxassetid://10747373176" }), "Visuals"),
         Character = CreateTabAdapter(tabGroup:Tab({ Name = "ตัวละคร",      Image = "rbxassetid://10747372702" }), "Character"),
-        World     = CreateTabAdapter(tabGroup:Tab({ Name = "ฟาร์ม & โลก",  Image = "rbxassetid://10723405360" }), "World"),
+        World     = CreateTabAdapter(tabGroup:Tab({ Name = "ฟาร์ม ",  Image = "rbxassetid://10723405360" }), "World"),
         Settings  = CreateTabAdapter(tabGroup:Tab({ Name = "ตั้งค่า",       Image = "rbxassetid://10734950309" }), "Settings")
     }
     -- Compatibility aliases
@@ -3741,14 +3971,7 @@ local function InitUI()
         ApplyWeaponMods()
     end)
 
-    local RedDmgToggle = Tabs.Combat:AddToggle("RedDmgToggle", {
-        Title = "บังคับตัวเลขดาเมจสีแดง 100% (Red Damage Numbers)",
-        Description = "บังคับให้ตัวเลขดาเมจและเป้าเล็งเป็นสีแดงสดทุกนัดที่ยิงเข้าหัว",
-        Default = Hub.Settings.RedDamageNumbers
-    })
-    RedDmgToggle:OnChanged(function(v)
-        Hub.Settings.RedDamageNumbers = v
-    end)
+
 
     Tabs.Combat:AddSection("ขยายฮิตบ็อกซ์ (Hitbox Expander)")
 
@@ -3938,11 +4161,11 @@ local function InitUI()
     })
     ESPTracerToggle:OnChanged(function(v) Hub.Settings.ESPTracers = v end)
 
-    Tabs.Visuals:AddSection("มองทะลุตู้เซฟและสิ่งของ (World Objects ESP)")
+    Tabs.Visuals:AddSection("เซฟโซน (Safe Zone ESP)")
 
     local SafeESPToggle = Tabs.Visuals:AddToggle("SafeESPToggle", {
-        Title = "มองทะลุตู้เซฟทหาร (Military Safe ESP)",
-        Description = "แสดงตู้เซฟเงิน $5,000 - $50,000 ทั้ง 4 จุดในแมพ",
+        Title = "เซฟโซน (Safe Zone ESP)",
+        Description = "แสดงตำแหน่งจุดเซฟโซน (Safe Zone) ทั้งหมดในแมพ",
         Default = Hub.Settings.SafeESP
     })
     SafeESPToggle:OnChanged(function(v)
@@ -4005,6 +4228,24 @@ local function InitUI()
     })
     InfStaminaToggle:OnChanged(function(v)
         Hub.Settings.InfiniteStamina = v
+    end)
+
+    Tabs.Character:AddSection("ระบบป้องกันการหลุด (Anti-AFK Protection)")
+
+    local AntiAFKToggle = Tabs.Character:AddToggle("AntiAFKToggle", {
+        Title = "ป้องกันการถูกเตะ AFK (Anti-AFK 100%)",
+        Description = "ป้องกันตัวเกมเตะหลุดเมื่อไม่ได้ขยับเมาส์เกิน 20 นาที ทำงานอัตโนมัติแม้พับจอหรือเล่นหน้าต่างอื่น",
+        Default = Hub.Settings.AntiAFK
+    })
+    AntiAFKToggle:OnChanged(function(v)
+        Hub.Settings.AntiAFK = v
+        if v then
+            DisableNativeIdled()
+            pcall(function()
+                VirtualUser:CaptureController()
+                VirtualUser:ClickButton2(Vector2.zero)
+            end)
+        end
     end)
 
     -- ================================================
@@ -4098,6 +4339,21 @@ local function InitUI()
             end
         end
     })
+
+
+    Tabs.World:AddSection("ระบบสุ่มของและร้านค้า (Fast Skip Gacha and Shop Roll)")
+
+    local AutoSkipGachaToggle = Tabs.World:AddToggle("AutoSkipGachaToggle", {
+        Title = "ข้ามอนิเมชั่นสุ่มของ/เปิดกล่อง (Fast Skip Gacha and Shop Roll)",
+        Description = "ข้ามอนิเมชั่นสุ่มปืน เปิดกล่องเคส และร้านค้าทันที ไม่ต้องรอดู 5.5 วินาที ได้รับไอเทมทันที",
+        Default = Hub.Settings.AutoSkipGacha
+    })
+    AutoSkipGachaToggle:OnChanged(function(v)
+        Hub.Settings.AutoSkipGacha = v
+        if v and Hub.EnforceFastSkip then
+            Hub.EnforceFastSkip()
+        end
+    end)
 
 
     -- ================================================
@@ -4362,6 +4618,14 @@ task.spawn(function()
         warn("[KrakenHub] InitUI Error: " .. tostring(err))
     else
         print("[KrakenHub] Urban Reload UI & Combat Engine successfully initialized!")
+print("==================================================")
+print("[Kraken Shield] Anticheat Status Verification:")
+print("  - NetBeat bencode Hook: " .. (NetBeatBencode and "ACTIVE (Sanitizing codes to 0)" or "NOT FOUND"))
+print("  - NetBeat report Hook:  " .. (NetBeatReportFn and "ACTIVE (Reports blocked)" or "NOT FOUND"))
+print("  - NetBeat Queue (u28):  " .. (NetBeatQueue and "ACTIVE (Cleared & locked)" or "NOT FOUND"))
+print("  - ESP Blacklist (u180): " .. (NetBeatESPList and "ACTIVE (Cleared)" or "CLEARED IN GC"))
+print("  - Remote Packet Guard:  ACTIVE (__namecall dropping HHeartbeatB & Honeypots)")
+print("==================================================")
     end
 end)
 
@@ -4400,3 +4664,192 @@ task.spawn(function()
         task.wait(0.2)
     end
 end)
+
+
+-- ==============================================================
+-- ⚡ FAST SKIP GACHA & SHOP ROLLS ENGINE (Zero-Lag / Pure Event-Driven)
+-- Completely removes wait times / spinning animations in shops & crates
+-- Optimized: Zero GC scans, cached module bypass, pure Signal events
+-- ==============================================================
+local function InitFastSkipEngine()
+    -- 1. Apply ReplicatedStorage.RollSkip Gamepass Bypass (Runs once, cached in memory)
+    local _rollSkipBypassed = false
+    local function ApplyRollSkipBypass()
+        if _rollSkipBypassed then return end
+        local rsModule = ReplicatedStorage:FindFirstChild("RollSkip")
+        if rsModule then
+            local ok, rs = pcall(require, rsModule)
+            if ok and typeof(rs) == "table" then
+                _rollSkipBypassed = true
+                rs.Owned = function() return true end
+                rs.Request = function(cb)
+                    if typeof(cb) == "function" then
+                        cb()
+                    end
+                end
+            end
+        end
+    end
+    pcall(ApplyRollSkipBypass)
+
+    -- 2. Fast Skip Trigger on UI Elements
+    local function TriggerButton(btn)
+        if not btn or not btn:IsA("GuiButton") then return false end
+        pcall(function()
+            if typeof(firesignal) == "function" then
+                if btn:FindFirstChild("Activated") or typeof(btn.Activated) == "RBXScriptSignal" then
+                    firesignal(btn.Activated)
+                end
+                if btn:FindFirstChild("MouseButton1Click") or typeof(btn.MouseButton1Click) == "RBXScriptSignal" then
+                    firesignal(btn.MouseButton1Click)
+                end
+            end
+        end)
+        return true
+    end
+
+    local function CheckAndSkipCases()
+        if not Hub.Settings.AutoSkipGacha then return end
+
+        local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+        if not playerGui then return end
+
+        -- Vector A: CasesFX (Weapon / Car Case Open Animation)
+        local casesFX = playerGui:FindFirstChild("CasesFX")
+        if casesFX then
+            local weapon = casesFX:FindFirstChild("Weapon")
+            if weapon and weapon.Visible then
+                local skip = weapon:FindFirstChild("Skip")
+                if skip then
+                    local price = skip:FindFirstChild("Price")
+                    if price and price.Visible then price.Visible = false end
+                    TriggerButton(skip)
+                end
+            end
+            local car = casesFX:FindFirstChild("Car")
+            if car and car.Visible then
+                local skip = car:FindFirstChild("Skip")
+                if skip then
+                    local price = skip:FindFirstChild("Price")
+                    if price and price.Visible then price.Visible = false end
+                    TriggerButton(skip)
+                end
+            end
+        end
+
+        -- Vector B: Cases.Garage.Roll (Car Garage Roll)
+        local cases = playerGui:FindFirstChild("Cases")
+        if cases then
+            local garage = cases:FindFirstChild("Garage")
+            if garage then
+                local roll = garage:FindFirstChild("Roll")
+                if roll and roll.Visible then
+                    local skip = roll:FindFirstChild("Skip")
+                    if skip then
+                        local price = skip:FindFirstChild("Price")
+                        if price and price.Visible then price.Visible = false end
+                        TriggerButton(skip)
+                    end
+                end
+            end
+        end
+
+        -- Vector C: GachaUI (Tool / Mystery Box / Gun Gacha)
+        local gachaUI = playerGui:FindFirstChild("GachaUI")
+        if gachaUI then
+            local window = gachaUI:FindFirstChild("Window")
+            if window and window.Visible then
+                local skip = window:FindFirstChild("Skip")
+                if skip then
+                    if not skip.Visible then
+                        skip.Visible = true
+                    end
+                    TriggerButton(skip)
+                end
+            end
+        end
+    end
+    Hub.EnforceFastSkip = CheckAndSkipCases
+
+    -- 3. Debounced trigger to eliminate micro-stutter
+    local _lastSkipTick = 0
+    local function SafeSkip()
+        local now = os.clock()
+        if now - _lastSkipTick < 0.1 then return end
+        _lastSkipTick = now
+        CheckAndSkipCases()
+    end
+
+    -- 4. Purely Event-Driven Listeners (Zero CPU usage when idle)
+    task.spawn(function()
+        local playerGui = LocalPlayer:WaitForChild("PlayerGui", 10)
+        if not playerGui then return end
+
+        local function WatchGui(gui)
+            if not gui then return end
+            if gui.Name == "CasesFX" then
+                local function BindElem(elem)
+                    if elem and (elem.Name == "Weapon" or elem.Name == "Car") then
+                        elem:GetPropertyChangedSignal("Visible"):Connect(function()
+                            if elem.Visible and Hub.Settings.AutoSkipGacha then
+                                SafeSkip()
+                            end
+                        end)
+                    end
+                end
+                for _, ch in ipairs(gui:GetChildren()) do BindElem(ch) end
+                gui.ChildAdded:Connect(BindElem)
+            end
+            if gui.Name == "Cases" then
+                local garage = gui:FindFirstChild("Garage")
+                if garage then
+                    local roll = garage:FindFirstChild("Roll")
+                    if roll then
+                        roll:GetPropertyChangedSignal("Visible"):Connect(function()
+                            if roll.Visible and Hub.Settings.AutoSkipGacha then
+                                SafeSkip()
+                            end
+                        end)
+                    end
+                end
+            end
+            if gui.Name == "GachaUI" then
+                local window = gui:WaitForChild("Window", 5)
+                if window then
+                    local skip = window:WaitForChild("Skip", 5)
+                    if skip then
+                        skip:GetPropertyChangedSignal("Visible"):Connect(function()
+                            if not skip.Visible and Hub.Settings.AutoSkipGacha then
+                                skip.Visible = true
+                            end
+                        end)
+                    end
+                    window:GetPropertyChangedSignal("Visible"):Connect(function()
+                        if window.Visible and Hub.Settings.AutoSkipGacha then
+                            SafeSkip()
+                        end
+                    end)
+                end
+            end
+        end
+
+        for _, g in ipairs(playerGui:GetChildren()) do
+            WatchGui(g)
+        end
+        playerGui.ChildAdded:Connect(WatchGui)
+    end)
+
+    -- 5. Very relaxed backup heartbeat (1 Hz only - zero CPU impact)
+    task.spawn(function()
+        while Hub.Running and genv._UrbanReloadScriptId == SCRIPT_ID do
+            if not _rollSkipBypassed then
+                ApplyRollSkipBypass()
+            end
+            if Hub.Settings.AutoSkipGacha then
+                CheckAndSkipCases()
+            end
+            task.wait(1.0)
+        end
+    end)
+end
+pcall(InitFastSkipEngine)
