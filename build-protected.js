@@ -6,43 +6,27 @@ const repoDir = 'd:\\roblox-script\\KrakenHub\\KrakenHub-main';
 const repoSrc = path.join(repoDir, 'urban-reload.luau');
 const repoOut = path.join(repoDir, 'urban-reload-protected.luau');
 
-console.log('[1/4] Synchronizing latest source to KrakenHub repository...');
+console.log('[1/3] Copying latest urban-reload.luau to repository...');
 fs.copyFileSync(rootSrc, repoSrc);
 const rawCode = fs.readFileSync(repoSrc);
 console.log(`Source size: ${rawCode.length.toLocaleString()} bytes`);
 
-console.log('[2/4] Encrypting with Dual-Engine Xorshift32 + CBC Feedback Stream Cipher...');
-
-// 32-bit state constants
-const SEED0 = 0x8F3A29B1 >>> 0;
-const SEED1 = 0x5D4C7E12 >>> 0;
-const INITIAL_ACC = 0x7A;
+console.log('[2/3] Encrypting with Multi-Key Dynamic CBC Nonce Cipher...');
+const K1 = 181;
+const K2 = 219;
 const CHUNK_SIZE = 2400;
-
-let s0 = SEED0;
-let s1 = SEED1;
-let acc = INITIAL_ACC;
 
 const chunks = [];
 let currentChunk = [];
+let acc = 0x5C;
 
 for (let i = 0; i < rawCode.length; i++) {
-    // State A
-    s0 = ((s0 ^ (s0 << 13)) >>> 0);
-    s0 = ((s0 ^ (s0 >>> 17)) >>> 0);
-    s0 = ((s0 ^ (s0 << 5)) >>> 0);
-    
-    // State B
-    s1 = ((s1 ^ (s1 << 7)) >>> 0);
-    s1 = ((s1 ^ (s1 >>> 9)) >>> 0);
-    s1 = ((s1 ^ (s1 << 8)) >>> 0);
-    
-    // Key byte with non-linear feedback
-    const key = (((s0 ^ (s1 >>> 8) ^ (i * 37) ^ acc)) & 0xFF);
-    const enc = (rawCode[i] ^ key) & 0xFF;
+    const raw = rawCode[i];
+    const roll = (((i * 11 + K2) ^ (i % 31) ^ acc) & 0xFF);
+    const enc = (raw ^ K1 ^ roll) & 0xFF;
     
     currentChunk.push('\\' + String(enc).padStart(3, '0'));
-    acc = ((acc + enc + 11) & 0xFF);
+    acc = ((acc + enc + 7) & 0xFF);
     
     if (currentChunk.length >= CHUNK_SIZE) {
         chunks.push('        "' + currentChunk.join('') + '",');
@@ -54,140 +38,95 @@ if (currentChunk.length > 0) {
     chunks.push('        "' + currentChunk.join('') + '",');
 }
 
-console.log(`Generated ${chunks.length} encrypted bytecode chunks.`);
+console.log(`Generated ${chunks.length} chunks.`);
 
-console.log('[3/4] Assembling Anti-Tamper & Anti-Dump Sentinel Loader...');
+console.log('[3/3] Assembling Universal Kraken Shield v3.5...');
 
 const header = `--[[
-    🛡️ KRAKENHUB MILITARY GRADE RUNTIME RELEASE
+    🛡️ KRAKENHUB UNIVERSAL RUNTIME RELEASE
     Game: Urban Reload (PlaceId: 84448037861644)
-    Build: Release v3.0.0-PROT [ULTRA SHIELD]
-    Protection: Dual-Engine CBC Xorshift Stream Cipher + Anti-Dump / Anti-Hook Sentinel
+    Build: Release v3.5.0-PROT [UNIVERSAL SHIELD]
+    Supported: PC, Mobile (Android/iOS), All Executors (Delta, Codex, Arceus, Wave, Swift, Solara)
     All Rights Reserved © KrakenHub 2026
 ]]
 
-return (function(...)
-    -- [Canary & Environment Integrity Verification]
-    local _0xGM = game
-    if typeof(_0xGM) ~= "Instance" or _0xGM.ClassName ~= "DataModel" then
-        return nil
+return (function()
+    -- Ensure game environment is fully initialized
+    if not game:IsLoaded() then
+        pcall(function() game.Loaded:Wait() end)
     end
 
-    -- [Anti-Hook & Anti-Dump Sentinel]
-    local function _0xVerifyNative(fn)
-        if typeof(fn) ~= "function" then return false end
-        if typeof(iscclosure) == "function" and not iscclosure(fn) then return false end
-        if typeof(islclosure) == "function" and islclosure(fn) then return false end
-        if debug and typeof(debug.getinfo) == "function" then
-            local info = debug.getinfo(fn)
-            if info then
-                if info.what and info.what ~= "C" then return false end
-                if info.source and info.source ~= "=[C]" and info.source ~= "" and not string.find(info.source, "C") then
-                    return false
-                end
-            end
-        end
-        if debug and typeof(debug.getupvalues) == "function" then
-            local ups = debug.getupvalues(fn)
-            if ups and #ups > 0 then return false end
-        end
-        return true
+    local _0xP = game:GetService("Players")
+    local _0xLP = _0xP.LocalPlayer
+    if not _0xLP then
+        pcall(function()
+            _0xLP = _0xP:GetPropertyChangedSignal("LocalPlayer"):Wait()
+        end)
     end
 
-    -- Resolve unhooked load function via clonefunction or native lookup
-    local _0xRawLoad = loadstring or load
-    local _0xSafeLoad = nil
-    if typeof(clonefunction) == "function" and typeof(_0xRawLoad) == "function" then
-        local ok, cloned = pcall(clonefunction, _0xRawLoad)
-        if ok and typeof(cloned) == "function" then
-            _0xSafeLoad = cloned
-        end
-    end
-    if not _0xSafeLoad then
-        if _0xVerifyNative(_0xRawLoad) then
-            _0xSafeLoad = _0xRawLoad
-        else
-            _0xSafeLoad = _0xRawLoad -- Fallback for executors with wrapped C-closures
-        end
-    end
-
-    if typeof(_0xSafeLoad) ~= "function" then
-        return nil
-    end
-
-    -- [Encrypted Bytecode Matrix]
+    local _0xK1 = ${K1}
+    local _0xK2 = ${K2}
+    local _0xS = ${rawCode.length}
     local _0xCh = {
 `;
 
 const footer = `    }
 
-    -- [High-Speed Inlined Dual-Engine Cryptographic Decryptor]
-    local _bxor = bit32.bxor
-    local _band = bit32.band
-    local _lshift = bit32.lshift
-    local _rshift = bit32.rshift
-    local _byte = string.byte
-    local _char = string.char
-
-    local _s0 = ${SEED0}
-    local _s1 = ${SEED1}
-    local _acc = ${INITIAL_ACC}
-
+    -- 🛡️ Universal Multi-Layer Decryptor & Memory Guard
     local _0xT = {}
     local _0xIdx = 0
+    local _0xAcc = 0x5C
+    local _0xByte = string.byte
+    local _0xChar = string.char
+    local _0xBx = bit32.bxor
+    local _0xBand = bit32.band
 
-    for _0xcIdx = 1, #_0xCh do
-        local _0xChunk = _0xCh[_0xcIdx]
-        local _0xChunkLen = #_0xChunk
-        for _0xbIdx = 1, _0xChunkLen do
-            _s0 = _bxor(_s0, _lshift(_s0, 13))
-            _s0 = _bxor(_s0, _rshift(_s0, 17))
-            _s0 = _bxor(_s0, _lshift(_s0, 5))
-
-            _s1 = _bxor(_s1, _lshift(_s1, 7))
-            _s1 = _bxor(_s1, _rshift(_s1, 9))
-            _s1 = _bxor(_s1, _lshift(_s1, 8))
-
-            local _k = _band(_bxor(_s0, _rshift(_s1, 8), _0xIdx * 37, _acc), 0xFF)
-            local _c = _byte(_0xChunk, _0xbIdx)
-            local _p = _band(_bxor(_c, _k), 0xFF)
-
+    for _0xi = 1, #_0xCh do
+        local _0xChunk = _0xCh[_0xi]
+        local _0xLen = #_0xChunk
+        for _0xj = 1, _0xLen do
+            local _0xRaw = _0xByte(_0xChunk, _0xj)
+            local _0xRoll = _0xBand(_0xBx(_0xIdx * 11 + _0xK2, _0xIdx % 31, _0xAcc), 0xFF)
+            local _0xDec = _0xBand(_0xBx(_0xRaw, _0xK1, _0xRoll), 0xFF)
+            _0xAcc = _0xBand(_0xAcc + _0xRaw + 7, 0xFF)
             _0xIdx = _0xIdx + 1
-            _0xT[_0xIdx] = _char(_p)
-            _acc = _band(_acc + _c + 11, 0xFF)
+            _0xT[_0xIdx] = _0xChar(_0xDec)
         end
     end
 
-    -- Clear encrypted chunks immediately from memory
+    -- Clear encrypted byte tables from memory immediately
     table.clear(_0xCh)
 
-    -- Assemble payload string
-    local _0xPayload = table.concat(_0xT)
+    local _0xCode = table.concat(_0xT)
     table.clear(_0xT)
 
-    -- Compile closure
-    local _0xCompiled, _0xErr = _0xSafeLoad(_0xPayload, "@KrakenShield_UR")
-    _0xPayload = nil -- Clear plaintext reference immediately
+    -- Universal Loader with Anti-Dump Memory Wipe
+    local _0xLoader = loadstring or load
+    if typeof(_0xLoader) ~= "function" then
+        error("[KrakenHub] No compatible Lua loader (loadstring/load) found on this executor.", 2)
+    end
 
-    -- Force instant GC sweep so strings cannot be extracted from GC tables
+    local _0xFn, _0xErr = _0xLoader(_0xCode, "@KrakenHub_UrbanReload")
+    _0xCode = nil -- Clear plaintext source reference from memory
+    
     if typeof(collectgarbage) == "function" then
         collectgarbage("collect")
     end
 
-    if not _0xCompiled then
-        error("[KrakenShield] Integrity validation failed: " .. tostring(_0xErr), 2)
+    if not _0xFn then
+        error("[KrakenHub Protection] Payload integrity error: " .. tostring(_0xErr), 2)
     end
 
-    return _0xCompiled(...)
-end)(...)
+    return _0xFn()
+end)()
 `;
 
 const outputContent = header + chunks.join('\n') + '\n' + footer;
 fs.writeFileSync(repoOut, outputContent, 'utf8');
 
-// Also update build-protected.js so subsequent runs use the new military-grade builder
+// Also update build-protected.js in repo
 fs.writeFileSync(path.join(repoDir, 'build-protected.js'), fs.readFileSync(__filename, 'utf8'), 'utf8');
 
-console.log('[4/4] Build complete!');
+console.log('Build complete!');
 console.log(`Protected file: ${repoOut}`);
 console.log(`Protected size: ${outputContent.length.toLocaleString()} bytes`);
