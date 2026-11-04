@@ -5,8 +5,8 @@
 --
 -- Features:
 -- • 🛡️ 100% Anti-Detection: Blocks all Honeypot remotes (AdminTools & GunTuning -> Beat)
--- • 🎯 Combat Engine: Silent Hitbox Expander + Smooth Camera Aimbot + Bone Targeting
--- • 🔫 Weapon Mods: 100% No Recoil + 100% No Spread + Rapid Fire + Full Auto + Instant Reload
+-- • 🛡️ Clean Edition: Pure Visuals, Character & Automation Engine (Combat Engine Purged)
+-- • 🛡️ Core Engine: Clean Vanilla Recoil & Spread Physics Protected
 -- • 👁️ Visuals: 2D Box ESP + Skeleton Tracers + Health Bar + Distance + Weapon Name + Safe ESP + Loot ESP
 -- • ⚡ Character: Infinite Stamina + Instant Respawn + Fast Reset
 -- • 🌾 Automation: Auto Safe Farm (Safes 1-4) + Auto Loot Magnet + Auto Halloween Quest Claim
@@ -50,6 +50,149 @@ if genv.UrbanReload_Cleanup then
 end
 
 -- ==============================================================
+-- GLOBAL KRAKENHUB CONFIGURATION STATE
+-- ==============================================================
+local Hub = {
+    Running = true,
+    CurrentTarget = nil,
+    Connections = {},
+    ESP = {},
+    WorldESP = {},
+    SafeESP = {},
+    HitboxParts = {},
+    Settings = {
+        IconTheme = "Themed",
+
+        -- ⚔️ ระบบต่อสู้ (Combat System) - Pure & Unified Engine
+        SilentAim = true,                     -- กระสุนล็อกเป้า 100% (Homing / Bullet Redirection)
+        SilentAimTargetPart = "Head",         -- ชิ้นส่วนเป้าหมาย (Head, UpperTorso)
+        ShowFOV = true,                       -- แสดงวงกลม FOV
+        FOVRadius = 180,                      -- รัศมีวงกลม FOV (Pixels)
+        FOVColor = Color3.fromRGB(0, 255, 200),
+        VisibleCheck = true,                  -- ตรวจสอบกำแพง (Line of Sight)
+        TargetDowned = false,                 -- ล็อกคนที่ล้มด้วย
+
+        AutoShoot = false,                    -- ยิงออโต้ (Auto Shoot)
+        RPM = 900,                            -- ความเร็วรอบการลั่นกระสุน (600 - 1800 RPM)
+        AutoShootDelay = 0,                   -- หน่วงเวลาเพิ่มเติม ms
+
+        NoRecoil = true,                      -- ปิดแรงดีด 100% (Zero Recoil)
+        NoSpread = true,                      -- ปิดการกระจายกระสุน 100% (Zero Spread)
+        InfiniteAmmo = true,                  -- กระสุนไม่จำกัด
+        FastReload = true,                    -- รีโหลดไวทันที
+        FastEquip = true,                     -- สลับปืนไว
+        AlwaysShoot = true,                   -- ยิงได้ตลอดเวลา
+
+
+
+        -- Auto Respawn
+        AutoRespawn = true,
+        RespawnKey = Enum.KeyCode.X,
+
+        InfiniteStamina = true,
+
+        -- Visuals (ESP)
+        PlayerESP = true,
+        ESPBox = true,
+        ESPName = true,
+        ESPFont = "UI",
+        ESPFontSize = 13,
+        ESPNameMode = "DisplayName",
+        ESPHealth = true,
+        ESPHealthBar = true,
+        ESPChams = true,
+        ChamsColor = Color3.fromRGB(255, 35, 35),
+        ChamsOutlineColor = Color3.fromRGB(255, 35, 35),
+        ChamsTransparency = 0.78,
+        ESPDistance = true,
+        ESPTracers = false,
+        ESPWeapon = true,
+        ESPTeamCheck = false,
+        ESPMaxDistance = 650,
+
+        BoxColor = Color3.fromRGB(255, 60, 60),
+        NameColor = Color3.fromRGB(255, 255, 255),
+        HealthColor = Color3.fromRGB(60, 255, 60),
+        TracerColor = Color3.fromRGB(0, 200, 255),
+
+        AutoSkipGacha = true,
+        HideCharacterName = false,
+        AntiAFK = true,
+
+        SafeESP = true,
+        LootESP = true,
+        HalloweenESP = true,
+        ATMESP = false,
+
+        HoodKillAura = false,
+        HoodKillAuraRange = 250,
+        HoodWallCheck = true,
+        HoodESP = true,
+        SavedFarmSpot = Vector3.new(-1033.4, 14.6, 427.6),
+        ZombieKillAura = false,
+        ZombieKillAuraRange = 250,
+        ZombieWallCheck = true,
+        ZombieESP = true,
+    }
+}
+genv.KrakenHub = Hub
+genv.Hub = Hub
+_G.Hub = Hub
+
+-- ==============================================================
+-- 💾 AUTO-SAVE & CONFIGURATION PERSISTENCE ENGINE
+-- ==============================================================
+local HttpService = game:GetService("HttpService")
+local ConfigFileName = "KrakenHub_UrbanReload_Settings.json"
+
+local function SaveConfig()
+    if typeof(writefile) ~= "function" then return end
+    pcall(function()
+        local data = {}
+        for k, v in pairs(Hub.Settings) do
+            local t = typeof(v)
+            if t == "boolean" or t == "number" or t == "string" then
+                data[k] = v
+            elseif t == "Color3" then
+                data[k] = { __type = "Color3", r = v.R, g = v.G, b = v.B }
+            end
+        end
+        writefile(ConfigFileName, HttpService:JSONEncode(data))
+    end)
+end
+
+local saveScheduled = false
+local function AutoSave()
+    if saveScheduled then return end
+    saveScheduled = true
+    task.delay(0.3, function()
+        saveScheduled = false
+        SaveConfig()
+    end)
+end
+Hub.AutoSave = AutoSave
+Hub.SaveConfig = SaveConfig
+
+local function LoadConfig()
+    if typeof(isfile) ~= "function" or typeof(readfile) ~= "function" then return end
+    if not isfile(ConfigFileName) then return end
+    pcall(function()
+        local raw = readfile(ConfigFileName)
+        local data = HttpService:JSONDecode(raw)
+        if typeof(data) == "table" then
+            for k, v in pairs(data) do
+                if typeof(v) == "table" and v.__type == "Color3" then
+                    Hub.Settings[k] = Color3.new(v.r, v.g, v.b)
+                else
+                    Hub.Settings[k] = v
+                end
+            end
+        end
+    end)
+end
+pcall(LoadConfig)
+
+-- ==============================================================
 -- 🛡️ 1. ADVANCED ANTI-DETECTION & NETBEAT GUARDIAN (ULTIMATE UNPATCHABLE SHIELD)
 -- Completely neutralizes all detection vectors in Urban Reload:
 -- 1. NetBeat Anomaly Queue (`u28`): Found via GC upvalues, cleared, and metatable-locked.
@@ -89,7 +232,8 @@ SilenceCameraAntiCheat()
 
 if ClientState and type(ClientState) == "table" then
     pcall(function()
-                ClientState.RecoilScale = 0
+        ClientState.RecoilScale = nil
+        ClientState.SpreadMultiplier = nil
     end)
 end
 
@@ -111,7 +255,7 @@ pcall(function()
     local is_exec = isexecutorclosure or is_executor_closure or checkcaller or function() return false end
 
     if typeof(getgc) == "function" then
-        local gc = getgc(true)
+        local gc = getgc(false)
 
         -- Pass 1: Scan GC objects for NetBeat bencode, report, and ESP tables
         for _, item in ipairs(gc) do
@@ -248,12 +392,13 @@ if AntiHitboxFn and typeof(hookfunction) == "function" then
     end)
 end
 
--- 1.9 Universal Remote Packet Guardian (__namecall - Safe from RTTI Violations)
 local oldNamecall = nil
+
 if typeof(hookmetamethod) == "function" then
     pcall(function()
         oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
             local method = getnamecallmethod()
+
             if method == "InvokeServer" or method == "invokeServer" then
                 if self.Name == "Roll" then
                     local res = oldNamecall(self, ...)
@@ -290,7 +435,10 @@ if typeof(hookmetamethod) == "function" then
                         return nil
                     end
                 end
+
+
             end
+            if setnamecallmethod then setnamecallmethod(method) end
             return oldNamecall(self, ...)
         end))
     end)
@@ -312,8 +460,6 @@ task.spawn(function()
         if NetBeatESPList then
             pcall(table.clear, NetBeatESPList)
         end
-        if ClientState and type(ClientState) == "table" then
-                    end
         task.wait(1)
     end
 end)
@@ -322,20 +468,117 @@ end)
 -- 📦 2. GAME REFERENCES & WEAPON MODULES
 -- ==============================================================
 local Weapons = ReplicatedStorage:WaitForChild("Weapons", 10)
-local ClientState = Weapons and require(Weapons:WaitForChild("ClientState", 5))
+ClientState = (Weapons and require(Weapons:WaitForChild("ClientState", 5))) or ClientState
 local Config = Weapons and require(Weapons:WaitForChild("Config", 5))
 local WeaponData = Weapons and require(Weapons:WaitForChild("WeaponData", 5))
 local Remotes = ReplicatedStorage:WaitForChild("Remotes", 5)
-local SafeZoneModule = ReplicatedStorage:FindFirstChild("SafeZone") and require(ReplicatedStorage.SafeZone)
+local SafeZoneModule = nil
+pcall(function()
+    local sz = ReplicatedStorage:FindFirstChild("SafeZone")
+    if sz then SafeZoneModule = require(sz) end
+end)
 
--- Backup original weapon configs for clean restore
+local SpawnShieldModule = nil
+pcall(function()
+    local ss = ReplicatedStorage:FindFirstChild("SpawnShield")
+    if ss then SpawnShieldModule = require(ss) end
+end)
+
+-- ตรวจสอบสถานะว่าผู้เล่นยิงได้หรือไม่ (ติดโล่เกิด SpawnShield หรืออยู่ใน SafeZone)
+local function IsPlayerInvulnerable(char, player, serverTimeNow)
+    if not char then return false end
+
+    -- 1. ตรวจสอบ SpawnShield (โล่ป้องกันตอนเกิด)
+    local shieldAttr = char:GetAttribute("SpawnShield")
+    if shieldAttr == true then
+        return true
+    elseif typeof(shieldAttr) == "number" then
+        local sTime = serverTimeNow
+        if not sTime then
+            pcall(function() sTime = workspace:GetServerTimeNow() end)
+        end
+        if sTime and sTime < shieldAttr then
+            return true
+        end
+    end
+
+    if SpawnShieldModule and typeof(SpawnShieldModule.Active) == "function" then
+        local active = false
+        pcall(function() active = SpawnShieldModule.Active(char) end)
+        if active then return true end
+    end
+
+    -- 2. ตรวจสอบ SafeZone (เขตปลอดภัยในเมือง)
+    if char:GetAttribute("InSafeZone") == true or char:GetAttribute("PvPSafe") == true then
+        return true
+    end
+
+    if SafeZoneModule and typeof(SafeZoneModule.IsIn) == "function" then
+        local inSZ = false
+        pcall(function() inSZ = SafeZoneModule.IsIn(char) end)
+        if inSZ then return true end
+    end
+
+    -- 3. ตรวจสอบ ForceField
+    if char:FindFirstChildOfClass("ForceField") then
+        return true
+    end
+
+    return false
+end
+Hub.IsPlayerInvulnerable = IsPlayerInvulnerable
+
+-- ==============================================================
+-- 🎯 2.1 VANILLA WEAPON RECOIL & SPREAD RESTORATION
+-- ==============================================================
+local function RestoreVanillaWeaponData()
+    pcall(function()
+        if ClientState and type(ClientState) == "table" then
+            ClientState.RecoilScale = nil
+            ClientState.SpreadMultiplier = nil
+        end
+        if WeaponData and typeof(WeaponData) == "table" and decompile and ReplicatedStorage:FindFirstChild("Weapons") and ReplicatedStorage.Weapons:FindFirstChild("WeaponData") then
+            local isCorrupted = false
+            for _, d in pairs(WeaponData) do
+                if d and d.Recoil and d.Recoil.Up == 0 then
+                    isCorrupted = true
+                    break
+                end
+            end
+            if isCorrupted then
+                local src = decompile(ReplicatedStorage.Weapons.WeaponData)
+                if src and #src > 100 then
+                    local cleanFn = loadstring(src)
+                    local clean = cleanFn and cleanFn()
+                    if clean and type(clean) == "table" then
+                        for wName, wData in pairs(clean) do
+                            if WeaponData[wName] then
+                                if wData.Recoil and WeaponData[wName].Recoil then
+                                    for k, v in pairs(wData.Recoil) do
+                                        WeaponData[wName].Recoil[k] = v
+                                    end
+                                end
+                                if wData.Bloom and WeaponData[wName].Bloom then
+                                    for k, v in pairs(wData.Bloom) do
+                                        WeaponData[wName].Bloom[k] = v
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end)
+end
+RestoreVanillaWeaponData()
+
+
 local OriginalWeaponData = {}
 if WeaponData then
-    for name, data in pairs(WeaponData) do
+    for gunName, data in pairs(WeaponData) do
         if type(data) == "table" then
-            OriginalWeaponData[name] = {
-                RecoilTable = data.Recoil,
-                BloomTable = data.Bloom,
+            OriginalWeaponData[gunName] = {
                 Recoil = data.Recoil and {
                     Up = data.Recoil.Up,
                     Side = data.Recoil.Side,
@@ -346,151 +589,23 @@ if WeaponData then
                     Air = data.Bloom.Air,
                     Move = data.Bloom.Move,
                     Max = data.Bloom.Max,
-                    Hip = data.Bloom.Hip,
                     PerShot = data.Bloom.PerShot,
                     Aim = data.Bloom.Aim,
-                    Recovery = data.Bloom.Recovery,
+                    Hip = data.Bloom.Hip,
                 },
                 Fire = data.Fire and {
-                    RPM = data.Fire.RPM,
                     Mode = data.Fire.Mode,
-                },
-                Ammo = data.Ammo and {
-                    ReloadTime = data.Ammo.ReloadTime,
-                },
-                Handling = data.Handling and {
-                    HitboxScale = data.Handling.HitboxScale,
+                    RPM = data.Fire.RPM,
+                    Burst = data.Fire.Burst,
                 }
             }
         end
     end
 end
 
--- ==============================================================
--- ⚙️ 3. HUB CONFIGURATION STATE
--- ==============================================================
-local Hub = {
-    Running = true,
-    CurrentTarget = nil,
-    Connections = {},
-    ESP = {},
-    WorldESP = {},
-    SafeESP = {},
-    HitboxParts = {},
-    Settings = {
-        -- Combat / Silent Aim (Bullet Snapping / Redirection)
-        SilentAim = true,
-        SilentAimBone = "Head", -- "Head", "UpperTorso", "Random"
-        SilentAimFOV = 180,
-        SilentAimMaxDist = 400,
-        SilentAimHitChance = 100,
-        SilentAimWallCheck = true,
-        SilentAimIgnoreSafeZone = true,
-        SilentAimIgnoreShield = true,
-        SilentAimIgnoreDowned = true,
-        SilentAimPriority = "Crosshair", -- "Crosshair", "Distance"
-        SilentAimTargetHood = true,
-        SilentAimTargetZombies = true,
-        SilentAimDrawFOV = false,
-        SilentAimFOVColor = Color3.fromRGB(255, 140, 0), -- Neon Amber/Orange
-        SilentAimFOVRainbow = false,
-        SilentAimFOVR = 255,
-        SilentAimFOVG = 140,
-        SilentAimFOVB = 0,
-        IconTheme = "Themed", -- "Themed", "ElectricBlue"
+-- [Hub table relocated to top of script]
 
-        -- FOV Circle Styles
-        FOVCircleThickness = 1.5,
-        FOVCircleTransparency = 0.85,
-        FOVCircleFilled = false,
 
-        -- Hitbox Expander (Bullet Tracking into Head)
-        HitboxExpander = true,
-        HitboxSize = 6,
-        HitboxTarget = "Head", -- Focus directly on Head
-        HitboxVisible = false,
-        HitboxTransparency = 0.65,
-
-        -- Auto Respawn (Key X / Instant Reset)
-        AutoRespawn = true,
-        RespawnKey = Enum.KeyCode.X,
-
-        -- Weapon Mods
-        NoRecoil = true,
-        NoSpread = true,
-        RapidFire = false,
-        RapidFireRPM = 1100,
-        FullAuto = true,
-        InstantReload = false,
-        FastReloadRatio = 0.35,
-
-        InfiniteStamina = true,
-
-        -- Visuals (ESP)
-        PlayerESP = true,
-        ESPBox = true,
-        ESPName = true,
-        ESPFont = "UI", -- "UI", "System", "Plex", "Monospace"
-        ESPFontSize = 13,
-        ESPNameMode = "DisplayName", -- "DisplayName", "Username", "Both"
-        ESPHealth = true,
-        ESPHealthBar = true,
-        ESPChams = true,
-        ChamsColor = Color3.fromRGB(255, 35, 35),
-        ChamsOutlineColor = Color3.fromRGB(255, 35, 35),
-        ChamsTransparency = 0.78,
-        ESPDistance = true,
-        ESPTracers = false,
-        ESPWeapon = true,
-        ESPTeamCheck = false,
-        ESPMaxDistance = 650,
-
-        BoxColor = Color3.fromRGB(255, 60, 60),
-        NameColor = Color3.fromRGB(255, 255, 255),
-        HealthColor = Color3.fromRGB(60, 255, 60),
-        TracerColor = Color3.fromRGB(0, 200, 255),
-
-        -- Fast Skip Animations (Gacha / Weapon Cases / Car Garage / Shop Rolls)
-        AutoSkipGacha = true,
-
-        -- Character
-        HideCharacterName = false,
-        AntiAFK = true,
-
-        -- World ESP
-        SafeESP = true,
-        LootESP = true,
-        HalloweenESP = true,
-        ATMESP = false,
-
-        -- Hood NPC Auto Aim & Shoot Kill Aura
-        HoodKillAura = false,
-        HoodKillAuraRange = 250,
-        HoodWallCheck = true,
-        HoodESP = true,
-        SavedFarmSpot = Vector3.new(-1033.4, 14.6, 427.6),
-        -- Aliases
-        ZombieKillAura = false,
-        ZombieKillAuraRange = 250,
-        ZombieWallCheck = true,
-        ZombieESP = true,
-    }
-}
-genv.KrakenHub = Hub
-
--- ================================================
--- ⭕ 4. SILENT AIM FOV DRAWING CIRCLE
--- ================================================
-local SilentFOVCircle = Drawing.new("Circle")
-SilentFOVCircle.Visible = false
-SilentFOVCircle.Radius = Hub.Settings.SilentAimFOV or 180
-SilentFOVCircle.Color = Hub.Settings.SilentAimFOVColor or Color3.fromRGB(255, 140, 0)
-SilentFOVCircle.Thickness = Hub.Settings.FOVCircleThickness or 1.5
-SilentFOVCircle.Filled = false
-SilentFOVCircle.NumSides = 64
-SilentFOVCircle.Transparency = Hub.Settings.FOVCircleTransparency or 0.85
-
-local FOVCircle = SilentFOVCircle -- Compatibility alias
 
 -- ================================================
 -- 🛠️ 5. HELPER FUNCTIONS
@@ -604,12 +719,14 @@ SharedRayParams.IgnoreWater = true
 local function IsVisible(targetChar, targetPart)
     if not targetChar or not targetPart then return false end
 
-    local origin = Camera.CFrame.Position
+    local myChar = LocalPlayer.Character
+    local myHead = myChar and myChar:FindFirstChild("Head")
+    local origin = (myHead and myHead.Position) or Camera.CFrame.Position
     local destination = targetPart.Position
     local direction = destination - origin
     if direction.Magnitude < 0.2 then return true end
 
-    local ignoreList = {LocalPlayer.Character, Camera}
+    local ignoreList = {myChar, Camera}
     local ch = Workspace:FindFirstChild("ClientHitboxes")
     if ch then table.insert(ignoreList, ch) end
     local gl = Workspace:FindFirstChild("GroundLoot")
@@ -617,12 +734,18 @@ local function IsVisible(targetChar, targetPart)
 
     SharedRayParams.FilterDescendantsInstances = ignoreList
 
-    for _ = 1, 3 do
+    for _ = 1, 4 do
         local result = Workspace:Raycast(origin, direction, SharedRayParams)
         if not result then return true end
-        if result.Instance:IsDescendantOf(targetChar) then return true end
-        if (not result.Instance.CanCollide) or result.Instance.Transparency >= 0.7 or result.Instance.Name == "Hitbox" then
-            table.insert(ignoreList, result.Instance)
+        local inst = result.Instance
+        if inst:IsDescendantOf(targetChar) then return true end
+
+        local nameLower = inst.Name:lower()
+        if (not inst.CanCollide) or inst.Transparency >= 0.7 or inst.Name == "Hitbox"
+           or nameLower:find("door") or nameLower:find("gate") or nameLower:find("fence")
+           or nameLower:find("glass") or nameLower:find("window") or nameLower:find("bar")
+           or nameLower:find("prop") or nameLower:find("debris") or nameLower:find("mesh") then
+            table.insert(ignoreList, inst)
             SharedRayParams.FilterDescendantsInstances = ignoreList
         else
             return false
@@ -646,7 +769,9 @@ end
 local function IsHoodVisible(targetPart, targetNpc)
     if not targetPart or not targetNpc then return false end
 
-    local origin = Camera.CFrame.Position
+    local myChar = LocalPlayer.Character
+    local myHead = myChar and myChar:FindFirstChild("Head")
+    local origin = (myHead and myHead.Position) or Camera.CFrame.Position
     local destination = targetPart.Position
     local direction = destination - origin
     if direction.Magnitude < 0.2 then return true end
@@ -809,428 +934,567 @@ local GetZombieRealtimeData = GetHoodRealtimeData
 
 
 -- ================================================
--- ⚡ 5.1 SILENT AIM TARGETING & HOOK ENGINE
--- Dedicated standalone bullet redirection
+-- ⚡ 5.1 PURE COMBAT & HOMING ENGINE (100% PACKET SPOOFING)
 -- ================================================
-local function IsSilentAimTargetValid(player)
-    if not player or player == LocalPlayer then return false end
-    if not IsEnemy(player) then return false end
-
-    local char = player.Character
-    if not char then return false end
-
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hum or hum.Health <= 0 or not hrp then return false end
-
-    if Hub.Settings.SilentAimIgnoreDowned and char:GetAttribute("Downed") == true then
-        return false
-    end
-
-    if Hub.Settings.SilentAimIgnoreShield and char:GetAttribute("SpawnShield") == true then
-        return false
-    end
-
-    if Hub.Settings.SilentAimIgnoreSafeZone then
-        if char:GetAttribute("InSafeZone") == true or char:GetAttribute("PvPSafe") == true then
-            return false
-        end
-        if SafeZoneModule and SafeZoneModule.IsIn then
-            local inSZ = false
-            pcall(function() inSZ = SafeZoneModule.IsIn(char) end)
-            if inSZ then return false end
-        end
-    end
-
-    return true
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local FireRemote = Remotes and Remotes:FindFirstChild("Fire")
+if not FireRemote and ReplicatedStorage:FindFirstChild("Remotes") then
+    FireRemote = ReplicatedStorage.Remotes:FindFirstChild("Fire")
 end
 
-local function GetSilentAimTarget()
-    if not Hub.Settings.SilentAim then return nil, nil, false end
-
-    local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-    local bestTarget = nil
-    local bestBone = nil
-    local bestScore = math.huge
-    local isNpcTarget = false
-
-    local myChar = LocalPlayer.Character
-    local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
-    local myPos = (myHRP and myHRP.Position) or Camera.CFrame.Position
-
-    -- 1. Check Hood NPCs if enabled
-    if Hub.Settings.SilentAimTargetHood or Hub.Settings.SilentAimTargetZombies or Hub.Settings.HoodKillAura or Hub.Settings.ZombieKillAura then
-        local enemyFolders = {}
-        local hl = Workspace:FindFirstChild("HoodLocal")
-        if hl then table.insert(enemyFolders, hl) end
-        local zf = Workspace:FindFirstChild("Zombies")
-        if zf then table.insert(enemyFolders, zf) end
-
-        for _, folder in ipairs(enemyFolders) do
-            for _, z in ipairs(folder:GetChildren()) do
-                if IsEnemyNPC(z) then
-                    local hp, maxHp, isDead = GetHoodRealtimeData(z)
-                    local head = z:FindFirstChild("Head") or z:FindFirstChild("HumanoidRootPart")
-                    local zHrp = z:FindFirstChild("HumanoidRootPart")
-                    if not isDead and hp > 0 and head and zHrp and zHrp.Position.Y > -100 then
-                        local worldDist = (myPos - head.Position).Magnitude
-                        if worldDist <= (Hub.Settings.SilentAimMaxDist or 400) then
-                            local screenPos, depth, onScreen = WorldToViewport(head.Position)
-                            if onScreen and depth > 0 then
-                                local screenDist = (screenPos - center).Magnitude
-                                if screenDist <= Hub.Settings.SilentAimFOV then
-                                    local visible = true
-                                    if Hub.Settings.SilentAimWallCheck then
-                                        visible = IsHoodVisible(head, z)
-                                    end
-                                    if visible then
-                                        local score = screenDist
-                                        if score < bestScore then
-                                            bestScore = score
-                                            bestTarget = z
-                                            bestBone = head
-                                            isNpcTarget = true
-                                        end
-                                    end
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    -- 2. Check Players if not locked on NPC
-    if not isNpcTarget then
-        for _, player in ipairs(Players:GetPlayers()) do
-            if IsSilentAimTargetValid(player) then
-                local boneName = Hub.Settings.SilentAimBone or "Head"
-                if boneName == "Random" then
-                    boneName = (math.random(1, 100) <= 70) and "Head" or "UpperTorso"
-                end
-
-                -- Prefer exact hitbox part from ClientHitboxes for 100% collision accuracy
-                local targetBone = nil
-                local ch = Workspace:FindFirstChild("ClientHitboxes")
-                local pFolder = ch and ch:FindFirstChild(player.Name)
-                if pFolder then
-                    targetBone = pFolder:FindFirstChild(boneName) or pFolder:FindFirstChild("Head") or pFolder:FindFirstChild("UpperTorso")
-                end
-                if not targetBone then
-                    targetBone = GetBone(player, boneName)
-                end
-
-                if targetBone then
-                    local worldDist = (myPos - targetBone.Position).Magnitude
-                    if worldDist <= (Hub.Settings.SilentAimMaxDist or 400) then
-                        local screenPos, depth, onScreen = WorldToViewport(targetBone.Position)
-                        if onScreen and depth > 0 then
-                            local screenDist = (screenPos - center).Magnitude
-                            if screenDist <= Hub.Settings.SilentAimFOV then
-                                local visible = true
-                                if Hub.Settings.SilentAimWallCheck then
-                                    visible = IsVisible(player.Character, targetBone)
-                                end
-
-                                if visible then
-                                    local score = 0
-                                    if Hub.Settings.SilentAimPriority == "Crosshair" then
-                                        score = screenDist
-                                    else
-                                        score = worldDist + (screenDist * 0.05)
-                                    end
-
-                                    if score < bestScore then
-                                        bestScore = score
-                                        bestTarget = player
-                                        bestBone = targetBone
-                                        isNpcTarget = false
-                                    end
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    return bestTarget, bestBone, isNpcTarget
+-- ล้างค่าและกู้คืน Hook เก่าทั้งหมดให้สะอาด 100%
+_G.UrbanReloadSilentAimTarget = nil
+_G.UrbanReloadSilentAimChar = nil
+_G.UrbanReloadSilentAimPart = nil
+if ClientState then
+    ClientState.ShotRedirect = nil
 end
-
--- Hook engine for ViewportPointToRay & ScreenPointToRay redirection
-local function InitSilentAimHooks()
-    if typeof(hookfunction) == "function" then
-        if typeof(Camera.ViewportPointToRay) == "function" then
-            local oldVPR = nil
-            oldVPR = hookfunction(Camera.ViewportPointToRay, function(self, x, y)
-                local origRay = oldVPR(self, x, y)
-                if not checkcaller() and Hub.Settings.SilentAim and (self == Camera or self == Workspace.CurrentCamera) then
-                    if Hub.Settings.SilentAimHitChance >= 100 or math.random(1, 100) <= Hub.Settings.SilentAimHitChance then
-                        local _, targetBone = GetSilentAimTarget()
-                        if targetBone then
-                            local dir = (targetBone.Position - origRay.Origin).Unit
-                            return Ray.new(origRay.Origin, dir)
-                        end
-                    end
-                end
-                return origRay
-            end)
-        end
-
-        if typeof(Camera.ScreenPointToRay) == "function" then
-            local oldSPR = nil
-            oldSPR = hookfunction(Camera.ScreenPointToRay, function(self, x, y)
-                local origRay = oldSPR(self, x, y)
-                if not checkcaller() and Hub.Settings.SilentAim and (self == Camera or self == Workspace.CurrentCamera) then
-                    if Hub.Settings.SilentAimHitChance >= 100 or math.random(1, 100) <= Hub.Settings.SilentAimHitChance then
-                        local _, targetBone = GetSilentAimTarget()
-                        if targetBone then
-                            local dir = (targetBone.Position - origRay.Origin).Unit
-                            return Ray.new(origRay.Origin, dir)
-                        end
-                    end
-                end
-                return origRay
-            end)
-        end
-    end
-
-    if typeof(hookmetamethod) == "function" then
-        pcall(function()
-            local oldNamecall = nil
-            oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-                local method = getnamecallmethod()
-                if method == "ViewportPointToRay" or method == "ScreenPointToRay" then
-                    if not checkcaller() and Hub.Settings.SilentAim and (self == Camera or self == Workspace.CurrentCamera) then
-                        local origRay = oldNamecall(self, ...)
-                        if Hub.Settings.SilentAimHitChance >= 100 or math.random(1, 100) <= Hub.Settings.SilentAimHitChance then
-                            local _, targetBone = GetSilentAimTarget()
-                            if targetBone then
-                                local dir = (targetBone.Position - origRay.Origin).Unit
-                                return Ray.new(origRay.Origin, dir)
-                            end
-                        end
-                        return origRay
-                    end
-                end
-                return oldNamecall(self, ...)
-            end)
-        end)
-    end
-end
-pcall(InitSilentAimHooks)
-
-local function makeWritable(tbl)
-    if type(tbl) == "table" then
-        if typeof(setreadonly) == "function" then
-            pcall(setreadonly, tbl, false)
-        end
-        if typeof(make_writeable) == "function" then
-            pcall(make_writeable, tbl)
-        end
-    end
-    return tbl
-end
-
--- ==============================================================
--- ⚡ 5.5 ENGINE-LEVEL WEAPON INTERCEPTORS (PERFECT ZERO RECOIL & ZERO SPREAD)
--- 1. Hook addRecoil closure in-place (preserves ClientState table reference for NetBeat)
--- 2. Direct subtable replacement in WeaponData with pre-frozen tables
--- ==============================================================
-local _origAddRecoil = nil
-local _recoilHooked = false
-
-local function HookAddRecoil()
-    if _recoilHooked then return end
-    if not (ClientState and type(ClientState.RecoilKey) == "function") then return end
-    local rKey = ClientState.RecoilKey()
-    if not rKey then return end
-    local rFn = rawget(ClientState, rKey)
-    if not (rFn and type(rFn) == "function") then return end
-
-    local hook_fn = hookfunction or replaceclosure
-    if typeof(hook_fn) ~= "function" then return end
-
-    _origAddRecoil = hook_fn(rFn, function(p94, p95)
-        if Hub and Hub.Settings and Hub.Settings.NoRecoil then
-            -- Zero recoil active: absorb camera pitch/yaw kick, return true for NetBeat check
-            return true
-        end
-        if _origAddRecoil then
-            return _origAddRecoil(p94, p95)
-        end
-        return true
-    end)
-    _recoilHooked = true
-end
-pcall(HookAddRecoil)
-task.spawn(function()
-    for _ = 1, 10 do
-        task.wait(1)
-        pcall(HookAddRecoil)
-        if _recoilHooked then break end
+pcall(function()
+    if typeof(restorefunction) == "function" then
+        restorefunction(Camera.ViewportPointToRay)
     end
 end)
 
-local _zeroRecoilTable = table.freeze({
-    Up = 0,
-    Side = 0,
-    Return = 100,
-    AimScale = 0
-})
+local LockedTarget = nil
+local lastAutoShotTime = 0
 
-local _zeroBloomTable = table.freeze({
-    Air = 0,
-    Move = 0,
-    Max = 0,
-    Hip = 0,
-    PerShot = 0,
-    Aim = 0,
-    Recovery = 100
-})
+-- FOV Circle & Tracer Line Drawing
+local fovCircle = nil
+local targetTracer = nil
+pcall(function()
+    fovCircle = Drawing.new("Circle")
+    fovCircle.Thickness = 1.5
+    fovCircle.NumSides = 64
+    fovCircle.Radius = Hub.Settings.FOVRadius or 180
+    fovCircle.Filled = false
+    fovCircle.Color = Hub.Settings.FOVColor or Color3.fromRGB(0, 255, 200)
+    fovCircle.Transparency = 1
+    fovCircle.Visible = false
 
--- ================================================
--- ⚡ 6. WEAPON & COMBAT ENGINE ENFORCER
--- Applies values from ssss.txt and live mod tables
--- ================================================
-local function ApplyWeaponMods()
-    pcall(HookAddRecoil)
+    targetTracer = Drawing.new("Line")
+    targetTracer.Thickness = 1.2
+    targetTracer.Color = Color3.fromRGB(255, 50, 70)
+    targetTracer.Transparency = 0.9
+    targetTracer.Visible = false
+end)
+Hub.SilentAimFOVCircle = fovCircle
+Hub.TargetTracerLine = targetTracer
 
-    if not WeaponData or type(WeaponData) ~= "table" then return end
-
-    makeWritable(WeaponData)
-
-    for name, weapon in pairs(WeaponData) do
-        if type(weapon) == "table" then
-            pcall(function()
-                makeWritable(weapon)
-
-                -- 1. 100% No Recoil (Replaces table pointer - bypasses Luau frozen tables)
-                if Hub.Settings.NoRecoil then
-                    weapon.Recoil = _zeroRecoilTable
-                elseif OriginalWeaponData[name] and OriginalWeaponData[name].RecoilTable then
-                    weapon.Recoil = OriginalWeaponData[name].RecoilTable
-                elseif OriginalWeaponData[name] and OriginalWeaponData[name].Recoil then
-                    weapon.Recoil = OriginalWeaponData[name].Recoil
-                end
-
-                -- 2. 100% No Spread / Perfect Bloom
-                if Hub.Settings.NoSpread then
-                    weapon.Bloom = _zeroBloomTable
-                elseif OriginalWeaponData[name] and OriginalWeaponData[name].BloomTable then
-                    weapon.Bloom = OriginalWeaponData[name].BloomTable
-                elseif OriginalWeaponData[name] and OriginalWeaponData[name].Bloom then
-                    weapon.Bloom = OriginalWeaponData[name].Bloom
-                end
-
-                -- 3. Full Auto & Rapid Fire
-                if Hub.Settings.FullAuto then
-                    if type(weapon.Fire) == "table" then
-                        makeWritable(weapon.Fire)
-                        pcall(function() weapon.Fire.Mode = "Auto" end)
-                        if weapon.Fire.Mode ~= "Auto" then
-                            local newFire = table.clone(weapon.Fire)
-                            newFire.Mode = "Auto"
-                            weapon.Fire = newFire
-                        end
-                    end
-                elseif OriginalWeaponData[name] and OriginalWeaponData[name].Fire then
-                    pcall(function() weapon.Fire.Mode = OriginalWeaponData[name].Fire.Mode end)
-                end
-
-                if Hub.Settings.RapidFire then
-                    if type(weapon.Fire) == "table" then
-                        makeWritable(weapon.Fire)
-                        local targetRPM = Hub.Settings.RapidFireRPM or 1100
-                        pcall(function() weapon.Fire.RPM = targetRPM end)
-                        if weapon.Fire.RPM ~= targetRPM then
-                            local newFire = table.clone(weapon.Fire)
-                            newFire.RPM = targetRPM
-                            weapon.Fire = newFire
-                        end
-                    end
-                elseif OriginalWeaponData[name] and OriginalWeaponData[name].Fire then
-                    pcall(function() weapon.Fire.RPM = OriginalWeaponData[name].Fire.RPM end)
-                end
-
-                -- 4. Fast Reload
-                if Hub.Settings.InstantReload then
-                    if type(weapon.Ammo) == "table" then
-                        makeWritable(weapon.Ammo)
-                        pcall(function() weapon.Ammo.ReloadTime = 0.05 end)
-                        if weapon.Ammo.ReloadTime ~= 0.05 then
-                            local newAmmo = table.clone(weapon.Ammo)
-                            newAmmo.ReloadTime = 0.05
-                            weapon.Ammo = newAmmo
-                        end
-                    end
-                elseif Hub.Settings.FastReloadRatio < 1 and OriginalWeaponData[name] and OriginalWeaponData[name].Ammo then
-                    local targetReload = OriginalWeaponData[name].Ammo.ReloadTime * Hub.Settings.FastReloadRatio
-                    if type(weapon.Ammo) == "table" then
-                        makeWritable(weapon.Ammo)
-                        pcall(function() weapon.Ammo.ReloadTime = targetReload end)
-                        if weapon.Ammo.ReloadTime ~= targetReload then
-                            local newAmmo = table.clone(weapon.Ammo)
-                            newAmmo.ReloadTime = targetReload
-                            weapon.Ammo = newAmmo
-                        end
-                    end
-                elseif OriginalWeaponData[name] and OriginalWeaponData[name].Ammo then
-                    pcall(function() weapon.Ammo.ReloadTime = OriginalWeaponData[name].Ammo.ReloadTime end)
-                end
-            end)
-        end
+-- ค้นหาเป้าหมายที่ดีที่สุดในวง FOV (Screen Distance + Line of Sight)
+local _fovAimCenter = Vector2.new(0, 0)
+local _fovLastVp = Vector2.new(0, 0)
+local function GetAimCenter()
+    local vp = Camera.ViewportSize
+    if vp.X ~= _fovLastVp.X or vp.Y ~= _fovLastVp.Y then
+        _fovLastVp = vp
+        _fovAimCenter = Vector2.new(vp.X * 0.5, vp.Y * 0.5)
     end
+    return _fovAimCenter
 end
 
--- ================================================
--- 🎯 7. HITBOX EXPANDER (ZERO-COST CONDITIONAL UPDATE)
--- ================================================
-local _lastHitboxUpdate = 0
-local function UpdateHitboxes()
-    local clientHitboxes = Workspace:FindFirstChild("ClientHitboxes")
-    if not clientHitboxes then return end
+local combatRayParams = RaycastParams.new()
+combatRayParams.FilterType = Enum.RaycastFilterType.Exclude
+combatRayParams.IgnoreWater = true
+local combatIgnoreList = {}
 
-    local hSize = Hub.Settings.HitboxSize or 10
-    local targetSize = Vector3.new(hSize, hSize, hSize)
-    local isVisible = Hub.Settings.HitboxVisible == true
-    local targetTrans = isVisible and (Hub.Settings.HitboxTransparency or 0.65) or 1
-    local targetBone = Hub.Settings.HitboxTarget or "Head"
+local function GetBestFOVTarget()
+    local cfg = Hub.Settings
+    local aimCenter = GetAimCenter()
+    local maxDist = cfg.FOVRadius or 180
+    local bestTarget = nil
+    local shortestDist = maxDist
+    local myChar = LocalPlayer.Character
+    local carsFolder = Workspace:FindFirstChild("Cars")
+    local chFolder = Workspace:FindFirstChild("ClientHitboxes")
 
-    for _, folder in ipairs(clientHitboxes:GetChildren()) do
-        if folder.Name ~= LocalPlayer.Name then
-            local player = Players:FindFirstChild(folder.Name)
-            local char = player and player.Character
-            local hum = char and char:FindFirstChildOfClass("Humanoid")
-            local isTargetValid = char and hum and hum.Health > 0 and IsEnemy(player)
+    local sTime = nil
+    pcall(function() sTime = workspace:GetServerTimeNow() end)
 
-            local part = folder:FindFirstChild(targetBone) or folder:FindFirstChild("Head")
-            if part and part:IsA("BasePart") then
-                if Hub.Settings.HitboxExpander and isTargetValid then
-                    if part.Size ~= targetSize then
-                        part.Size = targetSize
-                    end
-                    if part.CanCollide then
-                        part.CanCollide = false
-                    end
-                    if part.Transparency ~= targetTrans then
-                        part.Transparency = targetTrans
-                    end
-                    if isVisible and part.Material ~= Enum.Material.ForceField then
-                        part.Color = Color3.fromRGB(255, 30, 30)
-                        part.Material = Enum.Material.ForceField
-                    end
-                else
-                    if part.Transparency ~= 1 then
-                        part.Transparency = 1
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character then
+            local char = p.Character
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            local isDowned = char:GetAttribute("Downed") == true
+
+            -- ข้ามคนที่ยิงไม่ได้ (ติดโล่เกิด หรืออยู่ในเซฟโซน ไม่ล็อกเป้า และไม่ยิงออโต้)
+            if IsPlayerInvulnerable(char, p, sTime) then
+                continue
+            end
+
+            if hum and (hum.Health > 0 or isDowned) and (cfg.TargetDowned or not isDowned) then
+                local boneName = (cfg.SilentAimTargetPart == "UpperTorso") and "UpperTorso" or "Head"
+                local targetPart = char:FindFirstChild(boneName) or char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
+
+                if targetPart and targetPart:IsA("BasePart") then
+                    local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+                    if onScreen then
+                        local screenVec = Vector2.new(screenPos.X, screenPos.Y)
+                        local dist = (screenVec - aimCenter).Magnitude
+
+                        if dist <= shortestDist then
+                            local isVisible = true
+                            if cfg.VisibleCheck then
+                                local origin = Camera.CFrame.Position
+                                local dir = (targetPart.Position - origin)
+
+                                table.clear(combatIgnoreList)
+                                if myChar then table.insert(combatIgnoreList, myChar) end
+                                if Camera then table.insert(combatIgnoreList, Camera) end
+                                if carsFolder then table.insert(combatIgnoreList, carsFolder) end
+                                combatRayParams.FilterDescendantsInstances = combatIgnoreList
+
+                                local hitResult = Workspace:Raycast(origin, dir, combatRayParams)
+                                if hitResult then
+                                    local hitInst = hitResult.Instance
+                                    local isTargetHit = hitInst:IsDescendantOf(char)
+                                        or (chFolder and hitInst:IsDescendantOf(chFolder) and hitInst.Parent and hitInst.Parent.Name == char.Name)
+                                    if not isTargetHit then
+                                        isVisible = false
+                                    end
+                                end
+                            end
+
+                            if isVisible then
+                                shortestDist = dist
+                                local chChar = chFolder and chFolder:FindFirstChild(char.Name)
+                                local resolvedHitPart = (chChar and chChar:FindFirstChild(boneName))
+                                    or targetPart
+                                    or (chChar and chChar:FindFirstChild("Head"))
+
+                                bestTarget = {
+                                    Player = p,
+                                    Character = char,
+                                    Part = resolvedHitPart,
+                                    Position = targetPart.Position,
+                                    ScreenPos = screenVec,
+                                    Bone = boneName
+                                }
+                            end
+                        end
                     end
                 end
             end
         end
     end
+    return bestTarget
 end
+
+-- ================================================
+-- ⚡ PURE FIRESERVER PACKET SPOOFER (Fail-Safe 100% Headshot)
+-- ================================================
+local dummyRecoilFn = function() end
+
+_G.UrbanReloadCustomFireHandler = function(realFire, self, ...)
+    local args = table.pack(...)
+    local cfg = Hub and Hub.Settings
+
+    if cfg and cfg.SilentAim and LockedTarget and LockedTarget.Character and LockedTarget.Position then
+        local cam = workspace.CurrentCamera
+        local EnemyPos = LockedTarget.Position
+        local CharHim = LockedTarget.Character
+        local bone = cfg.SilentAimTargetPart or "Head"
+        local headPart = LockedTarget.Part or CharHim:FindFirstChild(bone) or CharHim:FindFirstChild("Head")
+
+        local camPos = cam.CFrame.Position
+        local camLook = (EnemyPos - camPos).Unit
+
+        local origin = (typeof(args[1]) == "Vector3" and args[1]) or camPos
+        args[1] = origin
+        args[2] = (EnemyPos - origin).Unit
+        args[3] = CharHim
+        args[4] = bone
+        args[5] = EnemyPos
+        args[6] = headPart
+        args[7] = nil
+        args[8] = nil
+        args[9] = 1
+        -- รักษา ShotId Counter (args[10]) เพื่อผ่านการตรวจนับกระสุนของ Server
+        if args[10] == nil then
+            args[10] = math.random(1000, 999999)
+        end
+        args[11] = camPos
+        args[12] = camLook
+        args[13] = EnemyPos
+
+        return realFire(self, table.unpack(args, 1, math.max(args.n or 0, 13)))
+    end
+
+    return realFire(self, table.unpack(args, 1, args.n or #args))
+end
+
+if FireRemote then
+    pcall(function()
+        if not _G.UrbanReloadOldFireServer then
+            local oldFire
+            oldFire = hookfunction(FireRemote.FireServer, newcclosure(function(self, ...)
+                if _G.UrbanReloadCustomFireHandler then
+                    return _G.UrbanReloadCustomFireHandler(oldFire, self, ...)
+                end
+                return oldFire(self, ...)
+            end))
+            _G.UrbanReloadOldFireServer = oldFire
+            _G.UrbanReloadFireHooked = true
+        end
+    end)
+end
+
+-- Hook canShoot for AlwaysShoot & Roll bypass
+pcall(function()
+    local fns = (filtergc and filtergc("function", { linedefined = 408 })) or {}
+    if fns and fns[1] and hookfunction then
+        local oldCanShoot = nil
+        oldCanShoot = hookfunction(fns[1], function(a1, ...)
+            if Hub and Hub.Settings and Hub.Settings.AlwaysShoot then
+                return true
+            end
+            return oldCanShoot(a1, ...)
+        end)
+    end
+end)
+
+-- สำรองข้อมูลเดิมของ WeaponData
+local OriginalWeaponData = {}
+if WeaponData then
+    for wName, wData in pairs(WeaponData) do
+        OriginalWeaponData[wName] = {
+            Recoil = wData.Recoil and {
+                Up = wData.Recoil.Up,
+                Side = wData.Recoil.Side,
+                AimScale = wData.Recoil.AimScale,
+                Return = wData.Recoil.Return
+            },
+            Bloom = wData.Bloom and {
+                Air = wData.Bloom.Air,
+                Move = wData.Bloom.Move,
+                Max = wData.Bloom.Max,
+                Recovery = wData.Bloom.Recovery,
+                Hip = wData.Bloom.Hip,
+                PerShot = wData.Bloom.PerShot,
+                Aim = wData.Bloom.Aim
+            },
+            Fire = wData.Fire and {
+                RPM = wData.Fire.RPM,
+                Mode = wData.Fire.Mode
+            },
+            Ammo = wData.Ammo and {
+                ReloadTime = wData.Ammo.ReloadTime,
+                Mag = wData.Ammo.Mag
+            },
+            Handling = wData.Handling and {
+                HitboxScale = wData.Handling.HitboxScale,
+                EquipTime = wData.Handling.EquipTime
+            }
+        }
+    end
+end
+
+local OriginalGlobal = { InfiniteAmmo = false }
+local WeaponsConfig = Weapons and require(Weapons:WaitForChild("Config", 5))
+
+local function makeWritable(tbl)
+    if typeof(tbl) ~= "table" then return end
+    if typeof(setreadonly) == "function" then
+        pcall(setreadonly, tbl, false)
+    elseif typeof(make_writeable) == "function" then
+        pcall(make_writeable, tbl)
+    end
+end
+
+local function ApplyWeaponMods()
+    if not WeaponData then return end
+    local cfg = Hub.Settings
+
+    for wName, wData in pairs(WeaponData) do
+        local orig = OriginalWeaponData[wName]
+        if orig then
+            -- 1. Zero Recoil
+            if wData.Recoil then
+                makeWritable(wData.Recoil)
+                if cfg.NoRecoil then
+                    wData.Recoil.Up = 0
+                    wData.Recoil.Side = 0
+                    wData.Recoil.AimScale = 0
+                else
+                    wData.Recoil.Up = orig.Recoil.Up
+                    wData.Recoil.Side = orig.Recoil.Side
+                    wData.Recoil.AimScale = orig.Recoil.AimScale
+                end
+            end
+
+            -- 2. Zero Spread / Bloom
+            if wData.Bloom then
+                makeWritable(wData.Bloom)
+                if cfg.NoSpread then
+                    wData.Bloom.Air = 0
+                    wData.Bloom.Move = 0
+                    wData.Bloom.Max = 0
+                    wData.Bloom.Hip = 0
+                    wData.Bloom.PerShot = 0
+                    wData.Bloom.Aim = 0
+                    wData.Bloom.Recovery = 100
+                else
+                    wData.Bloom.Air = orig.Bloom.Air
+                    wData.Bloom.Move = orig.Bloom.Move
+                    wData.Bloom.Max = orig.Bloom.Max
+                    wData.Bloom.Hip = orig.Bloom.Hip
+                    wData.Bloom.PerShot = orig.Bloom.PerShot
+                    wData.Bloom.Aim = orig.Bloom.Aim
+                    wData.Bloom.Recovery = orig.Bloom.Recovery
+                end
+            end
+
+            -- 3. Full Auto & Adjustable RPM
+            if wData.Fire and orig.Fire then
+                makeWritable(wData.Fire)
+                wData.Fire.Mode = "Auto"
+                wData.Fire.RPM = cfg.RPM or 900
+            end
+
+            -- 4. Fast Reload
+            if wData.Ammo then
+                makeWritable(wData.Ammo)
+                wData.Ammo.ReloadTime = cfg.FastReload and 0.05 or orig.Ammo.ReloadTime
+            end
+
+            -- 5. Fast Equip
+            if wData.Handling then
+                makeWritable(wData.Handling)
+                wData.Handling.EquipTime = cfg.FastEquip and 0 or orig.Handling.EquipTime
+            end
+        end
+    end
+
+    -- Infinite Ammo
+    if WeaponsConfig and WeaponsConfig.Global then
+        makeWritable(WeaponsConfig.Global)
+        WeaponsConfig.Global.InfiniteAmmo = cfg.InfiniteAmmo and true or OriginalGlobal.InfiniteAmmo
+    end
+
+    -- ClientState mods
+    if ClientState then
+        if cfg.NoSpread then
+            ClientState.SpreadMultiplier = 0
+            ClientState.Spread = 0
+            ClientState.SpreadRest = 0
+        else
+            ClientState.SpreadMultiplier = 1
+        end
+
+        if cfg.NoRecoil then
+            ClientState.RecoilScale = 0
+            pcall(function()
+                if ClientState.RecoilKey then
+                    local k = ClientState.RecoilKey()
+                    if k then rawset(ClientState, k, dummyRecoilFn) end
+                end
+            end)
+        else
+            ClientState.RecoilScale = 1
+        end
+    end
+end
+Hub.ApplyWeaponMods = ApplyWeaponMods
+task.spawn(function()
+    task.wait(0.1)
+    pcall(ApplyWeaponMods)
+end)
+
+local cachedFireFunction = nil
+local lastFireScanTick = 0
+local function getActiveFireFunction()
+    if cachedFireFunction and typeof(cachedFireFunction) == "function" then
+        return cachedFireFunction
+    end
+
+    local nowTick = os.clock()
+    if nowTick - lastFireScanTick < 2.0 then
+        return nil
+    end
+    lastFireScanTick = nowTick
+    cachedFireFunction = nil
+
+    local fns = {}
+    if typeof(filtergc) == "function" then
+        pcall(function() fns = filtergc("function", { Name = "fire" }) end)
+    end
+    if (not fns or #fns == 0) and typeof(getgc) == "function" then
+        pcall(function()
+            for _, v in ipairs(getgc(false)) do
+                if typeof(v) == "function" and islclosure(v) then
+                    local info = debug.getinfo(v)
+                    if info and (info.name == "fire" or (info.source and info.source:find("WeaponClient"))) then
+                        table.insert(fns, v)
+                    end
+                end
+            end
+        end)
+    end
+
+    for _, v in ipairs(fns or {}) do
+        if typeof(v) == "function" and islclosure(v) then
+            local upvals = debug.getupvalues(v)
+            local hasClientState = false
+            local hasFireConfig = false
+            for _, upv in pairs(upvals) do
+                if typeof(upv) == "table" then
+                    if upv.Aiming ~= nil or upv.Stamina ~= nil or upv.LastShot ~= nil then
+                        hasClientState = true
+                    elseif upv.Fire and upv.Fire.RPM then
+                        hasFireConfig = true
+                    end
+                end
+            end
+            if hasClientState and hasFireConfig then
+                for idx, upv in pairs(upvals) do
+                    if typeof(upv) == "boolean" and upv == false then
+                        pcall(debug.setupvalue, v, idx, true)
+                    end
+                end
+                cachedFireFunction = v
+                return v
+            end
+        end
+    end
+    return nil
+end
+
+-- Reset fire function cache on tool equip
+task.spawn(function()
+    local function BindEquip(char)
+        if not char then return end
+        char.ChildAdded:Connect(function(child)
+            if child:IsA("Tool") then
+                cachedFireFunction = nil
+                lastFireScanTick = 0
+            end
+        end)
+    end
+    if LocalPlayer.Character then BindEquip(LocalPlayer.Character) end
+    LocalPlayer.CharacterAdded:Connect(BindEquip)
+end)
+
+-- ================================================
+-- ⚡ MAIN COMBAT RENDERSTEPPED LOOP (FOV Lock & Auto Shoot)
+-- ================================================
+Hub.Connections.VenyxRenderStep = RunService.RenderStepped:Connect(function()
+    if not (Hub and Hub.Running) then
+        if fovCircle then fovCircle.Visible = false end
+        if targetTracer then targetTracer.Visible = false end
+        return
+    end
+
+    local cfg = Hub.Settings
+    local aimCenter = GetAimCenter()
+
+    -- ล็อกค่า No Recoil และ No Spread ให้กล้องนิ่งสนิท 100% ทุกเฟรม
+    if ClientState then
+        if cfg.NoSpread then
+            ClientState.SpreadMultiplier = 0
+            ClientState.Spread = 0
+            ClientState.SpreadRest = 0
+        end
+        if cfg.NoRecoil then
+            ClientState.RecoilScale = 0
+            pcall(function()
+                local k = ClientState.RecoilKey and ClientState.RecoilKey()
+                if k and rawget(ClientState, k) ~= dummyRecoilFn then
+                    rawset(ClientState, k, dummyRecoilFn)
+                end
+            end)
+        end
+    end
+
+    -- ซิงค์ Hitboxes
+    if ClientHitboxes and ClientHitboxes.Refresh then
+        pcall(ClientHitboxes.Refresh)
+    end
+
+    -- ค้นหาเป้าหมายในวง FOV
+    LockedTarget = GetBestFOVTarget()
+
+    -- อัปเดตพิกัดเป้าหมาย (รองรับทั้ง SilentAim และ AutoShoot)
+    if (cfg.SilentAim or cfg.AutoShoot) and LockedTarget then
+        _G.UrbanReloadSilentAimTarget = LockedTarget.Position
+        _G.UrbanReloadSilentAimChar = LockedTarget.Character
+        _G.UrbanReloadSilentAimPart = LockedTarget.Part
+    else
+        _G.UrbanReloadSilentAimTarget = nil
+        _G.UrbanReloadSilentAimChar = nil
+        _G.UrbanReloadSilentAimPart = nil
+    end
+
+    -- แสดง/ซ่อน FOV Circle
+    if fovCircle then
+        if cfg.ShowFOV then
+            fovCircle.Position = aimCenter
+            fovCircle.Radius = cfg.FOVRadius or 180
+            fovCircle.Color = LockedTarget and Color3.fromRGB(255, 50, 70) or (cfg.FOVColor or Color3.fromRGB(0, 255, 200))
+            fovCircle.Visible = true
+        else
+            fovCircle.Visible = false
+        end
+    end
+
+    -- แสดง/ซ่อน Tracer Line
+    if targetTracer then
+        if cfg.ShowFOV and LockedTarget and LockedTarget.ScreenPos then
+            targetTracer.Visible = true
+            targetTracer.From = aimCenter
+            targetTracer.To = LockedTarget.ScreenPos
+        else
+            targetTracer.Visible = false
+        end
+    end
+
+    -- ระบบ Auto Shoot (ตรวจจับศัตรูในวง FOV แล้วลั่นไกทันทีโดยไม่ต้องคลิกขวาเล็ง - รองรับทั้ง PC & Mobile)
+    if cfg.AutoShoot and LockedTarget then
+        local targetChar = LockedTarget.Character
+        local isTargetSafe = IsPlayerInvulnerable(targetChar, LockedTarget.Player)
+        local isSelfSafe = IsPlayerInvulnerable(LocalPlayer.Character, LocalPlayer)
+
+        if not isTargetSafe and not isSelfSafe then
+            local now = os.clock()
+            local isBusy = ClientState and (ClientState.Reloading or ClientState.Rolling or ClientState.CaseRolling)
+            local myChar = LocalPlayer.Character
+            local tool = myChar and myChar:FindFirstChildOfClass("Tool")
+
+            if not isBusy and tool then
+                local currentRPM = cfg.RPM or 900
+                local shotInterval = (60 / currentRPM) + ((cfg.AutoShootDelay or 0) / 1000)
+
+                if now - lastAutoShotTime >= shotInterval then
+                    lastAutoShotTime = now
+                    local fireFn = getActiveFireFunction()
+                    if fireFn then
+                        pcall(fireFn, now)
+                    elseif Controls and Controls.Press then
+                        pcall(function()
+                            Controls.Press("Fire", true)
+                            task.delay(0.05, function()
+                                pcall(Controls.Press, "Fire", false)
+                            end)
+                        end)
+                    elseif VirtualInputManager then
+                        local wasAiming = ClientState and ClientState.Aiming
+                        if ClientState then ClientState.Aiming = true end
+                        pcall(function()
+                            VirtualInputManager:SendMouseButtonEvent(aimCenter.X, aimCenter.Y, 0, true, game, 1)
+                            task.defer(function()
+                                VirtualInputManager:SendMouseButtonEvent(aimCenter.X, aimCenter.Y, 0, false, game, 1)
+                                if ClientState and not wasAiming then
+                                    ClientState.Aiming = false
+                                end
+                            end)
+                        end)
+                    end
+                end
+            end
+        end
+    end
+end)
+
+
+
 
 -- ================================================
 -- 🔄 8. HEARTBEAT / RENDERSTEPPED CORE LOOP (OPTIMIZED)
@@ -1241,15 +1505,7 @@ local _lastDamageCheck = 0
 Hub.Connections.CoreEnforcer = RunService.RenderStepped:Connect(function(dt)
     if not Hub.Running then return end
 
-    -- 1. Native Camera Recoil & Stamina (Direct table writes - Zero Overhead)
     if ClientState then
-        if Hub.Settings.NoRecoil then
-            ClientState.ScopeShake = nil
-            if not _recoilHooked then
-                pcall(HookAddRecoil)
-            end
-        end
-
         if Hub.Settings.InfiniteStamina then
             ClientState.Stamina = ClientState.StaminaMax or 150
             ClientState.Exhausted = false
@@ -1257,51 +1513,13 @@ Hub.Connections.CoreEnforcer = RunService.RenderStepped:Connect(function(dt)
         end
         ClientState.Frozen = false
 
-    end
-
-    local now = os.clock()
-
-    -- Hitbox Expander update (Throttled to 10 Hz to prevent physics stutter)
-    if Hub.Settings.HitboxExpander and (now - _lastHitboxUpdate >= 0.1) then
-        _lastHitboxUpdate = now
-        UpdateHitboxes()
-    end
-end)
-
--- ================================================
--- ⭕ 8.1 SILENT AIM FOV RENDER LOOP
--- Keeps FOV Circle position, size & rainbow cycle in sync
--- ================================================
-pcall(function() RunService:UnbindFromRenderStep("KrakenSilentFOV") end)
-    pcall(function() RunService:UnbindFromRenderStep("KrakenAimbot") end)
-pcall(function() RunService:UnbindFromRenderStep("KrakenSilentFOV") end)
-RunService:BindToRenderStep("KrakenSilentFOV", Enum.RenderPriority.Camera.Value + 1, function()
-    if not Hub.Running then return end
-
-    if SilentFOVCircle then
-        local shouldDraw = Hub.Settings.SilentAimDrawFOV == true
-        if SilentFOVCircle.Visible ~= shouldDraw then
-            SilentFOVCircle.Visible = shouldDraw
+        if Hub.Settings.NoSpread then
+            ClientState.SpreadMultiplier = 0
+            ClientState.Spread = 0
+            ClientState.SpreadRest = 0
         end
-        if shouldDraw then
-            local vp = Camera.ViewportSize
-            local cx = vp.X * 0.5
-            local cy = vp.Y * 0.5
-            if SilentFOVCircle.Position.X ~= cx or SilentFOVCircle.Position.Y ~= cy then
-                SilentFOVCircle.Position = Vector2.new(cx, cy)
-            end
-            local r = Hub.Settings.SilentAimFOV or 180
-            if SilentFOVCircle.Radius ~= r then
-                SilentFOVCircle.Radius = r
-            end
-            if Hub.Settings.SilentAimFOVRainbow then
-                SilentFOVCircle.Color = Color3.fromHSV((tick() * 0.35) % 1, 1, 1)
-            else
-                local col = Hub.Settings.SilentAimFOVColor or Color3.fromRGB(255, 140, 0)
-                if SilentFOVCircle.Color ~= col then
-                    SilentFOVCircle.Color = col
-                end
-            end
+        if Hub.Settings.NoRecoil then
+            ClientState.RecoilScale = 0
         end
     end
 end)
@@ -1351,8 +1569,14 @@ local respawnKeyConn = UserInputService.InputBegan:Connect(function(input, gpe)
 end)
 table.insert(Hub.Connections, respawnKeyConn)
 
+local _charRespawnConns = {}
 local function MonitorCharacterForRespawn(char)
     if not char then return end
+    for _, c in ipairs(_charRespawnConns) do
+        pcall(function() c:Disconnect() end)
+    end
+    table.clear(_charRespawnConns)
+
     local hum = char:WaitForChild("Humanoid", 5)
     if hum then
         local diedConn = hum.Died:Connect(function()
@@ -1361,6 +1585,7 @@ local function MonitorCharacterForRespawn(char)
                 ForceRespawnPlayer()
             end
         end)
+        table.insert(_charRespawnConns, diedConn)
         table.insert(Hub.Connections, diedConn)
     end
     local attrConn = char:GetAttributeChangedSignal("Downed"):Connect(function()
@@ -1369,6 +1594,7 @@ local function MonitorCharacterForRespawn(char)
             ForceRespawnPlayer()
         end
     end)
+    table.insert(_charRespawnConns, attrConn)
     table.insert(Hub.Connections, attrConn)
 end
 if LocalPlayer.Character then MonitorCharacterForRespawn(LocalPlayer.Character) end
@@ -1654,8 +1880,18 @@ Hub.Connections.ESPUpdate = RunService:BindToRenderStep("KrakenESP", Enum.Render
         end
     end
 
-    -- Pause drawing and hide if PlayerESP is off or Cases UI is open
-    if not Hub.Settings.PlayerESP or Hub._CasesOpen then
+    -- ตรวจสอบว่ามีการเปิดใช้งานฟังก์ชัน ESP ตัวใดตัวหนึ่งอยู่หรือไม่ (ทำงานแยกอิสระ ไม่ต้องเปิด PlayerESP ก่อน)
+    local isAnyEspActive = Hub.Settings.PlayerESP
+        or Hub.Settings.ESPBox
+        or Hub.Settings.ESPChams
+        or Hub.Settings.ESPName
+        or Hub.Settings.ESPHealth
+        or Hub.Settings.ESPHealthBar
+        or Hub.Settings.ESPDistance
+        or Hub.Settings.ESPWeapon
+        or Hub.Settings.ESPTracers
+
+    if not isAnyEspActive or Hub._CasesOpen then
         for _, obj in pairs(Hub.ESP) do
             hideESP(obj)
         end
@@ -1673,6 +1909,8 @@ Hub.Connections.ESPUpdate = RunService:BindToRenderStep("KrakenESP", Enum.Render
     local vpX = vp.X
     local vpY = vp.Y
     local tracerOrigin = Vector2.new(vpX * 0.5, vpY)
+    local sTime = nil
+    pcall(function() sTime = workspace:GetServerTimeNow() end)
 
     for player, obj in pairs(Hub.ESP) do
         if player == LocalPlayer or (Hub.Settings.ESPTeamCheck and player.Team and LocalPlayer.Team and player.Team == LocalPlayer.Team) then
@@ -1729,17 +1967,19 @@ Hub.Connections.ESPUpdate = RunService:BindToRenderStep("KrakenESP", Enum.Render
         end
 
         local dist = math.sqrt(distSq)
+        local isImmune = IsPlayerInvulnerable(char, player, sTime)
+        local safeColor = Color3.fromRGB(0, 255, 120) -- เขียว Neon สำหรับคนติดโล่เกิด/อยู่ใน SafeZone ยิงไม่ได้
 
         -- 0. Glowing Body Chams (Optimized: capped to 200 studs to prevent mobile/low-end GPU fillrate drops)
         if Hub.Settings.ESPChams and obj.Highlight and dist <= 200 then
             if obj.Highlight.Adornee ~= char then
                 obj.Highlight.Adornee = char
                 obj.Highlight.Parent = char
-                obj.Highlight.FillColor = Hub.Settings.ChamsColor or Color3.fromRGB(255, 35, 35)
-                obj.Highlight.OutlineColor = Hub.Settings.ChamsOutlineColor or Color3.fromRGB(255, 45, 45)
                 obj.Highlight.FillTransparency = Hub.Settings.ChamsTransparency or 0.78
                 obj.Highlight.OutlineTransparency = 0.25
             end
+            obj.Highlight.FillColor = isImmune and safeColor or (Hub.Settings.ChamsColor or Color3.fromRGB(255, 35, 35))
+            obj.Highlight.OutlineColor = isImmune and Color3.fromRGB(0, 255, 160) or (Hub.Settings.ChamsOutlineColor or Color3.fromRGB(255, 45, 45))
             if not obj.Highlight.Enabled then
                 obj.Highlight.Enabled = true
             end
@@ -1749,19 +1989,20 @@ Hub.Connections.ESPUpdate = RunService:BindToRenderStep("KrakenESP", Enum.Render
         end
 
         -- 1. Precision 2D Box with High-Contrast Black Border
+        local showBox = (Hub.Settings.ESPBox == true) or (Hub.Settings.PlayerESP == true)
         if obj.BoxOutline then
-            obj.BoxOutline.Visible = Hub.Settings.ESPBox
-            if Hub.Settings.ESPBox then
+            obj.BoxOutline.Visible = showBox
+            if showBox then
                 obj.BoxOutline.Position = Vector2.new(boxX - 1, boxY - 1)
                 obj.BoxOutline.Size = Vector2.new(boxW + 2, boxH + 2)
             end
         end
 
-        obj.Box.Visible = Hub.Settings.ESPBox
-        if Hub.Settings.ESPBox then
+        obj.Box.Visible = showBox
+        if showBox then
             obj.Box.Position = Vector2.new(boxX, boxY)
             obj.Box.Size = Vector2.new(boxW, boxH)
-            obj.Box.Color = Hub.Settings.BoxColor or Color3.fromRGB(255, 60, 60)
+            obj.Box.Color = isImmune and safeColor or (Hub.Settings.BoxColor or Color3.fromRGB(255, 60, 60))
         end
 
         -- 2. Clean Header (Single-line Name + Distance on top of Box)
@@ -1773,12 +2014,14 @@ Hub.Connections.ESPUpdate = RunService:BindToRenderStep("KrakenESP", Enum.Render
             nameStr = player.DisplayName .. " (@" .. player.Name .. ")"
         end
 
+        local showName = (Hub.Settings.ESPName == true) or (Hub.Settings.PlayerESP == true)
+        local showDist = (Hub.Settings.ESPDistance == true)
         local headerText = ""
-        if Hub.Settings.ESPName and Hub.Settings.ESPDistance then
+        if showName and showDist then
             headerText = nameStr .. "  [" .. distMeters .. "m]"
-        elseif Hub.Settings.ESPName then
+        elseif showName then
             headerText = nameStr
-        elseif Hub.Settings.ESPDistance then
+        elseif showDist then
             headerText = distMeters .. "m"
         end
 
@@ -1788,17 +2031,17 @@ Hub.Connections.ESPUpdate = RunService:BindToRenderStep("KrakenESP", Enum.Render
             obj.Name.Size = fontSize
             obj.Name.Position = Vector2.new(centerX, boxY - (fontSize + 3))
             obj.Name.Text = headerText
-            obj.Name.Color = Hub.Settings.NameColor
+            obj.Name.Color = isImmune and safeColor or Hub.Settings.NameColor
         else
             obj.Name.Visible = false
         end
         obj.Dist.Visible = false
 
-        -- 3. Dynamic Health & Health Bar (Left of Box)
+        -- 3. Dynamic Health & Health Bar (Left of target, fully independent of 2D Box)
         local hp = math.clamp(math.floor((hum.Health / math.max(hum.MaxHealth, 1)) * 100), 0, 100)
         local hpColor = GetHealthColor(hp)
 
-        if Hub.Settings.ESPHealthBar and Hub.Settings.ESPBox then
+        if Hub.Settings.ESPHealthBar then
             local barW = 3
             local barOutlineW = barW + 2
             local barX = boxX - barOutlineW - 3
@@ -1859,7 +2102,7 @@ Hub.Connections.ESPUpdate = RunService:BindToRenderStep("KrakenESP", Enum.Render
             obj.Tracer.Visible = true
             obj.Tracer.From = tracerOrigin
             obj.Tracer.To = bottomScreen
-            obj.Tracer.Color = Hub.Settings.TracerColor
+            obj.Tracer.Color = isImmune and safeColor or Hub.Settings.TracerColor
         else
             obj.Tracer.Visible = false
         end
@@ -1913,20 +2156,18 @@ local function UpdateSafeESP()
         table.insert(Hub.SafeESP, bb)
     end
 
-    -- Scan Workspace for SafeZone parts / models
-    for _, obj in ipairs(Workspace:GetChildren()) do
-        if obj.Name:lower():find("safezone") or obj.Name:lower():find("safe_zone") then
+    -- Fast scan Workspace for SafeZones (Zero lag: targeted lookup instead of 10k+ Map:GetDescendants)
+    local szFolder = Workspace:FindFirstChild("SafeZones") or Workspace:FindFirstChild("SafeZone")
+    if szFolder then
+        for _, obj in ipairs(szFolder:GetChildren()) do
             local p = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
             if p then AddSafeZoneMarker(p, obj.Name) end
         end
     end
-    local map = Workspace:FindFirstChild("Map")
-    if map then
-        for _, obj in ipairs(map:GetDescendants()) do
-            if obj.Name:lower():find("safezone") or obj.Name:lower():find("safe_zone") then
-                local p = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
-                if p then AddSafeZoneMarker(p, obj.Name) end
-            end
+    for _, obj in ipairs(Workspace:GetChildren()) do
+        if obj.Name:lower():find("safezone") or obj.Name:lower():find("safe_zone") then
+            local p = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
+            if p then AddSafeZoneMarker(p, obj.Name) end
         end
     end
 
@@ -2303,7 +2544,6 @@ task.spawn(function()
                 end
                 if ClientState then
                     ClientState.Aiming = true
-                    ClientState.RecoilScale = 0
                 end
 
                 local startHp = GetHoodRealtimeData(targetNpc)
@@ -2345,7 +2585,7 @@ task.spawn(function()
                     HoodTargetFails[targetNpc] = nil
                 end
 
-                -- Instant loot sequence upon death using direct NPC ID
+                -- Instant loot sequence upon death using direct NPC ID (Cross-Platform PC & Mobile)
                 pcall(function()
                     if ClientState and type(ClientState.HoodLootNow) == "function" then
                         ClientState.HoodLootNow()
@@ -2354,9 +2594,15 @@ task.spawn(function()
                     if hoodRemote and targetNpcId then
                         hoodRemote:FireServer("loot", targetNpcId, targetHead.Position)
                     end
-                    vim:SendKeyEvent(true, Enum.KeyCode.E, false, game)
-                    task.wait(0.02)
-                    vim:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+                    if typeof(fireproximityprompt) == "function" then
+                        local pp = targetNpc:FindFirstChildWhichIsA("ProximityPrompt", true)
+                        if pp then fireproximityprompt(pp) end
+                    end
+                    if vim and vim.SendKeyEvent then
+                        vim:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+                        task.wait(0.02)
+                        vim:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+                    end
                 end)
             end
         else
@@ -2365,14 +2611,16 @@ task.spawn(function()
                 pcall(function() Controls.Press("Aim", false) end)
             end
 
-            -- Sweep ground loot and dead corpses while waiting
+            -- Sweep ground loot and dead corpses while waiting (Cross-Platform PC & Mobile)
             pcall(function()
                 if ClientState and type(ClientState.HoodLootNow) == "function" then
                     ClientState.HoodLootNow()
                 end
-                vim:SendKeyEvent(true, Enum.KeyCode.E, false, game)
-                task.wait(0.02)
-                vim:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+                if vim and vim.SendKeyEvent then
+                    vim:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+                    task.wait(0.02)
+                    vim:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+                end
             end)
             task.wait(0.1)
         end
@@ -2383,13 +2631,10 @@ end)
 -- 🎨 13. MODERN MACLIB UI & FLOATING LOGO INTERFACE
 -- ==============================================================
 local function InitUI()
+    Hub.InitUI = InitUI
     -- GUI Container resolution (supports gethui / CoreGui / PlayerGui)
     local CoreGui = (pcall(function() return game:GetService("CoreGui") end) and game:GetService("CoreGui")) or nil
     local targetGuiParent = (function()
-        if gethui then
-            local ok, h = pcall(gethui)
-            if ok and h then return h end
-        end
         if CoreGui then
             local canCore = pcall(function()
                 local test = Instance.new("Folder")
@@ -2398,13 +2643,27 @@ local function InitUI()
             end)
             if canCore then return CoreGui end
         end
+        if gethui then
+            local ok, h = pcall(gethui)
+            if ok and h then return h end
+        end
         return LocalPlayer:WaitForChild("PlayerGui")
     end)()
 
-    -- Clean up previous UI instances
-    for _, name in ipairs({"KrakenHub_ToggleButton", "KrakenHub_UI", "Maclib", "Fluent"}) do
-        local old = targetGuiParent:FindFirstChild(name)
-        if old then pcall(function() old:Destroy() end) end
+    -- Clean up previous UI instances (thorough sweep of both targetGuiParent and CoreGui)
+    local function SweepOldGuis(parent)
+        if not parent then return end
+        for _, c in ipairs(parent:GetChildren()) do
+            if c:IsA("ScreenGui") then
+                if c.Name == "KrakenHub_ToggleButton" or c.Name == "KrakenHub_UI" or c.Name == "Maclib" or c.Name == "Fluent" or c:FindFirstChild("Base") then
+                    pcall(function() c:Destroy() end)
+                end
+            end
+        end
+    end
+    SweepOldGuis(targetGuiParent)
+    if CoreGui and CoreGui ~= targetGuiParent then
+        SweepOldGuis(CoreGui)
     end
 
     -- 🏷️ 1. LOGO ASSET LOADER (K COMMUNITY LOGO)
@@ -2474,18 +2733,27 @@ local function InitUI()
             "toggle1%.ImageColor3%s*=%s*Color3%.fromRGB%(87,%s*86,%s*86%)",
             "toggle1.ImageColor3 = togglebool and Color3.fromRGB(235, 50, 50) or Color3.fromRGB(87, 86, 86)"
         )
+        -- Expose section Frame in SectionFunctions
+        code = code:gsub("return SectionFunctions", "SectionFunctions.Instance = section\n\t\t\t\treturn SectionFunctions")
+
         -- 2. Restore Green Dot (Maximize Button)
         code = code:gsub("applyState%(maximize,%s*false%)", "applyState(maximize, true)")
         code = code:gsub("maximize%.BackgroundColor3%s*=%s*Color3%.fromRGB%(119,%s*174,%s*94%)", "maximize.BackgroundColor3 = Color3.fromRGB(40, 205, 65)")
 
-        -- 3. Fix Slider Overlap: limit sliderName width and compact sliderElements
+        -- 2.1 Sizing & Proportions: Sidebar 190px and responsive Content area
+        code = code:gsub("sidebar%.Size%s*=%s*UDim2%.fromScale%(0%.325,%s*1%)", "sidebar.Size = UDim2.new(0, 190, 1, 0)")
+        code = code:gsub("content%.Size%s*=%s*UDim2%.new%(0,%s*%(base%.AbsoluteSize%.X%s*-%s*sidebar%.AbsoluteSize%.X%),%s*1,%s*0%)", "content.Size = UDim2.new(1, -190, 1, 0)")
+        code = code:gsub("sectionUIPadding%.PaddingLeft%s*=%s*UDim%.new%(0,%s*20%)", "sectionUIPadding.PaddingLeft = UDim.new(0, 14)")
+        code = code:gsub("sectionUIPadding%.PaddingRight%s*=%s*UDim%.new%(0,%s*18%)", "sectionUIPadding.PaddingRight = UDim.new(0, 14)")
+
+        -- 3. Fix Slider Layout: give sliderName ample width (1, -135) and fixed crisp sliderBar
         code = code:gsub(
             "sliderName%.AutomaticSize%s*=%s*Enum%.AutomaticSize%.XY",
-            "sliderName.AutomaticSize = Enum.AutomaticSize.None\n\t\t\t\t\tsliderName.Size = UDim2.new(1, -145, 1, 0)\n\t\t\t\t\tsliderName.ClipsDescendants = true"
+            "sliderName.AutomaticSize = Enum.AutomaticSize.None\n\t\t\t\t\tsliderName.Size = UDim2.new(1, -135, 1, 0)\n\t\t\t\t\tsliderName.TextTruncate = Enum.TextTruncate.None\n\t\t\t\t\tsliderName.ClipsDescendants = false"
         )
         code = code:gsub(
             "sliderBar%.Size%s*=%s*UDim2%.fromOffset%(123,%s*3%)",
-            "sliderBar.Size = UDim2.fromOffset(88, 3)"
+            "sliderBar.Size = UDim2.fromOffset(80, 3)"
         )
         code = code:gsub(
             "sliderElementsUIListLayout%.Padding%s*=%s*UDim%.new%(0,%s*20%)",
@@ -2495,11 +2763,25 @@ local function InitUI()
             "sliderValue%.Size%s*=%s*UDim2%.fromOffset%(41,%s*21%)",
             "sliderValue.Size = UDim2.fromOffset(38, 20)"
         )
+        code = code:gsub(
+            "local function updateSliderBarSize%(%)\n.-end",
+            "local function updateSliderBarSize()\n\t\t\t\t\t\tsliderBar.Size = UDim2.fromOffset(80, 3)\n\t\t\t\t\tend"
+        )
 
-        -- 4. Fix Keybind Overlap: limit keybindName width and prevent text overlapping binderBox
+        -- 4. Fix Keybind Layout: ample width for keybindName and crisp binderBox
         code = code:gsub(
             "keybindName%.AutomaticSize%s*=%s*Enum%.AutomaticSize%.XY",
-            "keybindName.AutomaticSize = Enum.AutomaticSize.None\n\t\t\t\t\tkeybindName.Size = UDim2.new(1, -100, 1, 0)\n\t\t\t\t\tkeybindName.ClipsDescendants = true"
+            "keybindName.AutomaticSize = Enum.AutomaticSize.None\n\t\t\t\t\tkeybindName.Size = UDim2.new(1, -70, 1, 0)\n\t\t\t\t\tkeybindName.TextTruncate = Enum.TextTruncate.None\n\t\t\t\t\tkeybindName.ClipsDescendants = false"
+        )
+
+        -- 4.1 Fix Toggle & Dropdown Text Truncate
+        code = code:gsub(
+            "toggleName%.Size%s*=%s*UDim2%.new%(1,%s*-50,%s*0,%s*0%)",
+            "toggleName.Size = UDim2.new(1, -50, 0, 0)\n\t\t\t\t\ttoggleName.TextTruncate = Enum.TextTruncate.None"
+        )
+        code = code:gsub(
+            "dropdownName%.TextTruncate%s*=%s*Enum%.TextTruncate%.SplitWord",
+            "dropdownName.TextTruncate = Enum.TextTruncate.None"
         )
 
         -- 5. Partially censor UserInfo at bottom-left (Show avatar and partial masked name)
@@ -2512,13 +2794,25 @@ local function InitUI()
             'username.Text = "@" .. _mask(LocalPlayer.Name)'
         )
 
-        -- 6. Increase font sizes across MacLib components for mobile readability
-        code = code:gsub("TextSize%s*=%s*11", "TextSize = 12")
-        code = code:gsub("TextSize%s*=%s*12", "TextSize = 13")
-        code = code:gsub("TextSize%s*=%s*13", "TextSize = 14")
-        code = code:gsub("TextSize%s*=%s*14", "TextSize = 15")
-        code = code:gsub("TextSize%s*=%s*15", "TextSize = 16")
-        code = code:gsub("TextSize%s*=%s*16", "TextSize = 17")
+        
+        -- 6. Typography & Highlight Enhancements (Larger Fonts & Glowing Headers)
+        code = code:gsub(
+            "headerText%.TextSize%s*=%s*16",
+            "headerText.TextSize = 18\n\t\t\t\t\theaderText.TextColor3 = Color3.fromRGB(0, 230, 255)\n\t\t\t\t\theaderText.FontFace = Font.new(assets.interFont, Enum.FontWeight.Bold)"
+        )
+        code = code:gsub("headerText%.TextTransparency%s*=%s*0%.3", "headerText.TextTransparency = 0")
+
+        code = code:gsub("toggleName%.TextSize%s*=%s*13", "toggleName.TextSize = 15\n\t\t\t\t\ttoggleName.FontFace = Font.new(assets.interFont, Enum.FontWeight.SemiBold)")
+        code = code:gsub("toggleName%.TextTransparency%s*=%s*0%.5", "toggleName.TextTransparency = 0.05")
+
+        code = code:gsub("sliderName%.TextSize%s*=%s*13", "sliderName.TextSize = 15\n\t\t\t\t\tsliderName.FontFace = Font.new(assets.interFont, Enum.FontWeight.SemiBold)")
+        code = code:gsub("sliderName%.TextTransparency%s*=%s*0%.5", "sliderName.TextTransparency = 0.05")
+
+        code = code:gsub("dropdownName%.TextSize%s*=%s*13", "dropdownName.TextSize = 15\n\t\t\t\t\tdropdownName.FontFace = Font.new(assets.interFont, Enum.FontWeight.SemiBold)")
+        code = code:gsub("dropdownName%.TextTransparency%s*=%s*0%.5", "dropdownName.TextTransparency = 0.05")
+
+        code = code:gsub("buttonName%.TextSize%s*=%s*13", "buttonName.TextSize = 15\n\t\t\t\t\tbuttonName.FontFace = Font.new(assets.interFont, Enum.FontWeight.SemiBold)")
+        code = code:gsub("buttonName%.TextTransparency%s*=%s*0%.5", "buttonName.TextTransparency = 0.05")
 
         return loadstring(code)()
     end)
@@ -2529,21 +2823,22 @@ local function InitUI()
         return
     end
 
-    -- 📐 3. RESPONSIVE WINDOW SIZE
+    -- 📐 3. RESPONSIVE WINDOW SIZE (Mobile Android/iOS & PC Auto-Adapter)
     local function GetOptimalWindowSize()
         local vp = (Workspace.CurrentCamera and Workspace.CurrentCamera.ViewportSize) or Vector2.new(1920, 1080)
-        if vp.X < 900 or UserInputService.TouchEnabled then
-            local w = math.clamp(math.floor(vp.X * 0.88), 340, 720)
-            local h = math.clamp(math.floor(vp.Y * 0.82), 260, 480)
+        local isMobile = UserInputService.TouchEnabled or (vp.X < 950)
+        if isMobile then
+            local w = math.clamp(math.floor(vp.X * 0.92), 340, 780)
+            local h = math.clamp(math.floor(vp.Y * 0.86), 280, 520)
             return UDim2.fromOffset(w, h)
         end
-        return UDim2.fromOffset(860, 600)
+        return UDim2.fromOffset(980, 630)
     end
 
     -- 🪟 4. CREATE MAIN WINDOW
     local Window = MacLib:Window({
         Title = "KrakenHub",
-        Subtitle = "รีโหลดในเมือง (Urban Reload) | ภาษาไทย",
+        Subtitle = "Urban Reload | KrakenHub",
         Size = GetOptimalWindowSize(),
         DragStyle = 2,
         ShowUserInfo = true,
@@ -2551,6 +2846,187 @@ local function InitUI()
         AcrylicBlur = false,
     })
     Hub.Window = Window
+    pcall(function() Window:SetState(true) end)
+
+    -- 💬 DISCORD COMMUNITY BUTTON ENGINE (ปุ่มดิสคอร์ดกะทัดรัดขวาบนหน้าต่าง + Auto-Open Discord & New Logo)
+    local function CreateDiscordButton(base, windowObj)
+        if not base then return end
+        local old = base:FindFirstChild("DiscordBtn")
+        if old then return end
+
+        -- 1. Ensure Discord Logo Asset is ready
+        local discordLogoFile = "KrakenDiscordLogo.png"
+        local discordAsset = "rbxassetid://10709778748"
+        pcall(function()
+            if typeof(isfile) == "function" and typeof(writefile) == "function" then
+                if not isfile(discordLogoFile) then
+                    local b64Data = "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"
+                    local decoded = nil
+                    if crypt and typeof(crypt.base64decode) == "function" then
+                        decoded = crypt.base64decode(b64Data)
+                    elseif crypt and typeof(crypt.base64_decode) == "function" then
+                        decoded = crypt.base64_decode(b64Data)
+                    elseif typeof(base64_decode) == "function" then
+                        decoded = base64_decode(b64Data)
+                    end
+                    if decoded and #decoded > 0 then
+                        writefile(discordLogoFile, decoded)
+                    end
+                end
+                if isfile(discordLogoFile) and typeof(getcustomasset) == "function" then
+                    local customAsset = getcustomasset(discordLogoFile)
+                    if customAsset and #tostring(customAsset) > 0 then
+                        discordAsset = customAsset
+                    end
+                end
+            end
+        end)
+
+        local discordBtn = Instance.new("TextButton")
+        discordBtn.Name = "DiscordBtn"
+        discordBtn.AnchorPoint = Vector2.new(1, 0)
+        discordBtn.Position = UDim2.new(1, -42, 0, 16)
+        discordBtn.Size = UDim2.fromOffset(96, 28)
+        discordBtn.BackgroundColor3 = Color3.fromRGB(24, 25, 28) -- Sleek Discord Dark
+        discordBtn.BackgroundTransparency = 0
+        discordBtn.BorderSizePixel = 0
+        discordBtn.AutoButtonColor = false
+        discordBtn.Text = ""
+        discordBtn.ZIndex = 10000
+        discordBtn.Parent = base
+
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(0, 6)
+        corner.Parent = discordBtn
+
+        local stroke = Instance.new("UIStroke")
+        stroke.Color = Color3.fromRGB(88, 101, 242) -- Discord Blurple border
+        stroke.Thickness = 1.2
+        stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+        stroke.Parent = discordBtn
+
+        local layout = Instance.new("UIListLayout")
+        layout.FillDirection = Enum.FillDirection.Horizontal
+        layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+        layout.VerticalAlignment = Enum.VerticalAlignment.Center
+        layout.Padding = UDim.new(0, 6)
+        layout.Parent = discordBtn
+
+        local icon = Instance.new("ImageLabel")
+        icon.Name = "DiscordIcon"
+        icon.Size = UDim2.fromOffset(20, 20)
+        icon.BackgroundTransparency = 1
+        icon.Image = discordAsset
+        icon.ScaleType = Enum.ScaleType.Fit
+        icon.ImageColor3 = Color3.fromRGB(255, 255, 255)
+        icon.ZIndex = 10001
+        icon.Parent = discordBtn
+
+        local label = Instance.new("TextLabel")
+        label.Name = "DiscordLabel"
+        label.Size = UDim2.fromOffset(50, 16)
+        label.BackgroundTransparency = 1
+        label.Text = "Discord"
+        label.Font = Enum.Font.GothamBold
+        label.TextSize = 13
+        label.TextColor3 = Color3.fromRGB(255, 255, 255)
+        label.TextXAlignment = Enum.TextXAlignment.Left
+        label.ZIndex = 10001
+        label.Parent = discordBtn
+
+        -- Hover Animations
+        discordBtn.MouseEnter:Connect(function()
+            TweenService:Create(discordBtn, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {
+                BackgroundColor3 = Color3.fromRGB(38, 40, 45)
+            }):Play()
+            TweenService:Create(stroke, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {
+                Color = Color3.fromRGB(114, 137, 218)
+            }):Play()
+        end)
+
+        discordBtn.MouseLeave:Connect(function()
+            TweenService:Create(discordBtn, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {
+                BackgroundColor3 = Color3.fromRGB(24, 25, 28)
+            }):Play()
+            TweenService:Create(stroke, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {
+                Color = Color3.fromRGB(88, 101, 242)
+            }):Play()
+        end)
+
+        -- Click Handler: Auto-Open Discord App via Local RPC across all Discord ports (6463-6472)
+        local inviteCode = "vvkVDYeuhn"
+        local inviteUrl = "https://discord.gg/" .. inviteCode
+        local _lastDiscordClick = 0
+        local function OnDiscordClicked()
+            local now = os.clock()
+            if now - _lastDiscordClick < 0.5 then return end
+            _lastDiscordClick = now
+
+            TweenService:Create(discordBtn, TweenInfo.new(0.1, Enum.EasingStyle.Quad), {
+                BackgroundColor3 = Color3.fromRGB(88, 101, 242)
+            }):Play()
+            task.delay(0.15, function()
+                TweenService:Create(discordBtn, TweenInfo.new(0.15, Enum.EasingStyle.Quad), {
+                    BackgroundColor3 = Color3.fromRGB(24, 25, 28)
+                }):Play()
+            end)
+
+            -- 1. Copy invite link to clipboard
+            if typeof(setclipboard) == "function" then
+                pcall(setclipboard, inviteUrl)
+            elseif typeof(toclipboard) == "function" then
+                pcall(toclipboard, inviteUrl)
+            end
+
+            -- 2. Discord Desktop App Auto-Open (Local RPC 6463-6472)
+            task.spawn(function()
+                local req = (typeof(request) == "function" and request)
+                         or (typeof(http_request) == "function" and http_request)
+                         or (syn and typeof(syn.request) == "function" and syn.request)
+                if not req then return end
+
+                local HttpService = game:GetService("HttpService")
+                for port = 6463, 6472 do
+                    local opened = false
+                    pcall(function()
+                        local res = req({
+                            Url = "http://127.0.0.1:" .. tostring(port) .. "/rpc?v=1",
+                            Method = "POST",
+                            Headers = {
+                                ["Content-Type"] = "application/json",
+                                ["Origin"] = "https://discord.com"
+                            },
+                            Body = HttpService:JSONEncode({
+                                cmd = "INVITE_BROWSER",
+                                args = { code = inviteCode },
+                                nonce = HttpService:GenerateGUID(false)
+                            })
+                        })
+                        if res and res.StatusCode == 200 then
+                            opened = true
+                        end
+                    end)
+                    if opened then
+                        break
+                    end
+                end
+            end)
+
+            -- 3. Toast Notification
+            if windowObj and windowObj.Notify then
+                pcall(function()
+                    windowObj:Notify({
+                        Title = "Discord Community",
+                        Description = "กำลังเด้งเปิด Discord App และคัดลอกลิงก์ให้แล้ว!\n(discord.gg/" .. inviteCode .. ")",
+                        Lifetime = 4
+                    })
+                end)
+            end
+        end
+
+        discordBtn.MouseButton1Click:Connect(OnDiscordClicked)
+        discordBtn.Activated:Connect(OnDiscordClicked)
+    end
 
     -- 🌟 Rock-Solid Neon Blue Window Border, Resize Grip & Green Dot Engine
     local _windowBorderHooked = false
@@ -2560,6 +3036,7 @@ local function InitUI()
                       or (CoreGui and CoreGui:FindFirstChild("Base", true))
             if base then
                 base.ClipsDescendants = false
+                CreateDiscordButton(base, Window)
 
                 -- 1. สร้างกรอบ Overlay ชั้นบนสุด (ZIndex 9999) ลอยครอบหน้าต่างไว้ถาวร
                 local overlay = base:FindFirstChild("KrakenBorderOverlay")
@@ -2817,7 +3294,17 @@ local function InitUI()
                 gripButton.InputEnded:Connect(StopResize)
                 UserInputService.InputEnded:Connect(StopResize)
 
-                -- 4. 🎚️ Fix Slider Overlap: จัดสัดส่วนตัวหนังสือและแถบเลื่อนไม่ให้ทับกันเด็ดขาด
+                -- 4. 🎚️ Sizing & Layout Lock: Rock-solid, spacious proportions with ZERO truncation
+                local sidebarFrame = base:FindFirstChild("Sidebar")
+                local contentFrame = base:FindFirstChild("Content")
+                if sidebarFrame and sidebarFrame:IsA("Frame") then
+                    sidebarFrame.Size = UDim2.new(0, 190, 1, 0)
+                end
+                if contentFrame and contentFrame:IsA("Frame") then
+                    contentFrame.Position = UDim2.fromScale(1, 0)
+                    contentFrame.Size = UDim2.new(1, -190, 1, 0)
+                end
+
                 local function FixSlider(inst)
                     if not inst then return end
                     local slider = (inst.Name == "Slider" and inst)
@@ -2828,9 +3315,9 @@ local function InitUI()
                         local sliderElements = slider:FindFirstChild("SliderElements")
                         if sliderName and sliderName:IsA("TextLabel") then
                             sliderName.AutomaticSize = Enum.AutomaticSize.None
-                            sliderName.Size = UDim2.new(1, -145, 1, 0)
-                            sliderName.TextTruncate = Enum.TextTruncate.AtEnd
-                            sliderName.ClipsDescendants = true
+                            sliderName.Size = UDim2.new(1, -135, 1, 0)
+                            sliderName.TextTruncate = Enum.TextTruncate.None
+                            sliderName.ClipsDescendants = false
                             sliderName.TextSize = 13
                         end
                         if sliderElements and sliderElements:IsA("Frame") then
@@ -2840,7 +3327,7 @@ local function InitUI()
                             end
                             local bar = sliderElements:FindFirstChild("SliderBar")
                             if bar and bar:IsA("ImageLabel") then
-                                bar.Size = UDim2.fromOffset(88, 3)
+                                bar.Size = UDim2.fromOffset(80, 3)
                             end
                             local val = sliderElements:FindFirstChild("SliderValue")
                             if val and val:IsA("TextBox") then
@@ -2851,11 +3338,6 @@ local function InitUI()
                     end
                 end
 
-                for _, desc in ipairs(base:GetDescendants()) do
-                    FixSlider(desc)
-                end
-
-                -- 5. ⌨️ Fix Keybind Overlap: ป้องกันปุ่มคีย์ลัดทับกับชื่อหัวข้อ
                 local function FixKeybind(inst)
                     if not inst then return end
                     local keybind = (inst.Name == "Keybind" and inst)
@@ -2866,9 +3348,9 @@ local function InitUI()
                         local box = keybind:FindFirstChild("BinderBox")
                         if nameLbl and nameLbl:IsA("TextLabel") then
                             nameLbl.AutomaticSize = Enum.AutomaticSize.None
-                            nameLbl.Size = UDim2.new(1, -95, 1, 0)
-                            nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
-                            nameLbl.ClipsDescendants = true
+                            nameLbl.Size = UDim2.new(1, -70, 1, 0)
+                            nameLbl.TextTruncate = Enum.TextTruncate.None
+                            nameLbl.ClipsDescendants = false
                             nameLbl.TextSize = 13
                         end
                         if box and box:IsA("TextBox") then
@@ -2886,8 +3368,41 @@ local function InitUI()
                     end
                 end
 
+                local function FixToggle(inst)
+                    if not inst then return end
+                    local tog = (inst.Name == "Toggle" and inst)
+                             or (inst.Parent and inst.Parent.Name == "Toggle" and inst.Parent)
+                             or (inst:FindFirstChild("ToggleName") and inst)
+                    if tog and tog:IsA("Frame") then
+                        local nameLbl = tog:FindFirstChild("ToggleName")
+                        if nameLbl and nameLbl:IsA("TextLabel") then
+                            nameLbl.TextTruncate = Enum.TextTruncate.None
+                            nameLbl.ClipsDescendants = false
+                            nameLbl.TextSize = 13
+                        end
+                    end
+                end
+
+                local function FixDropdown(inst)
+                    if not inst then return end
+                    local dd = (inst.Name == "Dropdown" and inst)
+                            or (inst.Parent and inst.Parent.Name == "Dropdown" and inst.Parent)
+                            or (inst:FindFirstChild("DropdownName") and inst)
+                    if dd and dd:IsA("Frame") then
+                        local nameLbl = dd:FindFirstChild("DropdownName")
+                        if nameLbl and nameLbl:IsA("TextLabel") then
+                            nameLbl.TextTruncate = Enum.TextTruncate.None
+                            nameLbl.ClipsDescendants = false
+                            nameLbl.TextSize = 13
+                        end
+                    end
+                end
+
                 for _, desc in ipairs(base:GetDescendants()) do
+                    FixSlider(desc)
                     FixKeybind(desc)
+                    FixToggle(desc)
+                    FixDropdown(desc)
                 end
 
                 -- 6. 🛡️ Mask UserInfo (แสดงรูปพร้อมจุดเขียวออนไลน์ และปิดบังตัวอักษรบางส่วน)
@@ -2951,7 +3466,7 @@ local function InitUI()
                 -- 7. 🔤 Font Enhancer: ปรับขนาดตัวอักษรทุกตัวในเมนูให้พอดี ชัดเจนบนมือถือ
                 local function EnhanceFonts(inst)
                     if inst:IsA("TextLabel") or inst:IsA("TextButton") or inst:IsA("TextBox") then
-                        if inst.Name == "SliderName" or inst.Name == "SliderValue" or inst.Name == "KeybindName" or inst.Name == "BinderBox" then
+                        if inst.Name == "SliderName" or inst.Name == "SliderValue" or inst.Name == "KeybindName" or inst.Name == "BinderBox" or inst.Name == "ToggleName" or inst.Name == "DropdownName" then
                             return
                         end
                         if not inst:GetAttribute("FontBoosted") then
@@ -2990,6 +3505,8 @@ local function InitUI()
                     base.DescendantAdded:Connect(function(desc)
                         task.defer(FixSlider, desc)
                         task.defer(FixKeybind, desc)
+                        task.defer(FixToggle, desc)
+                        task.defer(FixDropdown, desc)
                         task.defer(EnhanceFonts, desc)
                         if desc.Name == "UserInfo" or (desc.Parent and desc.Parent.Name == "UserInfo") then
                             task.defer(MaskUserInfo, desc.Name == "UserInfo" and desc or desc.Parent)
@@ -3053,12 +3570,32 @@ local function InitUI()
     end)
 
     function Window:Minimize()
+        local base = (targetGuiParent and targetGuiParent:FindFirstChild("Base", true))
+                  or (CoreGui and CoreGui:FindFirstChild("Base", true))
         local cur = Window:GetState()
-        Window:SetState(not cur)
-        task.delay(0.05, function()
-            ApplyWindowBorder()
-            ApplyTitleShimmer()
-        end)
+        if cur == nil and base then
+            cur = base.Visible
+        end
+        local newState = not cur
+        Window:SetState(newState)
+        if base then
+            base.Visible = newState
+        end
+        if newState then
+            pcall(function()
+                if base then
+                    local vp = (Camera and Camera.ViewportSize) or Vector2.new(1920, 1080)
+                    local absPos = base.AbsolutePosition
+                    if absPos.Y < 0 or absPos.Y > vp.Y - 80 or absPos.X > vp.X - 80 or absPos.X + base.AbsoluteSize.X < 80 then
+                        base.Position = UDim2.fromScale(0.5, 0.5)
+                    end
+                end
+            end)
+            task.delay(0.05, function()
+                ApplyWindowBorder()
+                ApplyTitleShimmer()
+            end)
+        end
     end
 
     local originalDialog = Window.Dialog
@@ -3186,7 +3723,7 @@ local function InitUI()
             if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
                 dragging = true
                 movedEnough = false
-                dragThreshold = (input.UserInputType == Enum.UserInputType.Touch) and 18 or 8
+                dragThreshold = (input.UserInputType == Enum.UserInputType.Touch) and 20 or 14
                 dragStartPos = input.Position
                 startFramePos = mainBtn.Position
             end
@@ -3213,24 +3750,56 @@ local function InitUI()
             end
         end)
 
-        -- Click & Bounce Animation
-        mainBtn.Activated:Connect(function()
-            if not movedEnough then
-                task.spawn(function()
-                    TweenService:Create(mainBtn, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-                        Size = UDim2.fromOffset(42, 42)
-                    }):Play()
-                    task.wait(0.08)
-                    TweenService:Create(mainBtn, TweenInfo.new(0.12, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-                        Size = UDim2.fromOffset(48, 48)
-                    }):Play()
-                end)
+        local function TriggerToggle()
+            task.spawn(function()
+                TweenService:Create(mainBtn, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+                    Size = UDim2.fromOffset(42, 42)
+                }):Play()
+                task.wait(0.08)
+                TweenService:Create(mainBtn, TweenInfo.new(0.12, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+                    Size = UDim2.fromOffset(48, 48)
+                }):Play()
+            end)
 
-                if windowObj and windowObj.Minimize then
-                    windowObj:Minimize()
+            if windowObj and windowObj.Minimize then
+                windowObj:Minimize()
+            elseif windowObj and windowObj.SetState and windowObj.GetState then
+                local cur = windowObj:GetState()
+                windowObj:SetState(not cur)
+            else
+                local base = (targetGuiParent and targetGuiParent:FindFirstChild("Base", true))
+                          or (CoreGui and CoreGui:FindFirstChild("Base", true))
+                if base then
+                    base.Visible = not base.Visible
                 end
             end
+        end
+
+        local lastClickTime = 0
+        mainBtn.Activated:Connect(function()
+            if not movedEnough then
+                local now = os.clock()
+                if now - lastClickTime < 0.15 then return end
+                lastClickTime = now
+                TriggerToggle()
+            end
         end)
+
+        -- Right Click / Long Press re-centers window to center of screen
+        mainBtn.MouseButton2Click:Connect(function()
+            pcall(function()
+                local base = (targetGuiParent and targetGuiParent:FindFirstChild("Base", true))
+                          or (CoreGui and CoreGui:FindFirstChild("Base", true))
+                if base then
+                    base.Position = UDim2.fromScale(0.5, 0.5)
+                    if windowObj and windowObj.SetState then
+                        windowObj:SetState(true)
+                    end
+                end
+            end)
+        end)
+
+        Hub.ToggleUI = TriggerToggle
 
         mainBtn.MouseEnter:Connect(function()
             TweenService:Create(stroke, TweenInfo.new(0.2), { Thickness = 2.6 }):Play()
@@ -3262,18 +3831,43 @@ local function InitUI()
 
         local adapter = {
             RawTab = rawTab,
+            LeftSection = leftSection,
+            RightSection = rightSection,
             Select = function(self)
                 rawTab:Select()
+                pcall(function()
+                    local base = (targetGuiParent and targetGuiParent:FindFirstChild("Base", true))
+                              or (CoreGui and CoreGui:FindFirstChild("Base", true))
+                    if base then
+                        local content = base:FindFirstChild("Content")
+                        if content then
+                            for _, sc in ipairs(content:GetDescendants()) do
+                                if sc:IsA("ScrollingFrame") then
+                                    sc.CanvasPosition = Vector2.zero
+                                end
+                            end
+                        end
+                    end
+                end)
             end,
-            AddSection = function(self, title)
-                if side == "Left" then
-                    side = "Right"
-                    currentSection = rightSection
-                else
+            AddSection = function(self, title, explicitSide)
+                if explicitSide == "Left" then
+                    currentSection = leftSection
                     side = "Left"
-                    currentSection = rawTab:Section({ Side = "Left" })
+                elseif explicitSide == "Right" then
+                    currentSection = rightSection
+                    side = "Right"
+                else
+                    if side == "Left" then
+                        side = "Right"
+                        currentSection = rightSection
+                    else
+                        side = "Left"
+                        currentSection = rawTab:Section({ Side = "Left" })
+                    end
                 end
-                currentSection:Header({ Text = title })
+                local dispTitle = (title:sub(1,3) == "⚡ " or title:sub(1,1) == "⚔" or title:sub(1,1) == "👁" or title:sub(1,1) == "👤" or title:sub(1,1) == "🌾") and title or ("⚡ " .. title)
+                currentSection:Header({ Text = dispTitle })
                 return currentSection
             end,
             AddParagraph = function(self, cfg)
@@ -3294,6 +3888,7 @@ local function InitUI()
                     Callback = function(v)
                         if cfg.Callback then pcall(cfg.Callback, v) end
                         for _, fn in ipairs(changedCallbacks) do pcall(fn, v) end
+                        if Hub.AutoSave then Hub.AutoSave() end
                     end
                 }, flag)
                 macToggle.Value = cfg.Default or false
@@ -3318,6 +3913,7 @@ local function InitUI()
                     Callback = function(v)
                         if cfg.Callback then pcall(cfg.Callback, v) end
                         for _, fn in ipairs(changedCallbacks) do pcall(fn, v) end
+                        if Hub.AutoSave then Hub.AutoSave() end
                     end
                 }, flag)
                 macSlider.Min = cfg.Min or 0
@@ -3344,6 +3940,7 @@ local function InitUI()
                     Callback = function(v)
                         if cfg.Callback then pcall(cfg.Callback, v) end
                         for _, fn in ipairs(changedCallbacks) do pcall(fn, v) end
+                        if Hub.AutoSave then Hub.AutoSave() end
                     end
                 }, flag)
                 macDropdown.Value = cfg.Default or (cfg.Values and cfg.Values[1]) or ""
@@ -3378,6 +3975,7 @@ local function InitUI()
                     Callback = function(v)
                         if cfg.Callback then pcall(cfg.Callback, v) end
                         for _, fn in ipairs(changedCallbacks) do pcall(fn, v) end
+                        if Hub.AutoSave then Hub.AutoSave() end
                     end
                 }, flag)
                 macKeybind.Value = defKey
@@ -3480,7 +4078,7 @@ local function InitUI()
         return adapter
     end
 
-    -- 📑 All Tabs with Icons (หมวดต่อสู้แบบเดิมที่มี Silent Aim ครบครัน)
+    -- 📑 All Tabs with Icons
     local Tabs = {
         Combat    = CreateTabAdapter(tabGroup:Tab({ Name = "ต่อสู้",       Image = "rbxassetid://10709810948" }), "Combat"),
         Visuals   = CreateTabAdapter(tabGroup:Tab({ Name = "มองทะลุ",      Image = "rbxassetid://10747373176" }), "Visuals"),
@@ -3600,473 +4198,227 @@ local function InitUI()
     Hub.Fluent = Fluent
 
     -- ================================================
-    -- ⚔️ COMBAT TAB (หมวดต่อสู้ - ระบบกระสุนเลี้ยว & ม็อดปืน)
+    -- ⚔️ COMBAT TAB (หมวดต่อสู้)
     -- ================================================
-    Tabs.Combat:AddSection("ระบบกระสุนเลี้ยว (Silent Aim Engine)")
-
-    local HeadLock100Toggle = Tabs.Combat:AddToggle("HeadLock100Toggle", {
-        Title = "ล็อคหัว 100% & ปืนเทพ (Silent Head Lock 100%)",
-        Description = "กระสุนเลี้ยวเข้าหัวทุกนัด 100% (ไร้แรงดีด + ปืนไม่ส่าย + ยิงออโต้ + ขยายหัว 14 studs)",
-        Default = true
-    })
-    HeadLock100Toggle:OnChanged(function(v)
-        if v then
-            Hub.Settings.SilentAim = true
-            Hub.Settings.SilentAimBone = "Head"
-            Hub.Settings.SilentAimHitChance = 100
-            Hub.Settings.NoRecoil = true
-            Hub.Settings.NoSpread = true
-            Hub.Settings.FullAuto = true
-            Hub.Settings.HitboxExpander = true
-            Hub.Settings.HitboxTarget = "Head"
-            Hub.Settings.HitboxSize = 6
-            ApplyWeaponMods()
-            if Options.SilentAimToggle then Options.SilentAimToggle:SetValue(true) end
-            if Options.SilentBoneDrop then Options.SilentBoneDrop:SetValue("ส่วนหัว (Head - แนะนำ)") end
-            if Options.SilentHitChanceSlider then Options.SilentHitChanceSlider:SetValue(100) end
-            if Options.NoRecoilToggle then Options.NoRecoilToggle:SetValue(true) end
-            if Options.NoSpreadToggle then Options.NoSpreadToggle:SetValue(true) end
-            if Options.FullAutoToggle then Options.FullAutoToggle:SetValue(true) end
-            if Options.HitboxToggle then Options.HitboxToggle:SetValue(true) end
-            if Options.HitboxTargetDrop then Options.HitboxTargetDrop:SetValue("ส่วนหัว (Head - แนะนำ)") end
-            if Options.HitboxSizeSlider then Options.HitboxSizeSlider:SetValue(10) end
-        end
-    end)
+    Tabs.Combat:AddSection("Silent Aim (ระบบล็อกเป้า)", "Left")
 
     local SilentAimToggle = Tabs.Combat:AddToggle("SilentAimToggle", {
-        Title = "เปิดใช้งานกระสุนเลี้ยว (Silent Aim)",
-        Description = "กระสุนเลี้ยวเข้าเป้าหมายอัตโนมัติ โดยที่มุมกล้องไม่ขยับอิสระ 100%",
+        Title = "กระสุนดูด 100% (Silent Aim)",
+        Description = "ล็อกและดูดกระสุนเข้าเป้าหมายอัตโนมัติ 100% ผ่าน Packet Spoofing",
         Default = Hub.Settings.SilentAim
     })
     SilentAimToggle:OnChanged(function(v)
         Hub.Settings.SilentAim = v
     end)
 
-    local SilentBoneDrop = Tabs.Combat:AddDropdown("SilentBoneDrop", {
-        Title = "ตำแหน่งกระสุนเข้า (Target Bone)",
-        Description = "เลือกชิ้นส่วนร่างกายที่ต้องการให้กระสุนเลี้ยวพุ่งเข้าชน",
-        Values = {"ส่วนหัว (Head - แนะนำ)", "ลำตัวส่วนบน (UpperTorso)", "สุ่มตำแหน่ง (Random)"},
-        Default = "ส่วนหัว (Head - แนะนำ)"
+    local SilentAimPartDrop = Tabs.Combat:AddDropdown("SilentAimPartDrop", {
+        Title = "ชิ้นส่วนเป้าหมาย (Target Bone)",
+        Description = "เลือกจุดที่ต้องการให้กระสุนดูดเข้าชน",
+        Values = {"Head", "UpperTorso"},
+        Default = Hub.Settings.SilentAimTargetPart or "Head"
     })
-    SilentBoneDrop:OnChanged(function(v)
-        if v:find("ส่วนหัว") or v:find("Head") then
-            Hub.Settings.SilentAimBone = "Head"
-        elseif v:find("ลำตัว") or v:find("UpperTorso") then
-            Hub.Settings.SilentAimBone = "UpperTorso"
-        else
-            Hub.Settings.SilentAimBone = "Random"
-        end
+    SilentAimPartDrop:OnChanged(function(v)
+        Hub.Settings.SilentAimTargetPart = v
     end)
 
-    local SilentHitChanceSlider = Tabs.Combat:AddSlider("SilentHitChanceSlider", {
-        Title = "โอกาสโดน (Hit Chance %)",
-        Description = "100% = โดนทุกลูก | ปรับลดลงถ้าต้องการให้ดูเนียนเหมือนคนเล่นจริง",
-        Default = Hub.Settings.SilentAimHitChance,
-        Min = 10,
-        Max = 100,
-        Rounding = 0
+    local VisibleCheckToggle = Tabs.Combat:AddToggle("VisibleCheckToggle", {
+        Title = "ตรวจสอบกำแพง (Visible Check)",
+        Description = "เช็คระยะสายตาก่อนล็อกเป้า ป้องกันการล็อกเป้าหมายหลังกำแพง",
+        Default = Hub.Settings.VisibleCheck
     })
-    SilentHitChanceSlider:OnChanged(function(v)
-        Hub.Settings.SilentAimHitChance = v
+    VisibleCheckToggle:OnChanged(function(v)
+        Hub.Settings.VisibleCheck = v
     end)
 
-    local SilentMaxDistSlider = Tabs.Combat:AddSlider("SilentMaxDistSlider", {
-        Title = "ระยะยิงสูงสุด (Max Distance)",
-        Description = "ไม่เลี้ยวกระสุนใส่ศัตรูที่อยู่ไกลเกินระยะนี้ (Studs)",
-        Default = Hub.Settings.SilentAimMaxDist,
+    local TargetDownedToggle = Tabs.Combat:AddToggle("TargetDownedToggle", {
+        Title = "ล็อกคนที่ล้มด้วย (Target Downed)",
+        Description = "ล็อกเป้าหมายต่อแม้ศัตรูจะล้มลงไปนอนกับพื้น",
+        Default = Hub.Settings.TargetDowned
+    })
+    TargetDownedToggle:OnChanged(function(v)
+        Hub.Settings.TargetDowned = v
+    end)
+
+    Tabs.Combat:AddSection("FOV Circle (วงกลมหน้าจอ)", "Left")
+
+    local ShowFOVToggle = Tabs.Combat:AddToggle("ShowFOVToggle", {
+        Title = "แสดงวงกลม FOV",
+        Description = "แสดงวงกลมขอบเขตการล็อกเป้าหมายบนหน้าจอ",
+        Default = Hub.Settings.ShowFOV
+    })
+    ShowFOVToggle:OnChanged(function(v)
+        Hub.Settings.ShowFOV = v
+        if Hub.SilentAimFOVCircle then Hub.SilentAimFOVCircle.Visible = v end
+    end)
+
+    local FOVRadiusSlider = Tabs.Combat:AddSlider("FOVRadiusSlider", {
+        Title = "ขนาดรัศมี FOV (Radius)",
+        Description = "ปรับขนาดรัศมีวงกลม FOV บนหน้าจอ (Pixels)",
+        Default = Hub.Settings.FOVRadius or 180,
         Min = 50,
-        Max = 800,
+        Max = 500,
         Rounding = 0
     })
-    SilentMaxDistSlider:OnChanged(function(v)
-        Hub.Settings.SilentAimMaxDist = v
+    FOVRadiusSlider:OnChanged(function(v)
+        Hub.Settings.FOVRadius = v
+        if Hub.SilentAimFOVCircle then Hub.SilentAimFOVCircle.Radius = v end
     end)
 
-    local SilentPriorityDrop = Tabs.Combat:AddDropdown("SilentPriorityDrop", {
-        Title = "ลำดับเป้าหมาย (Priority)",
-        Description = "เลือกว่าจะเลี้ยวยิงศัตรูที่ใกล้กึ่งกลางเป้าเล็งสุด หรือใกล้ตัวเราที่สุด",
-        Values = {"ใกล้กึ่งกลางเป้าเล็งสุด (แนะนำ)", "ศัตรูที่ใกล้ตัวเราที่สุด"},
-        Default = "ใกล้กึ่งกลางเป้าเล็งสุด (แนะนำ)"
+    Tabs.Combat:AddSection("Auto Shoot (ยิงออโต้)", "Right")
+
+    local AutoShootToggle = Tabs.Combat:AddToggle("AutoShootToggle", {
+        Title = "เปิดใช้งาน Auto Shoot",
+        Description = "เมื่อมีเป้าหมายเข้ามาในระยะวง FOV ระบบจะลั่นไกยิงทันที",
+        Default = Hub.Settings.AutoShoot
     })
-    SilentPriorityDrop:OnChanged(function(v)
-        if v:find("กึ่งกลาง") or v:find("Crosshair") then
-            Hub.Settings.SilentAimPriority = "Crosshair"
-        else
-            Hub.Settings.SilentAimPriority = "Distance"
-        end
+    AutoShootToggle:OnChanged(function(v)
+        Hub.Settings.AutoShoot = v
     end)
 
-    Tabs.Combat:AddSection("การคัดกรองเป้าหมาย (Target Filters)")
-
-    local SilentWallCheckToggle = Tabs.Combat:AddToggle("SilentWallCheckToggle", {
-        Title = "เช็คสิ่งกีดขวาง (Wall Check)",
-        Description = "ไม่เลี้ยวกระสุนหากศัตรูแอบอยู่หลังกำแพงหรือสิ่งปลูกสร้าง",
-        Default = Hub.Settings.SilentAimWallCheck
-    })
-    SilentWallCheckToggle:OnChanged(function(v)
-        Hub.Settings.SilentAimWallCheck = v
-    end)
-
-    local SilentHoodToggle = Tabs.Combat:AddToggle("SilentHoodToggle", {
-        Title = "เลี้ยวยิงบอท Hood ด้วย (Target Hood NPCs)",
-        Description = "กระสุนเลี้ยวเข้าหัวบอท Hood ในโหมดฟาร์ม/อีเวนต์ด้วย",
-        Default = (Hub.Settings.SilentAimTargetHood ~= nil and Hub.Settings.SilentAimTargetHood) or Hub.Settings.SilentAimTargetZombies
-    })
-    SilentHoodToggle:OnChanged(function(v)
-        Hub.Settings.SilentAimTargetHood = v
-        Hub.Settings.SilentAimTargetZombies = v
-    end)
-
-    local SilentSafeZoneToggle = Tabs.Combat:AddToggle("SilentSafeZoneToggle", {
-        Title = "ข้ามคนในเซฟโซน (Ignore SafeZone)",
-        Description = "ไม่เลี้ยวกระสุนใส่คนในพื้นที่ปลอดภัยหรือเปิด PvPSafe",
-        Default = Hub.Settings.SilentAimIgnoreSafeZone
-    })
-    SilentSafeZoneToggle:OnChanged(function(v)
-        Hub.Settings.SilentAimIgnoreSafeZone = v
-    end)
-
-    local SilentShieldToggle = Tabs.Combat:AddToggle("SilentShieldToggle", {
-        Title = "ข้ามคนเกิดใหม่มีเกราะ (Ignore Spawn Shield)",
-        Description = "ไม่เลี้ยวกระสุนใส่คนที่มีเกราะกันดาเมจตอนเพิ่งเกิดใหม่",
-        Default = Hub.Settings.SilentAimIgnoreShield
-    })
-    SilentShieldToggle:OnChanged(function(v)
-        Hub.Settings.SilentAimIgnoreShield = v
-    end)
-
-    local SilentDownedToggle = Tabs.Combat:AddToggle("SilentDownedToggle", {
-        Title = "ข้ามศัตรูที่ล้มคลาน (Ignore Downed)",
-        Description = "ไม่เลี้ยวกระสุนใส่คนที่ล้มคลาน เพื่อโฟกัสคนที่ยังยืนยิงเรา",
-        Default = Hub.Settings.SilentAimIgnoreDowned
-    })
-    SilentDownedToggle:OnChanged(function(v)
-        Hub.Settings.SilentAimIgnoreDowned = v
-    end)
-
-    Tabs.Combat:AddSection("วงกลมระยะเล็ง (Silent Aim FOV Circle)")
-
-    local SilentDrawFOVToggle = Tabs.Combat:AddToggle("SilentDrawFOVToggle", {
-        Title = "แสดงวงกลมกระสุนเลี้ยว (Draw Silent FOV)",
-        Description = "เปิด/ปิด การแสดงวงกลมระยะเลี้ยวของ Silent Aim บนหน้าจอ",
-        Default = Hub.Settings.SilentAimDrawFOV
-    })
-    SilentDrawFOVToggle:OnChanged(function(v)
-        Hub.Settings.SilentAimDrawFOV = v
-        if SilentFOVCircle then
-            SilentFOVCircle.Visible = v
-        end
-    end)
-
-    local SilentFOVSlider = Tabs.Combat:AddSlider("SilentFOVSlider", {
-        Title = "ขนาดวงกลมกระสุนเลี้ยว (Silent FOV Radius)",
-        Description = "รัศมีตรวจจับเป้าหมายที่จะเลี้ยวกระสุนเข้าใส่ (แนะนำ 180 - 250)",
-        Default = Hub.Settings.SilentAimFOV,
-        Min = 50,
-        Max = 800,
-        Rounding = 0
-    })
-    SilentFOVSlider:OnChanged(function(v)
-        Hub.Settings.SilentAimFOV = v
-        if SilentFOVCircle then
-            SilentFOVCircle.Radius = v
-        end
-    end)
-
-    local SilentColorDrop = Tabs.Combat:AddDropdown("SilentColorDrop", {
-        Title = "สีวงกลม Silent Aim (Preset Color)",
-        Description = "เลือกชุดสีมาตรฐานหรือเลือกปรับแต่งแม่สี RGB แยกเอง",
-        Values = {
-            "ส้มนีออน (Neon Orange - ค่าเริ่มต้น)",
-            "ฟ้าคราม (Cyan Blue)",
-            "แดงสด (Crimson Red)",
-            "เขียวนีออน (Neon Green)",
-            "ม่วงนีออน (Electric Purple)",
-            "เหลืองทอง (Gold)",
-            "ชมพูนีออน (Hot Pink)",
-            "ขาวสว่าง (Pure White)",
-            "กำหนดค่าสี RGB เอง"
-        },
-        Default = "ส้มนีออน (Neon Orange - ค่าเริ่มต้น)"
-    })
-
-    local SilentRainbowToggle = Tabs.Combat:AddToggle("SilentRainbowToggle", {
-        Title = "วงกลม Silent Aim สีรุ้ง (Rainbow RGB Cycle)",
-        Description = "ให้วงกลม Silent Aim สลับสีรุ้งเคลื่อนไหวอย่างสมูท",
-        Default = Hub.Settings.SilentAimFOVRainbow
-    })
-    SilentRainbowToggle:OnChanged(function(v)
-        Hub.Settings.SilentAimFOVRainbow = v
-    end)
-
-    local SilentRSlider = Tabs.Combat:AddSlider("SilentRSlider", {
-        Title = "สีแดง Silent Aim (Red)",
-        Description = "ปรับค่าแม่สีแดง (0 - 255)",
-        Default = Hub.Settings.SilentAimFOVR,
-        Min = 0,
-        Max = 255,
-        Rounding = 0
-    })
-
-    local SilentGSlider = Tabs.Combat:AddSlider("SilentGSlider", {
-        Title = "สีเขียว Silent Aim (Green)",
-        Description = "ปรับค่าแม่สีเขียว (0 - 255)",
-        Default = Hub.Settings.SilentAimFOVG,
-        Min = 0,
-        Max = 255,
-        Rounding = 0
-    })
-
-    local SilentBSlider = Tabs.Combat:AddSlider("SilentBSlider", {
-        Title = "สีน้ำเงิน Silent Aim (Blue)",
-        Description = "ปรับค่าแม่สีน้ำเงิน (0 - 255)",
-        Default = Hub.Settings.SilentAimFOVB,
-        Min = 0,
-        Max = 255,
-        Rounding = 0
-    })
-
-    local function UpdateSilentColorFromRGB()
-        Hub.Settings.SilentAimFOVColor = Color3.fromRGB(Hub.Settings.SilentAimFOVR, Hub.Settings.SilentAimFOVG, Hub.Settings.SilentAimFOVB)
-        if SilentFOVCircle then
-            SilentFOVCircle.Color = Hub.Settings.SilentAimFOVColor
-        end
-    end
-
-    SilentRSlider:OnChanged(function(v)
-        Hub.Settings.SilentAimFOVR = v
-        UpdateSilentColorFromRGB()
-    end)
-    SilentGSlider:OnChanged(function(v)
-        Hub.Settings.SilentAimFOVG = v
-        UpdateSilentColorFromRGB()
-    end)
-    SilentBSlider:OnChanged(function(v)
-        Hub.Settings.SilentAimFOVB = v
-        UpdateSilentColorFromRGB()
-    end)
-
-    SilentColorDrop:OnChanged(function(v)
-        if v:find("ส้มนีออน") or v:find("Orange") then
-            Hub.Settings.SilentAimFOVR, Hub.Settings.SilentAimFOVG, Hub.Settings.SilentAimFOVB = 255, 140, 0
-        elseif v:find("ฟ้าคราม") or v:find("Cyan") then
-            Hub.Settings.SilentAimFOVR, Hub.Settings.SilentAimFOVG, Hub.Settings.SilentAimFOVB = 0, 220, 255
-        elseif v:find("แดงสด") or v:find("Red") then
-            Hub.Settings.SilentAimFOVR, Hub.Settings.SilentAimFOVG, Hub.Settings.SilentAimFOVB = 255, 45, 45
-        elseif v:find("เขียว") or v:find("Green") then
-            Hub.Settings.SilentAimFOVR, Hub.Settings.SilentAimFOVG, Hub.Settings.SilentAimFOVB = 50, 255, 80
-        elseif v:find("ม่วง") or v:find("Purple") then
-            Hub.Settings.SilentAimFOVR, Hub.Settings.SilentAimFOVG, Hub.Settings.SilentAimFOVB = 180, 50, 255
-        elseif v:find("เหลือง") or v:find("Gold") then
-            Hub.Settings.SilentAimFOVR, Hub.Settings.SilentAimFOVG, Hub.Settings.SilentAimFOVB = 255, 215, 0
-        elseif v:find("ชมพู") or v:find("Pink") then
-            Hub.Settings.SilentAimFOVR, Hub.Settings.SilentAimFOVG, Hub.Settings.SilentAimFOVB = 255, 60, 180
-        elseif v:find("ขาว") or v:find("White") then
-            Hub.Settings.SilentAimFOVR, Hub.Settings.SilentAimFOVG, Hub.Settings.SilentAimFOVB = 255, 255, 255
-        end
-        UpdateSilentColorFromRGB()
-        if Options.SilentRSlider then Options.SilentRSlider:SetValue(Hub.Settings.SilentAimFOVR) end
-        if Options.SilentGSlider then Options.SilentGSlider:SetValue(Hub.Settings.SilentAimFOVG) end
-        if Options.SilentBSlider then Options.SilentBSlider:SetValue(Hub.Settings.SilentAimFOVB) end
-    end)
-
-    local FOVThicknessSlider = Tabs.Combat:AddSlider("FOVThicknessSlider", {
-        Title = "ความหนาเส้นวงกลม (Circle Thickness)",
-        Description = "ปรับความหนาของเส้นขอบวงกลม",
-        Default = Hub.Settings.FOVCircleThickness,
-        Min = 1,
-        Max = 6,
-        Rounding = 1
-    })
-    FOVThicknessSlider:OnChanged(function(v)
-        Hub.Settings.FOVCircleThickness = v
-        if SilentFOVCircle then SilentFOVCircle.Thickness = v end
-    end)
-
-    local FOVTransparencySlider = Tabs.Combat:AddSlider("FOVTransparencySlider", {
-        Title = "ความโปร่งใสของเส้นวงกลม (Circle Transparency)",
-        Description = "ปรับความเข้มชัดหรือโปร่งใสของเส้นวงกลม (0.1 - 1.0)",
-        Default = Hub.Settings.FOVCircleTransparency,
-        Min = 0.1,
-        Max = 1.0,
-        Rounding = 2
-    })
-    FOVTransparencySlider:OnChanged(function(v)
-        Hub.Settings.FOVCircleTransparency = v
-        if SilentFOVCircle then SilentFOVCircle.Transparency = v end
-    end)
-
-    local FOVFilledToggle = Tabs.Combat:AddToggle("FOVFilledToggle", {
-        Title = "เติมสีเต็มวงกลม (Filled Circle)",
-        Description = "ระบายสีทึบภายในวงกลม",
-        Default = Hub.Settings.FOVCircleFilled
-    })
-    FOVFilledToggle:OnChanged(function(v)
-        Hub.Settings.FOVCircleFilled = v
-        if SilentFOVCircle then SilentFOVCircle.Filled = v end
-    end)
-
-    Tabs.Combat:AddSection("ปรับแต่งปืน (Weapon Modifications)")
-
-    local NoRecoilToggle = Tabs.Combat:AddToggle("NoRecoilToggle", {
-        Title = "ปืนไร้แรงดีด 100% (No Recoil)",
-        Description = "ปิดแรงดีดปืนทุกทิศทาง ยิงนิ่งสนิท 100% ปืนไม่กระดก",
-        Default = Hub.Settings.NoRecoil
-    })
-    NoRecoilToggle:OnChanged(function(v)
-        Hub.Settings.NoRecoil = v
-        ApplyWeaponMods()
-    end)
-
-    local NoSpreadToggle = Tabs.Combat:AddToggle("NoSpreadToggle", {
-        Title = "กระสุนตรงเป้า 100% (No Spread)",
-        Description = "ปิดการกระจายของกระสุน กระสุนเกาะกลุ่มจุดเดียวทุกนัด",
-        Default = Hub.Settings.NoSpread
-    })
-    NoSpreadToggle:OnChanged(function(v)
-        Hub.Settings.NoSpread = v
-        ApplyWeaponMods()
-    end)
-
-    local FullAutoToggle = Tabs.Combat:AddToggle("FullAutoToggle", {
-        Title = "ยิงออโต้ทุกปืน (Full Auto)",
-        Description = "เปลี่ยนโหมดยิงของปืนทุกชนิด (M9/ลูกซอง) ให้กดยิงค้างรัวได้",
-        Default = Hub.Settings.FullAuto
-    })
-    FullAutoToggle:OnChanged(function(v)
-        Hub.Settings.FullAuto = v
-        ApplyWeaponMods()
-    end)
-
-    local RapidToggle = Tabs.Combat:AddToggle("RapidToggle", {
-        Title = "เพิ่มความเร็วลั่นกระสุน (Rapid Fire)",
-        Description = "เพิ่มอัตราลั่นกระสุน (RPM) ยิงกระสุนออกไวกว่าปกติ",
-        Default = Hub.Settings.RapidFire
-    })
-    RapidToggle:OnChanged(function(v)
-        Hub.Settings.RapidFire = v
-        ApplyWeaponMods()
-    end)
-
-    local RapidFireRPMSlider = Tabs.Combat:AddSlider("RapidFireRPMSlider", {
-        Title = "ความเร็วรอบลั่นกระสุน (RPM Rate)",
-        Description = "ปรับความเร็วการลั่นกระสุนต่อนาที (RPM)",
-        Default = Hub.Settings.RapidFireRPM or 1100,
+    local RPMSlider = Tabs.Combat:AddSlider("RPMSlider", {
+        Title = "ความเร็วรอบลั่นกระสุน (RPM)",
+        Description = "ปรับความเร็วรอบการยิงของปืน (600 ถึง 1800 RPM)",
+        Default = Hub.Settings.RPM or 900,
         Min = 600,
         Max = 1800,
         Rounding = 0
     })
-    RapidFireRPMSlider:OnChanged(function(v)
-        Hub.Settings.RapidFireRPM = v
-        ApplyWeaponMods()
+    RPMSlider:OnChanged(function(v)
+        Hub.Settings.RPM = v
+        pcall(ApplyWeaponMods)
     end)
 
-    local InstantReloadToggle = Tabs.Combat:AddToggle("InstantReloadToggle", {
-        Title = "รีโหลดกระสุนทันที (Instant Reload)",
-        Description = "ลดเวลาบรรจุกระสุนลงเหลือ 0.05 วินาที รีโหลดแทบจะทันที",
-        Default = Hub.Settings.InstantReload
+    local AutoShootDelaySlider = Tabs.Combat:AddSlider("AutoShootDelaySlider", {
+        Title = "หน่วงเวลาเพิ่มเติม (Delay ms)",
+        Description = "หน่วงเวลาเพิ่มเติมก่อนลั่นไกนัดแรก (0 = ลั่นทันที)",
+        Default = Hub.Settings.AutoShootDelay or 0,
+        Min = 0,
+        Max = 100,
+        Rounding = 0
     })
-    InstantReloadToggle:OnChanged(function(v)
-        Hub.Settings.InstantReload = v
-        ApplyWeaponMods()
+    AutoShootDelaySlider:OnChanged(function(v)
+        Hub.Settings.AutoShootDelay = v
     end)
 
+    Tabs.Combat:AddSection("ปรับแต่งปืนขั้นเทพ (Weapon Modifiers)", "Right")
 
-
-    Tabs.Combat:AddSection("ขยายฮิตบ็อกซ์ (Hitbox Expander)")
-
-    local HitboxToggle = Tabs.Combat:AddToggle("HitboxToggle", {
-        Title = "เปิดขยายฮิตบ็อกซ์ (Hitbox Expander)",
-        Description = "ขยายขนาด Hitbox ศัตรู ยิงโดนหัวง่าย 100% แม้ยิงไม่ตรงเป้า",
-        Default = Hub.Settings.HitboxExpander
+    local NoRecoilToggle = Tabs.Combat:AddToggle("NoRecoilToggle", {
+        Title = "ปิดแรงดีด 100% (Zero Recoil)",
+        Description = "กล้องและเป้าเล็งนิ่งสนิท ไร้แรงกระตุก/ดีดเวลายิง",
+        Default = Hub.Settings.NoRecoil
     })
-    HitboxToggle:OnChanged(function(v)
-        Hub.Settings.HitboxExpander = v
-        if not v then
-            local ch = Workspace:FindFirstChild("ClientHitboxes")
-            if ch then
-                for _, f in ipairs(ch:GetChildren()) do
-                    for _, p in ipairs(f:GetChildren()) do
-                        if p:IsA("BasePart") then p.Transparency = 1 end
-                    end
-                end
-            end
-        end
+    NoRecoilToggle:OnChanged(function(v)
+        Hub.Settings.NoRecoil = v
+        pcall(ApplyWeaponMods)
     end)
 
-    local HitboxSizeSlider = Tabs.Combat:AddSlider("HitboxSizeSlider", {
-        Title = "ขนาดฮิตบ็อกซ์ (Hitbox Size)",
-        Description = "ขนาดของกล่องเป้าหมายที่ต้องการขยาย (Studs)",
-        Default = Hub.Settings.HitboxSize,
-        Min = 2,
-        Max = 25,
-        Rounding = 1
+    local NoSpreadToggle = Tabs.Combat:AddToggle("NoSpreadToggle", {
+        Title = "ปืนยิงตรง 100% (Zero Spread)",
+        Description = "กระสุนพุ่งเป็นเส้นตรงจุดเดียว ไม่บานออก",
+        Default = Hub.Settings.NoSpread
     })
-    HitboxSizeSlider:OnChanged(function(v)
-        Hub.Settings.HitboxSize = v
+    NoSpreadToggle:OnChanged(function(v)
+        Hub.Settings.NoSpread = v
+        pcall(ApplyWeaponMods)
     end)
 
-    local HitboxTargetDrop = Tabs.Combat:AddDropdown("HitboxTargetDrop", {
-        Title = "ชิ้นส่วนเป้าหมาย (Target Part)",
-        Description = "เลือกส่วนของร่างกายศัตรูที่ต้องการขยายขนาด",
-        Values = {"ส่วนหัว (Head - แนะนำ)", "ลำตัวส่วนบน (UpperTorso)", "ทุกส่วน (All Parts)"},
-        Default = "ส่วนหัว (Head - แนะนำ)"
+    local InfiniteAmmoToggle = Tabs.Combat:AddToggle("InfiniteAmmoToggle", {
+        Title = "กระสุนไม่จำกัด (Infinite Ammo)",
+        Description = "ยิงกระสุนได้เรื่อยๆ โดยไม่จำกัดจำนวนนัด",
+        Default = Hub.Settings.InfiniteAmmo
     })
-    HitboxTargetDrop:OnChanged(function(v)
-        if v:find("ส่วนหัว") or v:find("Head") then
-            Hub.Settings.HitboxTarget = "Head"
-        elseif v:find("ลำตัว") or v:find("UpperTorso") then
-            Hub.Settings.HitboxTarget = "UpperTorso"
+    InfiniteAmmoToggle:OnChanged(function(v)
+        Hub.Settings.InfiniteAmmo = v
+        pcall(ApplyWeaponMods)
+    end)
+
+    local FastReloadToggle = Tabs.Combat:AddToggle("FastReloadToggle", {
+        Title = "รีโหลดไวทันที (Fast Reload)",
+        Description = "ลดเวลารีโหลดกระสุนเหลือ 0.05 วินาที",
+        Default = Hub.Settings.FastReload
+    })
+    FastReloadToggle:OnChanged(function(v)
+        Hub.Settings.FastReload = v
+        pcall(ApplyWeaponMods)
+    end)
+
+    local FastEquipToggle = Tabs.Combat:AddToggle("FastEquipToggle", {
+        Title = "ชักปืนไว (Fast Equip)",
+        Description = "สลับปืนพร้อมยิงทันที ไม่ติดคูลดาวน์สลับปืน",
+        Default = Hub.Settings.FastEquip
+    })
+    FastEquipToggle:OnChanged(function(v)
+        Hub.Settings.FastEquip = v
+        pcall(ApplyWeaponMods)
+    end)
+
+    local AlwaysShootToggle = Tabs.Combat:AddToggle("AlwaysShootToggle", {
+        Title = "ยิงขณะกลิ้งตัว/เคลื่อนที่ (Always Shoot)",
+        Description = "ปลดล็อกให้ลั่นไกได้ตลอดเวลา แม้จะอยู่ในท่ากลิ้งตัวหรือวิ่ง",
+        Default = Hub.Settings.AlwaysShoot
+    })
+    AlwaysShootToggle:OnChanged(function(v)
+        Hub.Settings.AlwaysShoot = v
+    end)
+
+    -- ================================================
+
+    local function getESPFont()
+        local f = Hub.Settings.ESPFont or "UI"
+        if typeof(f) == "string" and (f == "System" or f:find("System")) then
+            return Enum.Font.SourceSansBold
+        elseif typeof(f) == "string" and (f == "Plex" or f:find("Plex")) then
+            return Enum.Font.RobotoMono
+        elseif typeof(f) == "string" and (f == "Monospace" or f:find("Monospace")) then
+            return Enum.Font.Code
         else
-            Hub.Settings.HitboxTarget = "All"
+            return Enum.Font.GothamBold
         end
-    end)
+    end
 
-    local HitboxVisToggle = Tabs.Combat:AddToggle("HitboxVisToggle", {
-        Title = "แสดงกล่องฮิตบ็อกซ์เรืองแสง (Show Hitbox Visualizer)",
-        Description = "แสดงกล่องเรืองแสงของ Hitbox ศัตรูบนหน้าจอ",
-        Default = Hub.Settings.HitboxVisible
-    })
-    HitboxVisToggle:OnChanged(function(v)
-        Hub.Settings.HitboxVisible = v
-    end)
+    local UpdateESPPreview = function() end
 
-    -- Apply initial weapon mods
-    ApplyWeaponMods()
-    -- ================================================
-    -- 👁️ VISUALS TAB (หมวดมองทะลุ)
-    -- ================================================
-    Tabs.Visuals:AddSection("มองทะลุผู้เล่น (Player ESP)")
+    Tabs.Visuals:AddSection("มองทะลุผู้เล่น (Player ESP)", "Left")
 
     local ESPMainToggle = Tabs.Visuals:AddToggle("ESPMainToggle", {
-        Title = "เปิดระบบมองทะลุผู้เล่น (Enable Player ESP)",
-        Description = "เปิด/ปิดระบบมองทะลุผู้เล่นทั้งหมดในเซิร์ฟเวอร์",
+        Title = "เปิดมองทะลุผู้เล่นทั้งหมด (Master ESP)",
+        Description = "เปิด/ปิดมองทะลุภาพรวม (ตัวเลือกด้านล่างสามารถเปิดแยกเดี่ยวได้ทันที ไม่จำเป็นต้องเปิดตัวนี้ก่อน)",
         Default = Hub.Settings.PlayerESP
     })
     ESPMainToggle:OnChanged(function(v)
         Hub.Settings.PlayerESP = v
+        pcall(UpdateESPPreview)
     end)
 
     local ESPBoxToggle = Tabs.Visuals:AddToggle("ESPBoxToggle", {
-        Title = "กรอบสี่เหลี่ยมตัวละคร (2D Box)",
+        Title = "กรอบสี่เหลี่ยม (2D Box)",
         Description = "แสดงกรอบสี่เหลี่ยมรอบตัวผู้เล่นศัตรู",
         Default = Hub.Settings.ESPBox
     })
-    ESPBoxToggle:OnChanged(function(v) Hub.Settings.ESPBox = v end)
+    ESPBoxToggle:OnChanged(function(v)
+        Hub.Settings.ESPBox = v
+        pcall(UpdateESPPreview)
+    end)
 
     local ESPChamsToggle = Tabs.Visuals:AddToggle("ESPChamsToggle", {
         Title = "เรืองแสงตัวศัตรู (Chams)",
         Description = "เรืองแสงไฮไลท์ขอบแดง ตัวแดงจาง มองทะลุกำแพงง่ายขึ้น",
         Default = Hub.Settings.ESPChams
     })
-    ESPChamsToggle:OnChanged(function(v) Hub.Settings.ESPChams = v end)
+    ESPChamsToggle:OnChanged(function(v)
+        Hub.Settings.ESPChams = v
+        pcall(UpdateESPPreview)
+    end)
 
     local ESPNameToggle = Tabs.Visuals:AddToggle("ESPNameToggle", {
         Title = "แสดงชื่อผู้เล่น (Player Names)",
         Description = "แสดงชื่อและไอดีของผู้เล่น",
         Default = Hub.Settings.ESPName
     })
-    ESPNameToggle:OnChanged(function(v) Hub.Settings.ESPName = v end)
+    ESPNameToggle:OnChanged(function(v)
+        Hub.Settings.ESPName = v
+        pcall(UpdateESPPreview)
+    end)
 
     local ESPFontDrop = Tabs.Visuals:AddDropdown("ESPFontDrop", {
         Title = "ฟอนต์ตัวอักษร (ESP Font)",
@@ -4084,10 +4436,11 @@ local function InitUI()
         elseif v:find("Monospace") then
             Hub.Settings.ESPFont = "Monospace"
         end
+        pcall(UpdateESPPreview)
     end)
 
     local ESPNameModeDrop = Tabs.Visuals:AddDropdown("ESPNameModeDrop", {
-        Title = "รูปแบบแสดงชื่อ (Name Format)",
+        Title = "รูปแบบชื่อ (Name Format)",
         Description = "เลือกรูปแบบการแสดงชื่อผู้เล่น",
         Values = {"ชื่อเล่น (DisplayName - อ่านง่ายสุด)", "ไอดีเกม (Username)", "แสดงทั้งสองอย่าง (Both)"},
         Default = "ชื่อเล่น (DisplayName - อ่านง่ายสุด)"
@@ -4100,6 +4453,7 @@ local function InitUI()
         elseif v:find("ทั้งสองอย่าง") or v:find("Both") then
             Hub.Settings.ESPNameMode = "Both"
         end
+        pcall(UpdateESPPreview)
     end)
 
     local ESPFontSizeSlider = Tabs.Visuals:AddSlider("ESPFontSizeSlider", {
@@ -4112,31 +4466,41 @@ local function InitUI()
     })
     ESPFontSizeSlider:OnChanged(function(v)
         Hub.Settings.ESPFontSize = v
+        pcall(UpdateESPPreview)
     end)
 
     local ESPHealthToggle = Tabs.Visuals:AddToggle("ESPHealthToggle", {
-        Title = "แสดงตัวเลขพลังชีวิต (Health Text)",
+        Title = "ตัวเลขพลังชีวิต (Health Text)",
         Description = "แสดงตัวเลขเปอร์เซ็นต์เลือด HP ของศัตรู",
         Default = Hub.Settings.ESPHealth
     })
-    ESPHealthToggle:OnChanged(function(v) Hub.Settings.ESPHealth = v end)
+    ESPHealthToggle:OnChanged(function(v)
+        Hub.Settings.ESPHealth = v
+        pcall(UpdateESPPreview)
+    end)
 
     local ESPHealthBarToggle = Tabs.Visuals:AddToggle("ESPHealthBarToggle", {
-        Title = "หลอดเลือดข้างตัวศัตรู (Dynamic Health Bar)",
+        Title = "หลอดเลือดศัตรู (Health Bar)",
         Description = "หลอดเลือดข้างตัวศัตรู ไล่ระดับสีตามเลือด (100% เขียว -> ส้ม -> 20% แดง)",
         Default = Hub.Settings.ESPHealthBar
     })
-    ESPHealthBarToggle:OnChanged(function(v) Hub.Settings.ESPHealthBar = v end)
+    ESPHealthBarToggle:OnChanged(function(v)
+        Hub.Settings.ESPHealthBar = v
+        pcall(UpdateESPPreview)
+    end)
 
     local ESPDistToggle = Tabs.Visuals:AddToggle("ESPDistToggle", {
         Title = "แสดงระยะห่าง (Distance)",
         Description = "แสดงระยะทางระหว่างเรากับผู้เล่น (เมตร/Studs)",
         Default = Hub.Settings.ESPDistance
     })
-    ESPDistToggle:OnChanged(function(v) Hub.Settings.ESPDistance = v end)
+    ESPDistToggle:OnChanged(function(v)
+        Hub.Settings.ESPDistance = v
+        pcall(UpdateESPPreview)
+    end)
 
     local ESPMaxDistSlider = Tabs.Visuals:AddSlider("ESPMaxDistSlider", {
-        Title = "ระยะแสดงผล ESP (Max Distance)",
+        Title = "ระยะมองทะลุ (Max Distance)",
         Description = "กำหนดระยะการมองเห็นผู้เล่น (Studs) ไกลเกินนี้จะไม่แสดง",
         Default = Hub.Settings.ESPMaxDistance or 1500,
         Min = 100,
@@ -4148,23 +4512,355 @@ local function InitUI()
     end)
 
     local ESPWeaponToggle = Tabs.Visuals:AddToggle("ESPWeaponToggle", {
-        Title = "แสดงชื่อปืนที่ถือ (Equipped Weapon)",
+        Title = "ชื่อปืนที่ถือ (Held Weapon)",
         Description = "แสดงชื่ออาวุธปืนที่ผู้เล่นกำลังถืออยู่ในมือ",
         Default = Hub.Settings.ESPWeapon
     })
-    ESPWeaponToggle:OnChanged(function(v) Hub.Settings.ESPWeapon = v end)
+    ESPWeaponToggle:OnChanged(function(v)
+        Hub.Settings.ESPWeapon = v
+        pcall(UpdateESPPreview)
+    end)
 
     local ESPTracerToggle = Tabs.Visuals:AddToggle("ESPTracerToggle", {
-        Title = "เส้นนำสายตา (Tracers)",
+        Title = "เส้นชี้ตัวศัตรู (Tracers)",
         Description = "ลากเส้นนำสายตาจากกลางจอด้านล่างไปยังตัวผู้เล่น",
         Default = Hub.Settings.ESPTracers
     })
-    ESPTracerToggle:OnChanged(function(v) Hub.Settings.ESPTracers = v end)
+    ESPTracerToggle:OnChanged(function(v)
+        Hub.Settings.ESPTracers = v
+        pcall(UpdateESPPreview)
+    end)
 
-    Tabs.Visuals:AddSection("เซฟโซน (Safe Zone ESP)")
+    -- 🌟 3D LIVE ESP PREVIEW ENGINE (หมุน 360° โมเดลเบค่อนแท้ Roblox ดึงจาก sportsclub)
+    local rightVisualSection = Tabs.Visuals:AddSection("พรีวิวสด 3D (Live ESP Preview)", "Right")
+    
+    local previewContainer = Instance.new("Frame")
+    previewContainer.Name = "ESPPreviewContainer"
+    previewContainer.Size = UDim2.new(1, 0, 0, 260)
+    previewContainer.BackgroundColor3 = Color3.fromRGB(15, 16, 22)
+    previewContainer.BorderSizePixel = 0
+    previewContainer.ClipsDescendants = true
+    previewContainer.Parent = rightVisualSection.Instance
+
+    local previewCorner = Instance.new("UICorner")
+    previewCorner.CornerRadius = UDim.new(0, 8)
+    previewCorner.Parent = previewContainer
+
+    local previewStroke = Instance.new("UIStroke")
+    previewStroke.Color = Color3.fromRGB(45, 50, 70)
+    previewStroke.Thickness = 1
+    previewStroke.Parent = previewContainer
+
+    local vp = Instance.new("ViewportFrame")
+    vp.Name = "DummyViewport"
+    vp.Size = UDim2.new(1, 0, 1, 0)
+    vp.BackgroundTransparency = 1
+    vp.Ambient = Color3.fromRGB(215, 215, 215)
+    vp.LightColor = Color3.fromRGB(255, 255, 255)
+    vp.LightDirection = Vector3.new(-1, -1, -2)
+    vp.Parent = previewContainer
+
+    local wm = Instance.new("WorldModel")
+    wm.Parent = vp
+
+    -- โหลดตัวละครเทสเป็น "ตัวเบค่อน โรบอก" (Bacon Hair Roblox Dummy - 119929949)
+    local dummy = nil
+    pcall(function()
+        dummy = Players:CreateHumanoidModelFromUserId(119929949)
+    end)
+
+    if not dummy then
+        pcall(function()
+            local lpChar = LocalPlayer.Character
+            if lpChar then
+                local oldArch = lpChar.Archivable
+                lpChar.Archivable = true
+                dummy = lpChar:Clone()
+                lpChar.Archivable = oldArch
+            end
+        end)
+    end
+
+    if not dummy then
+        dummy = Instance.new("Model")
+        local hrp = Instance.new("Part")
+        hrp.Name = "HumanoidRootPart"
+        hrp.Size = Vector3.new(2, 2, 1)
+        hrp.Position = Vector3.new(0, 0, 0)
+        hrp.Parent = dummy
+        local hum = Instance.new("Humanoid")
+        hum.Parent = dummy
+    end
+
+    dummy.Name = "BaconPreviewDummy"
+    for _, d in ipairs(dummy:GetDescendants()) do
+        if d:IsA("LuaSourceContainer") or d:IsA("Sound") or d:IsA("Tool") or d:IsA("BillboardGui") then
+            pcall(function() d:Destroy() end)
+        end
+    end
+    dummy.Parent = wm
+    dummy:PivotTo(CFrame.new(0, -0.45, 0))
+
+    -- บันทึกสีและ Material ดั้งเดิมของโมเดลไว้สลับโหมด Chams
+    local originalColors = {}
+    local originalMaterials = {}
+    for _, p in ipairs(dummy:GetDescendants()) do
+        if p:IsA("BasePart") then
+            originalColors[p] = p.Color
+            originalMaterials[p] = p.Material
+        end
+    end
+
+    -- ไฮไลท์เรืองแสง Chams
+    local previewHighlight = Instance.new("Highlight")
+    previewHighlight.Name = "PreviewHighlight"
+    previewHighlight.FillColor = Color3.fromRGB(255, 60, 60)
+    previewHighlight.FillTransparency = 0.65
+    previewHighlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+    previewHighlight.OutlineTransparency = 0.2
+    previewHighlight.Enabled = false
+    previewHighlight.Parent = dummy
+
+    -- มุมกล้องซูมออกให้เห็นทั้งตัวตั้งแต่หัวถึงปลายเท้าพอดีเป๊ะ
+    local cam = Instance.new("Camera")
+    cam.FieldOfView = 28
+    cam.CFrame = CFrame.new(Vector3.new(0, -0.45, 13.8), Vector3.new(0, -0.45, 0))
+    cam.Parent = vp
+    vp.CurrentCamera = cam
+
+    -- ระบบหมุน 360 องศา ทั้งตัวเป็นโมเดล (Auto-Spin + Drag Rotate)
+    local rotAngle = 0
+    local isDragging = false
+    local lastMouseX = 0
+
+    vp.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            isDragging = true
+            lastMouseX = input.Position.X
+        end
+    end)
+    vp.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            isDragging = false
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if isDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local deltaX = input.Position.X - lastMouseX
+            lastMouseX = input.Position.X
+            rotAngle = (rotAngle - deltaX * 1.5) % 360
+            if dummy and dummy.PrimaryPart then
+                dummy:PivotTo(CFrame.new(0, -0.45, 0) * CFrame.Angles(0, math.rad(rotAngle), 0))
+            end
+        end
+    end)
+
+    local rotConn = nil
+    local _previewBase = nil
+    rotConn = RunService.RenderStepped:Connect(function(dt)
+        if not previewContainer or not previewContainer.Parent then
+            if rotConn then rotConn:Disconnect() end
+            return
+        end
+        if not _previewBase then
+            _previewBase = previewContainer:FindFirstAncestor("Base")
+        end
+        local isBaseVis = (not _previewBase) or (_previewBase.Visible and _previewBase.Parent and (not _previewBase.Parent:IsA("ScreenGui") or _previewBase.Parent.Enabled))
+        if not isDragging and isBaseVis and previewContainer.Visible and previewContainer.AbsoluteSize.X > 0 then
+            rotAngle = (rotAngle + dt * 42) % 360
+            if dummy and dummy.PrimaryPart then
+                dummy:PivotTo(CFrame.new(0, -0.45, 0) * CFrame.Angles(0, math.rad(rotAngle), 0))
+            end
+        end
+    end)
+
+    -- 2D Overlay Box & ESP Elements (ขนาดกรอบครอบคลุมทั้งตัวเต็มสัดส่วน)
+    local overlay = Instance.new("Frame")
+    overlay.Name = "ESPOverlay"
+    overlay.Size = UDim2.fromScale(1, 1)
+    overlay.BackgroundTransparency = 1
+    overlay.Parent = previewContainer
+
+    local boxW, boxH = 88, 194
+    local boxYOffset = 0
+
+    local function makeLine(name, pos, size, col)
+        local l = Instance.new("Frame")
+        l.Name = name
+        l.Position = pos
+        l.Size = size
+        l.BackgroundColor3 = col
+        l.BorderSizePixel = 0
+        l.Parent = overlay
+        return l
+    end
+
+    local defaultCol = Color3.fromRGB(255, 60, 60)
+    local boxTop = makeLine("BoxTop", UDim2.new(0.5, -boxW/2, 0.5, boxYOffset - boxH/2), UDim2.new(0, boxW, 0, 1.5), defaultCol)
+    local boxBottom = makeLine("BoxBottom", UDim2.new(0.5, -boxW/2, 0.5, boxYOffset + boxH/2 - 1.5), UDim2.new(0, boxW, 0, 1.5), defaultCol)
+    local boxLeft = makeLine("BoxLeft", UDim2.new(0.5, -boxW/2, 0.5, boxYOffset - boxH/2), UDim2.new(0, 1.5, 0, boxH), defaultCol)
+    local boxRight = makeLine("BoxRight", UDim2.new(0.5, boxW/2 - 1.5, 0.5, boxYOffset - boxH/2), UDim2.new(0, 1.5, 0, boxH), defaultCol)
+
+    -- Box Fill (Semi-transparent inner fill)
+    local boxFill = Instance.new("Frame")
+    boxFill.Name = "BoxFill"
+    boxFill.Position = UDim2.new(0.5, -boxW/2 + 1.5, 0.5, boxYOffset - boxH/2 + 1.5)
+    boxFill.Size = UDim2.new(0, boxW - 3, 0, boxH - 3)
+    boxFill.BackgroundColor3 = defaultCol
+    boxFill.BackgroundTransparency = 0.88
+    boxFill.BorderSizePixel = 0
+    boxFill.Visible = false
+    boxFill.Parent = overlay
+
+    -- Health Bar (หลอดเลือดข้างตัว)
+    local hpBg = makeLine("HpBg", UDim2.new(0.5, -boxW/2 - 7, 0.5, boxYOffset - boxH/2), UDim2.new(0, 3.5, 0, boxH), Color3.fromRGB(35, 35, 40))
+    local hpFill = makeLine("HpFill", UDim2.new(0, 0, 0, 0), UDim2.new(1, 0, 1, 0), Color3.fromRGB(50, 255, 90))
+    hpFill.Parent = hpBg
+
+    -- Health Text
+    local hpLbl = Instance.new("TextLabel")
+    hpLbl.Name = "HpLbl"
+    hpLbl.AnchorPoint = Vector2.new(1, 0.5)
+    hpLbl.Position = UDim2.new(0.5, -boxW/2 - 11, 0.5, boxYOffset - boxH/2 + 7)
+    hpLbl.Size = UDim2.new(0, 35, 0, 12)
+    hpLbl.BackgroundTransparency = 1
+    hpLbl.Font = Enum.Font.GothamBold
+    hpLbl.Text = "100"
+    hpLbl.TextColor3 = Color3.fromRGB(50, 255, 90)
+    hpLbl.TextSize = 9
+    hpLbl.TextXAlignment = Enum.TextXAlignment.Right
+    hpLbl.Parent = overlay
+
+    -- Name Label
+    local nameLbl = Instance.new("TextLabel")
+    nameLbl.Name = "NameLbl"
+    nameLbl.AnchorPoint = Vector2.new(0.5, 1)
+    nameLbl.Position = UDim2.new(0.5, 0, 0.5, boxYOffset - boxH/2 - 4)
+    nameLbl.Size = UDim2.new(0, 160, 0, 14)
+    nameLbl.BackgroundTransparency = 1
+    nameLbl.Font = Enum.Font.GothamBold
+    nameLbl.Text = "Target Dummy [100%]"
+    nameLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+    nameLbl.TextSize = 11
+    nameLbl.Parent = overlay
+
+    -- Distance Label
+    local distLbl = Instance.new("TextLabel")
+    distLbl.Name = "DistLbl"
+    distLbl.AnchorPoint = Vector2.new(0.5, 0)
+    distLbl.Position = UDim2.new(0.5, 0, 0.5, boxYOffset + boxH/2 + 3)
+    distLbl.Size = UDim2.new(0, 140, 0, 12)
+    distLbl.BackgroundTransparency = 1
+    distLbl.Font = Enum.Font.Gotham
+    distLbl.Text = "[ 24m ]"
+    distLbl.TextColor3 = Color3.fromRGB(200, 200, 200)
+    distLbl.TextSize = 10
+    distLbl.Parent = overlay
+
+    -- Weapon Label
+    local wepLbl = Instance.new("TextLabel")
+    wepLbl.Name = "WepLbl"
+    wepLbl.AnchorPoint = Vector2.new(0.5, 0)
+    wepLbl.Position = UDim2.new(0.5, 0, 0.5, boxYOffset + boxH/2 + 16)
+    wepLbl.Size = UDim2.new(0, 140, 0, 12)
+    wepLbl.BackgroundTransparency = 1
+    wepLbl.Font = Enum.Font.GothamMedium
+    wepLbl.Text = "M4A1"
+    wepLbl.TextColor3 = Color3.fromRGB(255, 215, 0)
+    wepLbl.TextSize = 10
+    wepLbl.Parent = overlay
+
+    -- Tracer Line (เส้นลากจากขอบล่างของพรีวิวขึ้นมาหาเท้าตัวละคร)
+    local tracerLine = makeLine("TracerLine", UDim2.new(0.5, -0.75, 0.5, boxYOffset + boxH/2 + 1), UDim2.new(0, 1.5, 0.5, -boxYOffset - boxH/2 - 1), defaultCol)
+
+    -- ฟังก์ชันอัปเดต Live Preview ตอบสนองต่อการปรับเปลี่ยนเมนูทุกตัวทันที (แยกอิสระ ไม่ต้องเปิด PlayerESP ก่อน)
+    UpdateESPPreview = function()
+        local col = Hub.Settings.BoxColor or Hub.Settings.ESPVisibleColor or Color3.fromRGB(255, 60, 60)
+
+        -- 1. 2D Box (ทำงานได้ทันทีเมื่อเปิด)
+        local showBox = (Hub.Settings.ESPBox == true) or (Hub.Settings.PlayerESP == true)
+        boxTop.Visible = showBox
+        boxBottom.Visible = showBox
+        boxLeft.Visible = showBox
+        boxRight.Visible = showBox
+        boxTop.BackgroundColor3 = col
+        boxBottom.BackgroundColor3 = col
+        boxLeft.BackgroundColor3 = col
+        boxRight.BackgroundColor3 = col
+
+        -- 2. Box Fill
+        local showBoxFill = showBox and (Hub.Settings.ESPBoxFill == true)
+        boxFill.Visible = showBoxFill
+        boxFill.BackgroundColor3 = col
+
+        -- 3. Chams (ไฮไลท์เรืองแสงโมเดลจำลอง ทำงานได้ทันทีเมื่อเปิด)
+        local showChams = (Hub.Settings.ESPChams == true)
+        if previewHighlight then
+            previewHighlight.Enabled = showChams
+            previewHighlight.FillColor = col
+        end
+        for part, origMat in pairs(originalMaterials) do
+            if part and part.Parent then
+                if showChams then
+                    part.Material = Enum.Material.Neon
+                    part.Color = Color3.fromRGB(255, 80, 80)
+                else
+                    part.Material = origMat
+                    part.Color = originalColors[part] or Color3.fromRGB(160, 160, 160)
+                end
+            end
+        end
+
+        -- 4. Health Bar & Health Text (ทำงานได้ทันทีเมื่อเปิด)
+        local showHpBar = (Hub.Settings.ESPHealthBar == true)
+        hpBg.Visible = showHpBar
+
+        local showHpTxt = (Hub.Settings.ESPHealth == true)
+        hpLbl.Visible = showHpTxt
+
+        -- 5. Name, Font, Name Format & Font Size (ทำงานได้ทันทีเมื่อเปิด)
+        local font = getESPFont()
+        local fontSize = math.clamp(Hub.Settings.ESPFontSize or 11, 10, 18)
+
+        local showName = (Hub.Settings.ESPName == true) or (Hub.Settings.PlayerESP == true)
+        nameLbl.Visible = showName
+        nameLbl.Font = font
+        nameLbl.TextSize = fontSize
+        nameLbl.TextColor3 = Hub.Settings.NameColor or Color3.fromRGB(255, 255, 255)
+
+        local nameMode = Hub.Settings.ESPNameMode or "DisplayName"
+        if nameMode == "Username" or (typeof(nameMode) == "string" and nameMode:find("Username")) then
+            nameLbl.Text = "@TargetDummy"
+        elseif nameMode == "Both" or (typeof(nameMode) == "string" and (nameMode:find("Both") or nameMode:find("ทั้งสอง"))) then
+            nameLbl.Text = "Target Dummy [@TargetDummy]"
+        else
+            nameLbl.Text = "Target Dummy [100%]"
+        end
+
+        -- 6. Distance (ทำงานได้ทันทีเมื่อเปิด)
+        local showDist = (Hub.Settings.ESPDistance == true)
+        distLbl.Visible = showDist
+        distLbl.Font = font
+        distLbl.TextSize = math.clamp(fontSize - 1, 9, 16)
+
+        -- 7. Held Weapon (ทำงานได้ทันทีเมื่อเปิด)
+        local showWep = (Hub.Settings.ESPWeapon == true)
+        wepLbl.Visible = showWep
+        wepLbl.Font = font
+        wepLbl.TextSize = math.clamp(fontSize - 1, 9, 16)
+
+        -- 8. Tracers (ทำงานได้ทันทีเมื่อเปิด)
+        local showTracer = (Hub.Settings.ESPTracers == true)
+        tracerLine.Visible = showTracer
+        tracerLine.BackgroundColor3 = col
+    end
+    Hub.UpdateESPPreview = UpdateESPPreview
+    UpdateESPPreview()
+
+    Tabs.Visuals:AddSection("เซฟโซน (Safe Zone ESP)", "Right")
 
     local SafeESPToggle = Tabs.Visuals:AddToggle("SafeESPToggle", {
-        Title = "เซฟโซน (Safe Zone ESP)",
+        Title = "มองทะลุเซฟโซน (Safe Zones)",
         Description = "แสดงตำแหน่งจุดเซฟโซน (Safe Zone) ทั้งหมดในแมพ",
         Default = Hub.Settings.SafeESP
     })
@@ -4179,10 +4875,10 @@ local function InitUI()
     -- ================================================
     -- 👤 CHARACTER TAB (หมวดตัวละคร)
     -- ================================================
-    Tabs.Character:AddSection("การแสดงผลตัวละคร (Identity & Display)")
+    Tabs.Character:AddSection("การแสดงผลตัวละคร (Identity & Display)", "Left")
 
     local HideNameToggle = Tabs.Character:AddToggle("HideNameToggle", {
-        Title = "ปิดชื่อตัวละครบนหัว (Hide Overhead Name)",
+        Title = "ปิดชื่อบนหัว (Hide Overhead Name)",
         Description = "ซ่อนชื่อและแท็กแก๊งบนหัวตัวละครของเรา ไม่ให้คนอื่นเห็นหรืออัดคลิปติดชื่อ",
         Default = Hub.Settings.HideCharacterName
     })
@@ -4193,7 +4889,7 @@ local function InitUI()
     Tabs.Character:AddSection("เกิดใหม่อัตโนมัติ & รีเซ็ตด่วน (Auto Respawn & Fast Reset)")
 
     local AutoRespawnToggle = Tabs.Character:AddToggle("AutoRespawnToggle", {
-        Title = "เกิดใหม่อัตโนมัติ (Auto Respawn - ปุ่ม X)",
+        Title = "เกิดใหม่อัตโนมัติ (Auto Respawn)",
         Description = "กดปุ่ม X หรือเมื่อถูกยิงล้มคลาน/เลือดหมด จะเกิดใหม่และรีเซ็ตทันทีไม่ต้องรอคูลดาวน์",
         Default = Hub.Settings.AutoRespawn
     })
@@ -4202,7 +4898,7 @@ local function InitUI()
     end)
 
     local RespawnKeybind = Tabs.Character:AddKeybind("RespawnKeybind", {
-        Title = "ปุ่มคีย์ลัดเกิดใหม่ (Respawn Key)",
+        Title = "ปุ่มเกิดใหม่ (Respawn Key)",
         Default = Hub.Settings.RespawnKey,
         Callback = function(key)
             Hub.Settings.RespawnKey = key
@@ -4233,7 +4929,7 @@ local function InitUI()
     Tabs.Character:AddSection("ระบบป้องกันการหลุด (Anti-AFK Protection)")
 
     local AntiAFKToggle = Tabs.Character:AddToggle("AntiAFKToggle", {
-        Title = "ป้องกันการถูกเตะ AFK (Anti-AFK 100%)",
+        Title = "ป้องกันถูกเตะ (Anti-AFK)",
         Description = "ป้องกันตัวเกมเตะหลุดเมื่อไม่ได้ขยับเมาส์เกิน 20 นาที ทำงานอัตโนมัติแม้พับจอหรือเล่นหน้าต่างอื่น",
         Default = Hub.Settings.AntiAFK
     })
@@ -4254,7 +4950,7 @@ local function InitUI()
     Tabs.World:AddSection("⚔️ เล็งและยิงบอท Hood อัตโนมัติ (Auto Aim & Shoot Hood NPCs)")
 
     local HoodKillAuraToggle = Tabs.World:AddToggle("HoodKillAuraToggle", {
-        Title = "เริ่มเล็งและยิงบอท Hood อัตโนมัติ (Auto Aim & Shoot Hood NPCs)",
+        Title = "ยิงบอท Hood ออโต้ (Hood Kill Aura)",
         Description = "เล็งหัวและยิงบอท Hood ทั้งหมดในจุดฟาร์มอัตโนมัติ วนลูปเกิดใหม่ก็ยิง + เก็บเงินด่วน",
         Default = (Hub.Settings.HoodKillAura ~= nil and Hub.Settings.HoodKillAura) or Hub.Settings.ZombieKillAura
     })
@@ -4269,7 +4965,6 @@ local function InitUI()
                 end
                 if ClientState then
                     ClientState.Aiming = true
-                    ClientState.RecoilScale = 0
                 end
             end)
         else
@@ -4286,7 +4981,7 @@ local function InitUI()
     end)
 
     local HoodWallCheckToggle = Tabs.World:AddToggle("HoodWallCheckToggle", {
-        Title = "ตรวจจับสิ่งกีดขวาง (Hood Wall Check / LOS)",
+        Title = "ตรวจสิ่งกีดขวาง (Wall Check)",
         Description = "ไม่ยิงสิ่งกีดขวาง รอให้บอท Hood เดินออกมาในที่โล่งก่อนค่อยยิง (ประหยัดกระสุน)",
         Default = (Hub.Settings.HoodWallCheck ~= nil and Hub.Settings.HoodWallCheck) or Hub.Settings.ZombieWallCheck
     })
@@ -4344,7 +5039,7 @@ local function InitUI()
     Tabs.World:AddSection("ระบบสุ่มของและร้านค้า (Fast Skip Gacha and Shop Roll)")
 
     local AutoSkipGachaToggle = Tabs.World:AddToggle("AutoSkipGachaToggle", {
-        Title = "ข้ามอนิเมชั่นสุ่มของ/เปิดกล่อง (Fast Skip Gacha and Shop Roll)",
+        Title = "ข้ามอนิเมชั่นสุ่ม (Skip Gacha/Roll)",
         Description = "ข้ามอนิเมชั่นสุ่มปืน เปิดกล่องเคส และร้านค้าทันที ไม่ต้องรอดู 5.5 วินาที ได้รับไอเทมทันที",
         Default = Hub.Settings.AutoSkipGacha
     })
@@ -4373,7 +5068,7 @@ local function InitUI()
     Tabs.Settings:AddSection("ธีมและการแสดงผล (Theme & Visuals)")
 
     local IconThemeDrop = Tabs.Settings:AddDropdown("IconThemeDrop", {
-        Title = "สีไอค่อนแถบข้าง (Tab Icon Colors)",
+        Title = "สีไอค่อนแถบข้าง (Icon Colors)",
         Description = "เลือกชุดสีสำหรับไอค่อนเมนูแต่ละหมวดหมู่",
         Values = {"สีตามหมวดหมู่ (แดง/ฟ้า/ส้ม/เขียว/ม่วง)", "สีน้ำเงินนีออนล้วน (Electric Blue)"},
         Default = "สีตามหมวดหมู่ (แดง/ฟ้า/ส้ม/เขียว/ม่วง)"
@@ -4409,7 +5104,7 @@ local function InitUI()
     })
 
     local MobileFPSToggle = Tabs.Settings:AddToggle("MobileFPSToggle", {
-        Title = "บูสต์ FPS มือถือ (Mobile FPS Booster)",
+        Title = "บูสต์ FPS (FPS Booster)",
         Description = "ลดทอนเอฟเฟกต์แสงเงาและหมอกที่ไม่จำเป็น ช่วยให้เกมลื่นขึ้น 60+ FPS บน Delta",
         Default = false
     })
@@ -4460,6 +5155,7 @@ local function InitUI()
         end
     })
 
+    pcall(ApplyWeaponMods)
     Window:SelectTab(1)
     Fluent:Notify({
         Title = "🌊 KrakenHub โหลดสำเร็จ!",
@@ -4487,81 +5183,19 @@ genv.UrbanReload_Cleanup = function()
         pcall(function() conn:Disconnect() end)
     end
     pcall(function() RunService:UnbindFromRenderStep("KrakenESP") end)
-    pcall(function() RunService:UnbindFromRenderStep("KrakenAimbot") end)
+    pcall(function()
+        if AimWarnDrawings then
+            if AimWarnDrawings.Text then AimWarnDrawings.Text:Remove() end
+            if AimWarnDrawings.Tracer then AimWarnDrawings.Tracer:Remove() end
+        end
+    end)
 
     -- Remove FOV Circles
-    if FOVCircle then
-        pcall(function() FOVCircle:Remove() end)
-    end
-    if SilentFOVCircle then
-        pcall(function() SilentFOVCircle:Remove() end)
-    end
-
     -- Clear ESP
     for player in pairs(Hub.ESP) do
         RemovePlayerESP(player)
     end
     ClearSafeESP()
-
-    -- Restore Hitboxes
-    local ch = Workspace:FindFirstChild("ClientHitboxes")
-    if ch then
-        for _, f in ipairs(ch:GetChildren()) do
-            for _, p in ipairs(f:GetChildren()) do
-                if p:IsA("BasePart") then
-                    p.Transparency = 1
-                end
-            end
-        end
-    end
-
-    -- Restore Weapon Configs
-    if WeaponData and OriginalWeaponData then
-        for name, orig in pairs(OriginalWeaponData) do
-            local w = WeaponData[name]
-            if w then
-                pcall(function()
-                    if orig.Recoil and w.Recoil then
-                        makeWritable(w.Recoil)
-                        w.Recoil.Up = orig.Recoil.Up
-                        w.Recoil.Side = orig.Recoil.Side
-                        w.Recoil.Return = orig.Recoil.Return
-                        w.Recoil.AimScale = orig.Recoil.AimScale
-                    end
-                    if orig.Bloom and w.Bloom then
-                        makeWritable(w.Bloom)
-                        w.Bloom.Air = orig.Bloom.Air or 0
-                        w.Bloom.Move = orig.Bloom.Move or 0
-                        w.Bloom.Max = orig.Bloom.Max or 0
-                        w.Bloom.Hip = orig.Bloom.Hip or 0
-                        w.Bloom.PerShot = orig.Bloom.PerShot or 0
-                        w.Bloom.Aim = orig.Bloom.Aim or 0
-                    end
-                    if orig.Fire and w.Fire then
-                        makeWritable(w.Fire)
-                        w.Fire.RPM = orig.Fire.RPM
-                        w.Fire.Mode = orig.Fire.Mode
-                    end
-                    if orig.Ammo and w.Ammo then
-                        makeWritable(w.Ammo)
-                        w.Ammo.ReloadTime = orig.Ammo.ReloadTime
-                    end
-                end)
-            end
-        end
-    end
-
-    -- Restore Global Configs
-    if Config and Config.Global then
-        Config.Global.BloomScale = 0.8
-    end
-
-    if Controls and Controls.Press then
-        pcall(function()
-            Controls.Press("Fire", false)
-            Controls.Press("Aim", false)
-        end)
-    end
 
     -- Restore Hood NPC Heads to natural size
     local enemyFolders = {}
@@ -4603,6 +5237,15 @@ genv.UrbanReload_Cleanup = function()
     end
     LiveNpcTable = nil
 
+    if Hub.SilentAimFOVCircle then
+        pcall(function() Hub.SilentAimFOVCircle:Remove() end)
+        Hub.SilentAimFOVCircle = nil
+    end
+    if Hub.TargetTracerLine then
+        pcall(function() Hub.TargetTracerLine:Remove() end)
+        Hub.TargetTracerLine = nil
+    end
+    pcall(function() RunService:UnbindFromRenderStep("KrakenTargetLock") end)
     if ApplyNametagVisibility then
         pcall(ApplyNametagVisibility, false)
     end
@@ -4612,12 +5255,16 @@ end
 -- ==============================================================
 -- 🚀 15. INITIALIZE
 -- ==============================================================
+Hub.InitUI = InitUI
+print("DEBUG_REACHED_LINE_5280")
 task.spawn(function()
+    print("DEBUG_INSIDE_INITUI_SPAWN")
     local ok, err = pcall(InitUI)
     if not ok then
-        warn("[KrakenHub] InitUI Error: " .. tostring(err))
+        warn("INITUI_ERROR: " .. tostring(err))
     else
-        print("[KrakenHub] Urban Reload UI & Combat Engine successfully initialized!")
+        print("[KrakenHub] Urban Reload UI & Clean Engine successfully initialized! (Pure Visuals/Character/Farm)")
+
 print("==================================================")
 print("[Kraken Shield] Anticheat Status Verification:")
 print("  - NetBeat bencode Hook: " .. (NetBeatBencode and "ACTIVE (Sanitizing codes to 0)" or "NOT FOUND"))
@@ -4853,3 +5500,6 @@ local function InitFastSkipEngine()
     end)
 end
 pcall(InitFastSkipEngine)
+
+
+
