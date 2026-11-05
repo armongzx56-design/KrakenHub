@@ -4234,8 +4234,6 @@ local function InitUI()
         Hub.ToggleButtonGui = screenGui
         return screenGui
     end
-        return screenGui
-    end
 
     CreateFloatingToggleButton(Window)
 

@@ -81,7 +81,20 @@ const footer = `    }
     table.clear(_0xT)
     table.clear(_0xCh)
 
-    local _0xFn, _0xErr = (loadstring or load)(_0xCode, "@KrakenHub_UrbanReload")
+    local _0xLoader = loadstring or load
+    if typeof(_0xLoader) ~= "function" then
+        error("[KrakenHub] No compatible Lua loader (loadstring/load) found on this executor.", 2)
+    end
+
+    local _0xFn, _0xErr
+    local _0xOk = pcall(function()
+        _0xFn, _0xErr = _0xLoader(_0xCode)
+    end)
+    if not _0xOk or not _0xFn then
+        pcall(function()
+            _0xFn, _0xErr = _0xLoader(_0xCode, "@KrakenHub_UrbanReload")
+        end)
+    end
     _0xCode = nil
 
     if not _0xFn then
