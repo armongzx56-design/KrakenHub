@@ -974,16 +974,37 @@ local isMobileDevice = UserInputService.TouchEnabled or (UserInputService.Keyboa
 local DrawingGui = nil
 local function GetDrawingGui()
     if DrawingGui and DrawingGui.Parent then return DrawingGui end
-    local CoreGui = (pcall(function() return game:GetService("CoreGui") end) and game:GetService("CoreGui")) or nil
-    local p = (gethui and gethui())
-        or CoreGui
-        or (LocalPlayer and LocalPlayer:FindFirstChildOfClass("PlayerGui"))
+    local p = nil
+    if gethui then
+        local ok, h = pcall(gethui)
+        if ok and h and typeof(h) == "Instance" then
+            p = h
+        end
+    end
+    if not p and CoreGui then
+        local canCore = pcall(function()
+            local test = Instance.new("Folder")
+            test.Parent = CoreGui
+            test:Destroy()
+        end)
+        if canCore then p = CoreGui end
+    end
+    if not p then
+        p = (LocalPlayer and LocalPlayer:FindFirstChildOfClass("PlayerGui"))
+            or (LocalPlayer and LocalPlayer:WaitForChild("PlayerGui", 5))
+    end
+
     local sg = Instance.new("ScreenGui")
     sg.Name = "KrakenDrawingGui"
     sg.ResetOnSpawn = false
     sg.DisplayOrder = 99999
+    sg.IgnoreGuiInset = true -- 1:1 pixel alignment with Camera:WorldToViewportPoint
     sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    pcall(function() sg.Parent = p end)
+
+    local okP = pcall(function() sg.Parent = p end)
+    if not okP or not sg.Parent then
+        pcall(function() sg.Parent = LocalPlayer:WaitForChild("PlayerGui") end)
+    end
     DrawingGui = sg
     return sg
 end
@@ -1016,6 +1037,7 @@ local function CreateGuiDrawing(kind)
     if kind == "Square" then
         inst = Instance.new("Frame")
         inst.BorderSizePixel = 0
+        inst.ZIndex = 30
         inst.Visible = false
         pcall(function() inst.Parent = gui end)
         stroke = Instance.new("UIStroke")
@@ -1038,12 +1060,14 @@ local function CreateGuiDrawing(kind)
         inst = Instance.new("Frame")
         inst.AnchorPoint = Vector2.new(0.5, 0.5)
         inst.BorderSizePixel = 0
+        inst.ZIndex = 30
         inst.Visible = false
         pcall(function() inst.Parent = gui end)
     elseif kind == "Circle" then
         inst = Instance.new("Frame")
         inst.AnchorPoint = Vector2.new(0.5, 0.5)
         inst.BorderSizePixel = 0
+        inst.ZIndex = 30
         inst.Visible = false
         pcall(function() inst.Parent = gui end)
         corner = Instance.new("UICorner")
@@ -1456,17 +1480,25 @@ local function ApplyWeaponMods()
                 end
             end
 
-            -- 3. Full Auto & Adjustable RPM
+            -- 3. Full Auto, Zero Bolt Pause & Adjustable RPM
             if wData.Fire and orig.Fire then
                 makeWritable(wData.Fire)
                 wData.Fire.Mode = "Auto"
                 wData.Fire.RPM = cfg.RPM or 900
+                wData.Fire.BoltTime = 0       -- Remove bolt action pause between shots
+                wData.Fire.SwapCooldown = 0   -- Remove weapon swap pause
+                wData.Fire.Burst = nil        -- Convert burst to true continuous full auto
+                wData.Fire.BurstDelay = 0     -- Remove burst pause
             end
 
-            -- 4. Fast Reload
+            -- 4. Fast Reload & Large Mag
             if wData.Ammo then
                 makeWritable(wData.Ammo)
-                wData.Ammo.ReloadTime = cfg.FastReload and 0.05 or orig.Ammo.ReloadTime
+                wData.Ammo.ReloadTime = cfg.FastReload and 0.01 or orig.Ammo.ReloadTime
+                if cfg.InfiniteAmmo then
+                    wData.Ammo.Mag = 999
+                    wData.Ammo.MaxMag = 999
+                end
             end
 
             -- 5. Fast Equip
@@ -1510,6 +1542,25 @@ Hub.ApplyWeaponMods = ApplyWeaponMods
 task.spawn(function()
     task.wait(0.1)
     pcall(ApplyWeaponMods)
+end)
+
+
+-- Re-apply weapon mods whenever player equips a tool
+task.spawn(function()
+    local function hookCharacter(char)
+        if not char then return end
+        char.ChildAdded:Connect(function(child)
+            if child:IsA("Tool") then
+                task.wait(0.05)
+                pcall(ApplyWeaponMods)
+                if Hub.Settings.InfiniteAmmo then
+                    child:SetAttribute("Ammo", 60)
+                end
+            end
+        end)
+    end
+    if LocalPlayer.Character then hookCharacter(LocalPlayer.Character) end
+    LocalPlayer.CharacterAdded:Connect(hookCharacter)
 end)
 
 local cachedFireFunction = nil
@@ -1810,6 +1861,29 @@ Hub.Connections.CoreEnforcer = RunService.RenderStepped:Connect(function(dt)
         if Hub.Settings.NoRecoil then
             ClientState.RecoilScale = 0
         end
+
+        -- 🛡️ True Infinite Ammo Replenishment (Stops Reload Interruption Loop)
+        if Hub.Settings.InfiniteAmmo then
+            local myChar = LocalPlayer.Character
+            local tool = myChar and myChar:FindFirstChildOfClass("Tool")
+            if tool then
+                local curAmmo = tool:GetAttribute("Ammo") or 0
+                if curAmmo < 10 then
+                    tool:SetAttribute("Ammo", 60)
+                end
+            end
+            ClientState.Reloading = false
+        end
+
+        if Hub.Settings.AlwaysShoot then
+            ClientState.Rolling = false
+            ClientState.CaseRolling = false
+        end
+
+        -- Keep Aiming active during combat or touch aim to prevent firing cutoff
+        if Hub.MobileAimActive then
+            ClientState.Aiming = true
+        end
     end
 end)
 
@@ -2017,6 +2091,55 @@ end)
 local function MakePlayerESP(player)
     if Hub.ESP[player] then return end
 
+    -- Native 3D BillboardGui for 100% Guaranteed ESP on iOS Delta & Mobile
+    local bb = Instance.new("BillboardGui")
+    bb.Name = "KrakenPlayerBillboard_" .. player.Name
+    bb.Size = UDim2.new(0, 160, 0, 44)
+    bb.StudsOffset = Vector3.new(0, 2.8, 0)
+    bb.AlwaysOnTop = true
+    bb.MaxDistance = 650
+    bb.ResetOnSpawn = false
+    bb.Enabled = false
+    CollectionService:AddTag(bb, "OwnFX")
+
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Name = "NameLabel"
+    nameLabel.Size = UDim2.new(1, 0, 0, 16)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Font = Enum.Font.GothamBold
+    nameLabel.TextSize = 13
+    nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    nameLabel.TextStrokeTransparency = 0.2
+    nameLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    nameLabel.Parent = bb
+
+    local barBg = Instance.new("Frame")
+    barBg.Name = "BarBg"
+    barBg.Size = UDim2.new(1, -20, 0, 4)
+    barBg.Position = UDim2.new(0, 10, 0, 18)
+    barBg.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    barBg.BorderSizePixel = 0
+    barBg.Parent = bb
+
+    local barFill = Instance.new("Frame")
+    barFill.Name = "BarFill"
+    barFill.Size = UDim2.new(1, 0, 1, 0)
+    barFill.BackgroundColor3 = Color3.fromRGB(60, 255, 60)
+    barFill.BorderSizePixel = 0
+    barFill.Parent = barBg
+
+    local weaponLabel = Instance.new("TextLabel")
+    weaponLabel.Name = "WeaponLabel"
+    weaponLabel.Size = UDim2.new(1, 0, 0, 14)
+    weaponLabel.Position = UDim2.new(0, 0, 0, 24)
+    weaponLabel.BackgroundTransparency = 1
+    weaponLabel.Font = Enum.Font.GothamMedium
+    weaponLabel.TextSize = 11
+    weaponLabel.TextColor3 = Color3.fromRGB(255, 215, 80)
+    weaponLabel.TextStrokeTransparency = 0.2
+    weaponLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    weaponLabel.Parent = bb
+
     local obj = {
         BoxOutline = SafeDrawing("Square"),
         Box = SafeDrawing("Square"),
@@ -2028,7 +2151,7 @@ local function MakePlayerESP(player)
         Weapon = SafeDrawing("Text"),
         Tracer = SafeDrawing("Line"),
         Highlight = nil,
-        Billboard = nil,
+        Billboard = bb,
     }
 
     local fontId = (Drawing and Drawing.Fonts and Drawing.Fonts[Hub.Settings.ESPFont]) or 0
@@ -2115,6 +2238,10 @@ local function RemovePlayerESP(player)
         pcall(function() obj.Highlight:Destroy() end)
         obj.Highlight = nil
     end
+    if obj.Billboard then
+        pcall(function() obj.Billboard:Destroy() end)
+        obj.Billboard = nil
+    end
     for k, d in pairs(obj) do
         if k ~= "Highlight" then
             pcall(function() d:Remove() end)
@@ -2155,6 +2282,10 @@ Hub.Connections.ESPUpdate = RunService:BindToRenderStep("KrakenESP", Enum.Render
         if obj.Highlight and obj.Highlight.Enabled then
             obj.Highlight.Enabled = false
             obj.Highlight.Adornee = nil
+        end
+        if obj.Billboard and obj.Billboard.Enabled then
+            obj.Billboard.Enabled = false
+            obj.Billboard.Adornee = nil
         end
     end
 
@@ -2201,7 +2332,8 @@ Hub.Connections.ESPUpdate = RunService:BindToRenderStep("KrakenESP", Enum.Render
         local head = char and char:FindFirstChild("Head")
         local hum = char and char:FindFirstChildOfClass("Humanoid")
 
-        if not root or not head or not hum or hum.Health <= 0 then
+        local isDowned = (char:GetAttribute("Downed") == true)
+        if not root or not head or not hum or (hum.Health <= 0 and not isDowned) then
             hideESP(obj)
             continue
         end
@@ -2314,6 +2446,43 @@ Hub.Connections.ESPUpdate = RunService:BindToRenderStep("KrakenESP", Enum.Render
             obj.Name.Visible = false
         end
         obj.Dist.Visible = false
+
+        
+        -- 🌟 3D Native Billboard ESP (Always visible on iOS Delta & Mobile devices)
+        if obj.Billboard then
+            if showName or showDist or Hub.Settings.ESPHealthBar or Hub.Settings.ESPWeapon then
+                obj.Billboard.Adornee = head
+                if obj.Billboard.Parent ~= head then
+                    pcall(function() obj.Billboard.Parent = head end)
+                end
+                local nb = obj.Billboard:FindFirstChild("NameLabel")
+                if nb then
+                    nb.Text = headerText
+                    nb.TextColor3 = isImmune and safeColor or (Hub.Settings.NameColor or Color3.fromRGB(255, 255, 255))
+                    nb.Visible = (showName or showDist) and (headerText ~= "")
+                end
+                local bg = obj.Billboard:FindFirstChild("BarBg")
+                local bf = bg and bg:FindFirstChild("BarFill")
+                if bf and bg then
+                    bf.Size = UDim2.new(math.clamp(hp / 100, 0, 1), 0, 1, 0)
+                    bf.BackgroundColor3 = hpColor
+                    bg.Visible = (Hub.Settings.ESPHealthBar == true)
+                end
+                local wb = obj.Billboard:FindFirstChild("WeaponLabel")
+                if wb then
+                    local tool = char:FindFirstChildOfClass("Tool")
+                    local rawName = tool and tool.Name
+                    local wName = rawName and GetFormattedWeaponName(rawName) or ""
+                    wb.Text = wName ~= "" and ("🔫 " .. wName) or ""
+                    wb.Visible = (Hub.Settings.ESPWeapon == true and wName ~= "")
+                end
+                if not obj.Billboard.Enabled then
+                    obj.Billboard.Enabled = true
+                end
+            elseif obj.Billboard.Enabled then
+                obj.Billboard.Enabled = false
+            end
+        end
 
         -- 3. Dynamic Health & Health Bar (Left of target, fully independent of 2D Box)
         local hp = math.clamp(math.floor((hum.Health / math.max(hum.MaxHealth, 1)) * 100), 0, 100)
