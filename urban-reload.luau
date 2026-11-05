@@ -2482,7 +2482,7 @@ local function UpdateSafeESP()
         title.TextSize = 13
         title.TextColor3 = Color3.fromRGB(0, 255, 130)
         title.TextStrokeTransparency = 0.2
-        title.Text = "🛡️ เซฟโซน: " .. (name or "Safe Zone")
+        title.Text = "เซฟโซน: " .. (name or "Safe Zone")
 
         local sub = Instance.new("TextLabel", bb)
         sub.Size = UDim2.new(1, 0, 0, 16)
@@ -2533,7 +2533,7 @@ local function UpdateSafeESP()
                 title.TextSize = 13
                 title.TextColor3 = Color3.fromRGB(0, 230, 255)
                 title.TextStrokeTransparency = 0.2
-                title.Text = "💎 เซฟโซน: " .. safe.Name:gsub("MilitaryCase_", "")
+                title.Text = "ตู้เซฟ: " .. safe.Name:gsub("MilitaryCase_", "")
 
                 local sub = Instance.new("TextLabel", bb)
                 sub.Size = UDim2.new(1, 0, 0, 16)
@@ -2693,7 +2693,7 @@ task.spawn(function()
                             local pct = math.clamp(hp / math.max(maxHp, 1), 0, 1)
 
                             if title then
-                                title.Text = "🔫 " .. z.Name .. " [" .. dist .. "m]"
+                                title.Text = z.Name .. " [" .. dist .. "m]"
                             end
 
                             if sub then
@@ -4200,8 +4200,7 @@ local function InitUI()
                         currentSection = rawTab:Section({ Side = "Left" })
                     end
                 end
-                local dispTitle = (title:sub(1,3) == "⚡ " or title:sub(1,1) == "⚔" or title:sub(1,1) == "👁" or title:sub(1,1) == "👤" or title:sub(1,1) == "🌾") and title or ("⚡ " .. title)
-                currentSection:Header({ Text = dispTitle })
+                currentSection:Header({ Text = title })
                 return currentSection
             end,
             AddParagraph = function(self, cfg)
@@ -4414,11 +4413,11 @@ local function InitUI()
 
     -- 📑 All Tabs with Icons
     local Tabs = {
-        Combat    = CreateTabAdapter(tabGroup:Tab({ Name = "⚔️ ต่อสู้",       Image = "rbxassetid://10709810948" }), "Combat"),
-        Visuals   = CreateTabAdapter(tabGroup:Tab({ Name = "👁️ มองทะลุ",      Image = "rbxassetid://10747373176" }), "Visuals"),
-        Character = CreateTabAdapter(tabGroup:Tab({ Name = "🏃 ตัวละคร",      Image = "rbxassetid://10747372702" }), "Character"),
-        World     = CreateTabAdapter(tabGroup:Tab({ Name = "🌾 ฟาร์ม ",  Image = "rbxassetid://10723405360" }), "World"),
-        Settings  = CreateTabAdapter(tabGroup:Tab({ Name = "⚙️ ตั้งค่า",       Image = "rbxassetid://10734950309" }), "Settings")
+        Combat    = CreateTabAdapter(tabGroup:Tab({ Name = "ต่อสู้",       Image = "rbxassetid://10709810948" }), "Combat"),
+        Visuals   = CreateTabAdapter(tabGroup:Tab({ Name = "มองทะลุ",      Image = "rbxassetid://10747373176" }), "Visuals"),
+        Character = CreateTabAdapter(tabGroup:Tab({ Name = "ตัวละคร",      Image = "rbxassetid://10747372702" }), "Character"),
+        World     = CreateTabAdapter(tabGroup:Tab({ Name = "ฟาร์ม",        Image = "rbxassetid://10723405360" }), "World"),
+        Settings  = CreateTabAdapter(tabGroup:Tab({ Name = "ตั้งค่า",       Image = "rbxassetid://10734950309" }), "Settings")
     }
     -- Compatibility aliases
     Tabs.Aimbot = Tabs.Combat
@@ -5280,7 +5279,7 @@ local function InitUI()
     -- ================================================
     -- 🌾 FARM & WORLD TAB (หมวดฟาร์ม & โลก)
     -- ================================================
-    Tabs.World:AddSection("⚔️ เล็งและยิงบอท Hood อัตโนมัติ (Auto Aim & Shoot Hood NPCs)")
+    Tabs.World:AddSection("เล็งและยิงบอท Hood อัตโนมัติ (Auto Aim & Shoot Hood NPCs)")
 
     local HoodKillAuraToggle = Tabs.World:AddToggle("HoodKillAuraToggle", {
         Title = "ยิงบอท Hood ออโต้ (Hood Kill Aura)",
@@ -5491,7 +5490,7 @@ local function InitUI()
     pcall(ApplyWeaponMods)
     Window:SelectTab(1)
     Fluent:Notify({
-        Title = "🌊 KrakenHub โหลดสำเร็จ!",
+        Title = "KrakenHub โหลดสำเร็จ!",
         Content = "Urban Reload (ภาษาไทย) พร้อมใช้งานแล้ว!\nแตะปุ่มโลโก้ หรือกด Right Control เพื่อเปิด/ปิดเมนู",
         Duration = 5
     })
