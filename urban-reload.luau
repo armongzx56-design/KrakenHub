@@ -5917,23 +5917,12 @@ end
 -- 🚀 15. INITIALIZE
 -- ==============================================================
 Hub.InitUI = InitUI
-print("DEBUG_REACHED_LINE_5280")
 task.spawn(function()
-    print("DEBUG_INSIDE_INITUI_SPAWN")
     local ok, err = pcall(InitUI)
-    if not ok then
-        warn("INITUI_ERROR: " .. tostring(err))
+    if ok then
+        print("[KrakenHub] รันสคริปต์ติดเรียบร้อย ✅")
     else
-        print("[KrakenHub] Urban Reload UI & Clean Engine successfully initialized! (Pure Visuals/Character/Farm)")
-
-print("==================================================")
-print("[Kraken Shield] Anticheat Status Verification:")
-print("  - NetBeat bencode Hook: " .. (NetBeatBencode and "ACTIVE (Sanitizing codes to 0)" or "NOT FOUND"))
-print("  - NetBeat report Hook:  " .. (NetBeatReportFn and "ACTIVE (Reports blocked)" or "NOT FOUND"))
-print("  - NetBeat Queue (u28):  " .. (NetBeatQueue and "ACTIVE (Cleared & locked)" or "NOT FOUND"))
-print("  - ESP Blacklist (u180): " .. (NetBeatESPList and "ACTIVE (Cleared)" or "CLEARED IN GC"))
-print("  - Remote Packet Guard:  ACTIVE (__namecall dropping HHeartbeatB & Honeypots)")
-print("==================================================")
+        warn("[KrakenHub] Init error: " .. tostring(err))
     end
 end)
 
