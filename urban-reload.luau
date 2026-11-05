@@ -5910,7 +5910,6 @@ genv.UrbanReload_Cleanup = function()
     if ApplyNametagVisibility then
         pcall(ApplyNametagVisibility, false)
     end
-    print("[KrakenHub] Urban Reload Script cleanly unloaded.")
 end
 
 -- ==============================================================
@@ -5920,6 +5919,7 @@ Hub.InitUI = InitUI
 task.spawn(function()
     local ok, err = pcall(InitUI)
     if ok then
+        print("[KrakenHub] Urban Reload Script cleanly unloaded.")
         print("[KrakenHub] รันสคริปต์ติดเรียบร้อย ✅")
     else
         warn("[KrakenHub] Init error: " .. tostring(err))
