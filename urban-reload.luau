@@ -1494,7 +1494,7 @@ local function ApplyWeaponMods()
                 wData.Fire.Mode = "Auto"
                 wData.Fire.RPM = cfg.RPM or 900
                 if orig.Fire.BoltTime ~= nil then
-                    wData.Fire.BoltTime = 0.01       -- Fast cycle for bolt-action rifles
+                    wData.Fire.BoltTime = 0.001      -- Instant cycle for bolt-action rifles & shotguns
                 end
                 if orig.Fire.SwapCooldown ~= nil then
                     wData.Fire.SwapCooldown = 0   -- Remove weapon swap pause
@@ -1571,7 +1571,9 @@ task.spawn(function()
                 task.wait(0.05)
                 pcall(ApplyWeaponMods)
                 if Hub.Settings.InfiniteAmmo then
-                    child:SetAttribute("Ammo", 60)
+                    child:SetAttribute("MagSize", 999)
+                    child:SetAttribute("Ammo", 999)
+                    child:SetAttribute("AmmoFresh", true)
                 end
             end
         end)
@@ -1800,7 +1802,6 @@ Hub.Connections.VenyxRenderStep = RunService.RenderStepped:Connect(function()
 
         if not isTargetSafe and not isSelfSafe then
             local now = os.clock()
-            if ClientState and Hub.Settings.InfiniteAmmo then ClientState.Reloading = false end
             local isBusy = ClientState and (ClientState.Reloading or ClientState.Rolling or ClientState.CaseRolling)
             local myChar = LocalPlayer.Character
             local tool = myChar and myChar:FindFirstChildOfClass("Tool")
@@ -1820,6 +1821,66 @@ end)
 
 
 
+
+-- ================================================
+-- 📱 MOBILE CONTINUOUS FULL-AUTO & TOUCH AIM ENGINE
+-- รองรับมือถือ 100%: กดยิงค้าง ลั่นกระสุนรัวไม่หยุดชะงัก
+-- ================================================
+local _mobileHoldingFire = false
+local _activeFireTouch = nil
+local _lastMobilePulseTick = 0
+
+-- ตรวจจับการแตะค้างปุ่มยิงหรือสัมผัสหน้าจอยิงบนมือถือ
+if UserInputService.TouchEnabled then
+    UserInputService.TouchStarted:Connect(function(touchInput, gameProcessed)
+        if not (Hub and Hub.Running) then return end
+        local myChar = LocalPlayer.Character
+        local tool = myChar and myChar:FindFirstChildOfClass("Tool")
+        if not tool then return end
+
+        local vp = (Camera and Camera.ViewportSize) or Vector2.new(1920, 1080)
+        local pos = touchInput.Position
+
+        -- แตะจอฝั่งขวา (โซนปุ่มยิง/มุมกล้องขวา) หรือสัมผัสเริ่มยิง
+        if pos.X > vp.X * 0.35 and pos.Y > vp.Y * 0.15 then
+            _mobileHoldingFire = true
+            _activeFireTouch = touchInput
+            if ClientState then
+                ClientState.Aiming = true
+                ClientState.Rolling = false
+            end
+            if Controls and typeof(Controls.Press) == "function" then
+                pcall(Controls.Press, "Fire", true)
+            end
+        end
+    end)
+
+    UserInputService.TouchEnded:Connect(function(touchInput)
+        if _activeFireTouch and touchInput == _activeFireTouch then
+            _mobileHoldingFire = false
+            _activeFireTouch = nil
+            if Controls and typeof(Controls.Press) == "function" then
+                pcall(Controls.Press, "Fire", false)
+            end
+            if ClientState and not (Controls and typeof(Controls.IsDown) == "function" and Controls.IsDown("Aim")) then
+                ClientState.Aiming = false
+            end
+        end
+    end)
+
+    UserInputService.TouchCancelled:Connect(function(touchInput)
+        if _activeFireTouch and touchInput == _activeFireTouch then
+            _mobileHoldingFire = false
+            _activeFireTouch = nil
+            if Controls and typeof(Controls.Press) == "function" then
+                pcall(Controls.Press, "Fire", false)
+            end
+            if ClientState then
+                ClientState.Aiming = false
+            end
+        end
+    end)
+end
 
 -- ================================================
 -- 🔄 8. HEARTBEAT / RENDERSTEPPED CORE LOOP (OPTIMIZED)
@@ -1847,21 +1908,57 @@ Hub.Connections.CoreEnforcer = RunService.RenderStepped:Connect(function(dt)
             ClientState.RecoilScale = 0
         end
 
-        -- 🛡️ True Infinite Ammo Replenishment (Maintains high ammo, completely prevents reload stutter)
+        -- 🛡️ True Infinite Ammo Replenishment (Maintains 999 ammo in clip & internal VM upvalue)
         if Hub.Settings.InfiniteAmmo then
             local myChar = LocalPlayer.Character
             local tool = myChar and myChar:FindFirstChildOfClass("Tool")
             if tool and tool:IsA("Tool") then
                 local curAmmo = tool:GetAttribute("Ammo")
-                if typeof(curAmmo) == "number" and curAmmo < 25 then
-                    tool:SetAttribute("Ammo", 60)
-                end
-                if tool:GetAttribute("Reloading") == true and curAmmo and curAmmo > 10 then
-                    tool:SetAttribute("Reloading", false)
+                if typeof(curAmmo) == "number" and curAmmo < 100 then
+                    tool:SetAttribute("Ammo", 999)
+                    tool:SetAttribute("AmmoFresh", true)
+                    tool:SetAttribute("MagSize", 999)
                 end
             end
-            if ClientState and not Hub.Settings.FastReload then
-                ClientState.Reloading = false
+
+            -- เติมตัวแปร u24 (จำนวนกระสุนในแมกกาซีน) ใน Closure ของ WeaponClient โดยตรง
+            local fireFn = getActiveFireFunction()
+            if fireFn and typeof(debug.getupvalues) == "function" and typeof(debug.setupvalue) == "function" then
+                pcall(function()
+                    local ups = debug.getupvalues(fireFn)
+                    for idx, val in pairs(ups) do
+                        if typeof(val) == "number" and val >= 0 and val <= 999 and (idx == 8 or idx == 18 or idx == 24) then
+                            if val < 50 then
+                                debug.setupvalue(fireFn, idx, 999)
+                            end
+                        end
+                    end
+                end)
+            end
+        end
+
+        -- 🎯 Mobile & Combat Aim Automation
+        -- บนมือถือหรือตอนยิง ล็อก Aiming ไว้ตลอด ทำให้กดยิงค้างแล้วยิงรัวต่อเนื่อง ไม่สะดุด
+        if ClientState.Equipped then
+            local isFiring = (Controls and typeof(Controls.IsDown) == "function" and Controls.IsDown("Fire"))
+                          or _mobileHoldingFire
+                          or Hub.Settings.AlwaysShoot
+
+            if isFiring then
+                ClientState.Aiming = true
+                ClientState.Rolling = false
+                ClientState.CaseRolling = false
+
+                -- Full-Auto Rapid Pulse สำหรับปืน Semi-Auto / ปืนพก / ลูกซองบนมือถือ
+                local now = os.clock()
+                local currentRPM = Hub.Settings.RPM or 900
+                local shotInterval = 60 / currentRPM
+                if now - _lastMobilePulseTick >= shotInterval then
+                    _lastMobilePulseTick = now
+                    if Controls and typeof(Controls.Press) == "function" then
+                        pcall(Controls.Press, "Fire", true)
+                    end
+                end
             end
         end
 
