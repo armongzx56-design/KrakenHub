@@ -1507,14 +1507,16 @@ local function ApplyWeaponMods()
                 end
             end
 
-            -- 4. Fast Reload & Large Mag
+            -- 4. Fast Reload
             if wData.Ammo then
                 makeWritable(wData.Ammo)
                 local origReload = (orig.Ammo and orig.Ammo.ReloadTime) or 1.5
                 wData.Ammo.ReloadTime = cfg.FastReload and 0.05 or origReload
-                if cfg.InfiniteAmmo then
-                    wData.Ammo.Mag = 999
-                    wData.Ammo.MaxMag = 999
+                if orig.Ammo and orig.Ammo.Mag then
+                    wData.Ammo.Mag = orig.Ammo.Mag
+                end
+                if orig.Ammo and orig.Ammo.MaxMag then
+                    wData.Ammo.MaxMag = orig.Ammo.MaxMag
                 end
             end
 
@@ -1564,21 +1566,34 @@ end)
 
 -- Re-apply weapon mods whenever player equips a tool
 task.spawn(function()
+    local function cleanToolAttributes(tool)
+        if not tool or not tool:IsA("Tool") then return end
+        local orig = OriginalWeaponData[tool.Name]
+        if orig and orig.Ammo and orig.Ammo.Mag then
+            if tool:GetAttribute("MagSize") == 999 then
+                tool:SetAttribute("MagSize", orig.Ammo.Mag)
+            end
+            if tool:GetAttribute("Ammo") == 999 then
+                tool:SetAttribute("Ammo", orig.Ammo.Mag)
+            end
+        end
+    end
+
     local function hookCharacter(char)
         if not char then return end
         char.ChildAdded:Connect(function(child)
             if child:IsA("Tool") then
                 task.wait(0.05)
                 pcall(ApplyWeaponMods)
-                if Hub.Settings.InfiniteAmmo then
-                    child:SetAttribute("MagSize", 999)
-                    child:SetAttribute("Ammo", 999)
-                    child:SetAttribute("AmmoFresh", true)
-                end
+                cleanToolAttributes(child)
             end
         end)
     end
-    if LocalPlayer.Character then hookCharacter(LocalPlayer.Character) end
+    if LocalPlayer.Character then
+        hookCharacter(LocalPlayer.Character)
+        local cur = LocalPlayer.Character:FindFirstChildOfClass("Tool")
+        if cur then cleanToolAttributes(cur) end
+    end
     LocalPlayer.CharacterAdded:Connect(hookCharacter)
 end)
 
@@ -1913,32 +1928,26 @@ Hub.Connections.CoreEnforcer = RunService.RenderStepped:Connect(function(dt)
             ClientState.RecoilScale = 0
         end
 
-        -- 🛡️ True Infinite Ammo Replenishment (Maintains 999 ammo in clip & internal VM upvalue)
-        if Hub.Settings.InfiniteAmmo then
-            local myChar = LocalPlayer.Character
-            local tool = myChar and myChar:FindFirstChildOfClass("Tool")
-            if tool and tool:IsA("Tool") then
-                local curAmmo = tool:GetAttribute("Ammo")
-                if typeof(curAmmo) == "number" and curAmmo < 100 then
-                    tool:SetAttribute("Ammo", 999)
-                    tool:SetAttribute("AmmoFresh", true)
-                    tool:SetAttribute("MagSize", 999)
-                end
-            end
-
-            -- เติมตัวแปร u24 (จำนวนกระสุนในแมกกาซีน) ใน Closure ของ WeaponClient โดยตรง
-            local fireFn = getActiveFireFunction()
-            if fireFn and typeof(debug.getupvalues) == "function" and typeof(debug.setupvalue) == "function" then
-                pcall(function()
-                    local ups = debug.getupvalues(fireFn)
-                    for idx, val in pairs(ups) do
-                        if typeof(val) == "number" and val >= 0 and val <= 999 and (idx == 8 or idx == 18 or idx == 24) then
-                            if val < 50 then
-                                debug.setupvalue(fireFn, idx, 999)
-                            end
-                        end
+        -- 🛡️ UI Text Size Protection (ป้องกันขนาดตัวอักษรของ HUD หดเล็กลง)
+        local pGui = LocalPlayer:FindFirstChild("PlayerGui")
+        local wh = pGui and pGui:FindFirstChild("WeaponHUD", true)
+        if wh then
+            local ap = wh:FindFirstChild("AmmoPanel", true)
+            if ap then
+                local wn = ap:FindFirstChild("WeaponName")
+                if wn then
+                    local c = wn:FindFirstChildOfClass("UITextSizeConstraint")
+                    if c and c.MaxTextSize < 16 then
+                        c.MaxTextSize = 16
                     end
-                end)
+                end
+                local ammo = ap:FindFirstChild("Ammo")
+                if ammo then
+                    local c = ammo:FindFirstChildOfClass("UITextSizeConstraint")
+                    if c and c.MaxTextSize < 42 then
+                        c.MaxTextSize = 42
+                    end
+                end
             end
         end
 
