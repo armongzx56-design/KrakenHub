@@ -64,6 +64,12 @@ local Hub = {
         IconTheme = "Themed",
 
         -- ⚔️ ระบบต่อสู้ (Combat System) - Pure & Unified Engine
+                -- 🎯 ระบบช่วยเล็ง & ล็อกเป้า (Camlock & Mobile Aim System)
+        Camlock = true,                       -- ล็อกมุมกล้องตามเป้าหมาย (Camera Aim Lock)
+        CamlockSmoothness = 0.25,             -- ความนุ่มนวลการหันกล้อง (0 = Snap ทันที, 0.5 = ค่อยๆ หัน)
+        CamlockTargetPart = "Head",           -- ชิ้นส่วนล็อกกล้อง (Head, UpperTorso)
+        MobileAimButton = true,               -- แสดงปุ่มช่วยเล็งลอยบนจอมือถือ (HUD Touch Button)
+        MobileAimMode = "Toggle",             -- รูปแบบการกด ("Toggle" แตะเพื่อเปิด/ปิด, "Hold" แตะค้าง)
         SilentAim = true,                     -- กระสุนล็อกเป้า 100% (Homing / Bullet Redirection)
         SilentAimTargetPart = "Head",         -- ชิ้นส่วนเป้าหมาย (Head, UpperTorso)
         ShowFOV = true,                       -- แสดงวงกลม FOV
@@ -958,11 +964,218 @@ end)
 local LockedTarget = nil
 local lastAutoShotTime = 0
 
+
+-- ================================================
+-- 📱 CROSS-PLATFORM SYSTEM & UNIVERSAL GUI DRAWING ADAPTER
+-- Supports iOS Delta, AppleWare, Android, and PC
+-- ================================================
+local isMobileDevice = UserInputService.TouchEnabled or (UserInputService.KeyboardEnabled == false)
+
+local DrawingGui = nil
+local function GetDrawingGui()
+    if DrawingGui and DrawingGui.Parent then return DrawingGui end
+    local CoreGui = (pcall(function() return game:GetService("CoreGui") end) and game:GetService("CoreGui")) or nil
+    local p = (gethui and gethui())
+        or CoreGui
+        or (LocalPlayer and LocalPlayer:FindFirstChildOfClass("PlayerGui"))
+    local sg = Instance.new("ScreenGui")
+    sg.Name = "KrakenDrawingGui"
+    sg.ResetOnSpawn = false
+    sg.DisplayOrder = 99999
+    sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    pcall(function() sg.Parent = p end)
+    DrawingGui = sg
+    return sg
+end
+
+local function CreateGuiDrawing(kind)
+    local gui = GetDrawingGui()
+    local rawProps = {
+        Visible = false,
+        Transparency = 1,
+        Color = Color3.new(1, 1, 1),
+        Thickness = 1,
+        Filled = false,
+        Position = Vector2.zero,
+        Size = Vector2.zero,
+        From = Vector2.zero,
+        To = Vector2.zero,
+        Radius = 50,
+        Text = "",
+        Center = false,
+        Outline = false,
+        OutlineColor = Color3.new(0, 0, 0),
+        Font = 0,
+        NumSides = 64,
+    }
+
+    local inst = nil
+    local stroke = nil
+    local corner = nil
+
+    if kind == "Square" then
+        inst = Instance.new("Frame")
+        inst.BorderSizePixel = 0
+        inst.Visible = false
+        pcall(function() inst.Parent = gui end)
+        stroke = Instance.new("UIStroke")
+        stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+        stroke.Parent = inst
+    elseif kind == "Text" then
+        inst = Instance.new("TextLabel")
+        inst.BackgroundTransparency = 1
+        inst.BorderSizePixel = 0
+        inst.Font = Enum.Font.GothamBold
+        inst.TextXAlignment = Enum.TextXAlignment.Left
+        inst.TextYAlignment = Enum.TextYAlignment.Center
+        inst.Visible = false
+        pcall(function() inst.Parent = gui end)
+        stroke = Instance.new("UIStroke")
+        stroke.Thickness = 1
+        stroke.Transparency = 1
+        stroke.Parent = inst
+    elseif kind == "Line" then
+        inst = Instance.new("Frame")
+        inst.AnchorPoint = Vector2.new(0.5, 0.5)
+        inst.BorderSizePixel = 0
+        inst.Visible = false
+        pcall(function() inst.Parent = gui end)
+    elseif kind == "Circle" then
+        inst = Instance.new("Frame")
+        inst.AnchorPoint = Vector2.new(0.5, 0.5)
+        inst.BorderSizePixel = 0
+        inst.Visible = false
+        pcall(function() inst.Parent = gui end)
+        corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(1, 0)
+        corner.Parent = inst
+        stroke = Instance.new("UIStroke")
+        stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+        stroke.Parent = inst
+    end
+
+    local function update()
+        if not inst or not inst.Parent then return end
+        inst.Visible = rawProps.Visible
+        if not rawProps.Visible then return end
+
+        local trans = math.clamp(1 - (rawProps.Transparency or 1), 0, 1)
+
+        if kind == "Square" then
+            inst.Position = UDim2.fromOffset(rawProps.Position.X, rawProps.Position.Y)
+            inst.Size = UDim2.fromOffset(math.max(1, rawProps.Size.X), math.max(1, rawProps.Size.Y))
+            if rawProps.Filled then
+                inst.BackgroundColor3 = rawProps.Color
+                inst.BackgroundTransparency = trans
+                if stroke then stroke.Enabled = false end
+            else
+                inst.BackgroundTransparency = 1
+                if stroke then
+                    stroke.Enabled = true
+                    stroke.Color = rawProps.Color
+                    stroke.Thickness = rawProps.Thickness or 1
+                    stroke.Transparency = trans
+                end
+            end
+        elseif kind == "Text" then
+            if rawProps.Center then
+                inst.AnchorPoint = Vector2.new(0.5, 0)
+                inst.TextXAlignment = Enum.TextXAlignment.Center
+            else
+                inst.AnchorPoint = Vector2.new(0, 0)
+                inst.TextXAlignment = Enum.TextXAlignment.Left
+            end
+            inst.Position = UDim2.fromOffset(rawProps.Position.X, rawProps.Position.Y)
+            inst.Text = tostring(rawProps.Text or "")
+            inst.TextSize = rawProps.Size or 13
+            inst.TextColor3 = rawProps.Color
+            inst.TextTransparency = trans
+            if rawProps.Outline and stroke then
+                stroke.Enabled = true
+                stroke.Color = rawProps.OutlineColor or Color3.new(0, 0, 0)
+                stroke.Thickness = 1
+                stroke.Transparency = trans
+            elseif stroke then
+                stroke.Enabled = false
+            end
+        elseif kind == "Line" then
+            local from = rawProps.From or Vector2.zero
+            local to = rawProps.To or Vector2.zero
+            local diff = to - from
+            local dist = diff.Magnitude
+            local angle = math.atan2(diff.Y, diff.X)
+            local mid = (from + to) * 0.5
+            inst.Position = UDim2.fromOffset(mid.X, mid.Y)
+            inst.Size = UDim2.fromOffset(dist, rawProps.Thickness or 1)
+            inst.Rotation = math.deg(angle)
+            inst.BackgroundColor3 = rawProps.Color
+            inst.BackgroundTransparency = trans
+        elseif kind == "Circle" then
+            local rad = rawProps.Radius or 50
+            inst.Position = UDim2.fromOffset(rawProps.Position.X, rawProps.Position.Y)
+            inst.Size = UDim2.fromOffset(rad * 2, rad * 2)
+            if rawProps.Filled then
+                inst.BackgroundColor3 = rawProps.Color
+                inst.BackgroundTransparency = trans
+                if stroke then stroke.Enabled = false end
+            else
+                inst.BackgroundTransparency = 1
+                if stroke then
+                    stroke.Enabled = true
+                    stroke.Color = rawProps.Color
+                    stroke.Thickness = rawProps.Thickness or 1.5
+                    stroke.Transparency = trans
+                end
+            end
+        end
+    end
+
+    local proxy = {}
+    return setmetatable(proxy, {
+        __index = function(_, k)
+            if k == "Remove" or k == "Destroy" then
+                return function()
+                    if inst then
+                        pcall(function() inst:Destroy() end)
+                        inst = nil
+                    end
+                end
+            end
+            return rawProps[k]
+        end,
+        __newindex = function(_, k, v)
+            rawProps[k] = v
+            update()
+        end
+    })
+end
+
+local hasNativeDrawing = false
+pcall(function()
+    if typeof(Drawing) == "table" and typeof(Drawing.new) == "function" then
+        local t = Drawing.new("Square")
+        if t and (typeof(t) == "userdata" or (typeof(t) == "table" and t.Visible ~= nil and t.Remove ~= nil)) then
+            t.Visible = false
+            t:Remove()
+            hasNativeDrawing = true
+        end
+    end
+end)
+
+local function SafeDrawing(kind)
+    if not isMobileDevice and hasNativeDrawing then
+        local ok, d = pcall(Drawing.new, kind)
+        if ok and d then return d end
+    end
+    -- Fallback universal GUI Drawing for iOS Delta, AppleWare, and Mobile executors
+    return CreateGuiDrawing(kind)
+end
+
 -- FOV Circle & Tracer Line Drawing
 local fovCircle = nil
 local targetTracer = nil
 pcall(function()
-    fovCircle = Drawing.new("Circle")
+    fovCircle = SafeDrawing("Circle")
     fovCircle.Thickness = 1.5
     fovCircle.NumSides = 64
     fovCircle.Radius = Hub.Settings.FOVRadius or 180
@@ -971,7 +1184,7 @@ pcall(function()
     fovCircle.Transparency = 1
     fovCircle.Visible = false
 
-    targetTracer = Drawing.new("Line")
+    targetTracer = SafeDrawing("Line")
     targetTracer.Thickness = 1.2
     targetTracer.Color = Color3.fromRGB(255, 50, 70)
     targetTracer.Transparency = 0.9
@@ -1373,6 +1586,65 @@ task.spawn(function()
     LocalPlayer.CharacterAdded:Connect(BindEquip)
 end)
 
+
+-- ================================================
+-- 🔫 CROSS-PLATFORM UNIVERSAL WEAPON FIRING ENGINE
+-- Fully supports PC, iOS Touch, and Android Touch
+-- ================================================
+local function UniversalFireShot(targetPos, targetChar, targetPart)
+    local now = os.clock()
+    -- 1. Try invoking cached weaponclient internal fire closure
+    local fireFn = getActiveFireFunction()
+    if fireFn then
+        local ok = pcall(fireFn, now)
+        if ok then return true end
+    end
+
+    -- 2. Tool activate (fires naturally through Roblox Tool system on all platforms)
+    local char = LocalPlayer.Character
+    local tool = char and char:FindFirstChildOfClass("Tool")
+    if tool and tool:IsA("Tool") then
+        pcall(function() tool:Activate() end)
+    end
+
+    -- 3. Direct packet fallback via FireRemote (Packet Spoofing 100% Headshot)
+    if FireRemote then
+        pcall(function()
+            local camPos = Camera.CFrame.Position
+            local dir = (targetPos and (targetPos - camPos).Unit) or Camera.CFrame.LookVector
+            local bone = Hub.Settings.SilentAimTargetPart or "Head"
+            local hitPart = targetPart or (targetChar and targetChar:FindFirstChild(bone)) or (targetChar and targetChar:FindFirstChild("Head"))
+            local hitPos = targetPos or (hitPart and hitPart.Position) or (camPos + dir * 100)
+            FireRemote:FireServer(
+                camPos,
+                dir,
+                targetChar,
+                bone,
+                hitPos,
+                hitPart,
+                nil,
+                nil,
+                1,
+                math.random(1000, 999999),
+                camPos,
+                dir,
+                hitPos
+            )
+        end)
+        return true
+    end
+
+    -- 4. PC Mouse press fallback
+    if not isMobileDevice and typeof(mouse1press) == "function" then
+        pcall(function()
+            mouse1press()
+            task.delay(0.04, mouse1release)
+        end)
+        return true
+    end
+    return false
+end
+
 -- ================================================
 -- ⚡ MAIN COMBAT RENDERSTEPPED LOOP (FOV Lock & Auto Shoot)
 -- ================================================
@@ -1409,8 +1681,47 @@ Hub.Connections.VenyxRenderStep = RunService.RenderStepped:Connect(function()
         pcall(ClientHitboxes.Refresh)
     end
 
-    -- ค้นหาเป้าหมายในวง FOV
     LockedTarget = GetBestFOVTarget()
+
+    -- 🎯 CAMLOCK / CAMERA AIM TRACKING (Cross-Platform Mobile Touch & PC Right Click)
+    local isCamlockActive = false
+    if isMobileDevice then
+        isCamlockActive = (Hub.MobileAimActive == true)
+    else
+        local isM2 = false
+        pcall(function()
+            isM2 = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
+        end)
+        isCamlockActive = isM2 or (Hub.MobileAimActive == true)
+    end
+
+    if (Hub.Settings.Camlock ~= false) and isCamlockActive and LockedTarget and LockedTarget.Character then
+        local bone = Hub.Settings.CamlockTargetPart or Hub.Settings.SilentAimTargetPart or "Head"
+        local targetPart = LockedTarget.Part or LockedTarget.Character:FindFirstChild(bone) or LockedTarget.Character:FindFirstChild("Head")
+        if targetPart then
+            local camPos = Camera.CFrame.Position
+            local targetLook = CFrame.new(camPos, targetPart.Position)
+            local smooth = Hub.Settings.CamlockSmoothness or 0.25
+            if smooth <= 0 then
+                Camera.CFrame = targetLook
+            else
+                Camera.CFrame = Camera.CFrame:Lerp(targetLook, math.clamp(1 - (smooth * 0.4), 0.2, 1))
+            end
+            if ClientState then
+                ClientState.Aiming = true
+            end
+        end
+    elseif isCamlockActive and not LockedTarget then
+        if ClientState then
+            ClientState.Aiming = true
+        end
+    elseif not isCamlockActive and Hub.WasCamlockActive then
+        if ClientState then
+            ClientState.Aiming = false
+        end
+    end
+    Hub.WasCamlockActive = isCamlockActive
+
 
     -- อัปเดตพิกัดเป้าหมาย (รองรับทั้ง SilentAim และ AutoShoot)
     if (cfg.SilentAim or cfg.AutoShoot) and LockedTarget then
@@ -1464,29 +1775,7 @@ Hub.Connections.VenyxRenderStep = RunService.RenderStepped:Connect(function()
 
                 if now - lastAutoShotTime >= shotInterval then
                     lastAutoShotTime = now
-                    local fireFn = getActiveFireFunction()
-                    if fireFn then
-                        pcall(fireFn, now)
-                    elseif Controls and Controls.Press then
-                        pcall(function()
-                            Controls.Press("Fire", true)
-                            task.delay(0.05, function()
-                                pcall(Controls.Press, "Fire", false)
-                            end)
-                        end)
-                    elseif VirtualInputManager then
-                        local wasAiming = ClientState and ClientState.Aiming
-                        if ClientState then ClientState.Aiming = true end
-                        pcall(function()
-                            VirtualInputManager:SendMouseButtonEvent(aimCenter.X, aimCenter.Y, 0, true, game, 1)
-                            task.defer(function()
-                                VirtualInputManager:SendMouseButtonEvent(aimCenter.X, aimCenter.Y, 0, false, game, 1)
-                                if ClientState and not wasAiming then
-                                    ClientState.Aiming = false
-                                end
-                            end)
-                        end)
-                    end
+                    UniversalFireShot(LockedTarget.Position, LockedTarget.Character, LockedTarget.Part)
                 end
             end
         end
@@ -1723,18 +2012,7 @@ end)
 -- ================================================
 -- 👁️ 10. DRAWING API PLAYER ESP
 -- ================================================
-local function SafeDrawing(kind)
-    if typeof(Drawing) == "table" and typeof(Drawing.new) == "function" then
-        local ok, d = pcall(Drawing.new, kind)
-        if ok and d then return d end
-    end
-    -- Fallback dummy object for Delta iOS where Drawing API is not supported
-    local dummy = {}
-    return setmetatable(dummy, {
-        __index = function(_, k) return (k == "Visible" and false) or 0 end,
-        __newindex = function() end
-    })
-end
+-- (SafeDrawing unified above with Cross-Platform GuiDrawingAdapter)
 
 local function MakePlayerESP(player)
     if Hub.ESP[player] then return end
@@ -2559,19 +2837,8 @@ task.spawn(function()
                     end
                     shots = shots + 1
                     Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetHead.Position)
-                    if Controls then
-                        Controls.Press("Fire", true)
-                        task.wait(0.08)
-                        Controls.Press("Fire", false)
-                        task.wait(0.04)
-                    else
-                        if typeof(mouse1press) == "function" then
-                            mouse1press()
-                            task.wait(0.07)
-                            mouse1release()
-                            task.wait(0.03)
-                        end
-                    end
+                    UniversalFireShot(targetHead.Position, targetNpc, targetHead)
+                    task.wait(0.09)
                 end
 
                 -- Anti-Stall Health Check: If target took multiple bursts without losing HP, blacklist it for 3s
@@ -2686,7 +2953,7 @@ local function InitUI()
             local s, asset = pcall(getcustomasset, "k_community_logo.png")
             if s and asset then return asset end
         end
-        return "rbxasset://5059d143b75fc7c70a58a871660c4f16/k_community_logo.png"
+        return "rbxassetid://10709810948"
     end
 
     -- 🎨 2. LOAD MACLIB UI LIBRARY (MULTI-MIRROR RESILIENT LOADER)
@@ -3664,6 +3931,20 @@ local function InitUI()
         end)
         table.insert(Hub.Connections, rgbConn)
 
+        -- Mascot Fallback Icon (100% visible on iOS, Android, and PC)
+        local fallbackLogo = Instance.new("TextLabel")
+        fallbackLogo.Name = "FallbackMascot"
+        fallbackLogo.Size = UDim2.fromScale(1, 1)
+        fallbackLogo.Position = UDim2.fromScale(0.5, 0.5)
+        fallbackLogo.AnchorPoint = Vector2.new(0.5, 0.5)
+        fallbackLogo.BackgroundTransparency = 1
+        fallbackLogo.Text = "🐙"
+        fallbackLogo.TextSize = 26
+        fallbackLogo.TextColor3 = Color3.fromRGB(0, 230, 255)
+        fallbackLogo.Font = Enum.Font.GothamBold
+        fallbackLogo.ZIndex = 2
+        fallbackLogo.Parent = mainBtn
+
         -- Logo Image
         local logoImg = Instance.new("ImageLabel")
         logoImg.Name = "Logo"
@@ -3673,6 +3954,7 @@ local function InitUI()
         logoImg.BackgroundTransparency = 1
         logoImg.Image = GetLogoAsset()
         logoImg.ScaleType = Enum.ScaleType.Fit
+        logoImg.ZIndex = 3
         logoImg.Parent = mainBtn
 
         -- ✨ Looping Light Sweep / Shimmer Sheen on Logo (แสงปาดโลโก้เนียนๆตา)
@@ -4080,11 +4362,11 @@ local function InitUI()
 
     -- 📑 All Tabs with Icons
     local Tabs = {
-        Combat    = CreateTabAdapter(tabGroup:Tab({ Name = "ต่อสู้",       Image = "rbxassetid://10709810948" }), "Combat"),
-        Visuals   = CreateTabAdapter(tabGroup:Tab({ Name = "มองทะลุ",      Image = "rbxassetid://10747373176" }), "Visuals"),
-        Character = CreateTabAdapter(tabGroup:Tab({ Name = "ตัวละคร",      Image = "rbxassetid://10747372702" }), "Character"),
-        World     = CreateTabAdapter(tabGroup:Tab({ Name = "ฟาร์ม ",  Image = "rbxassetid://10723405360" }), "World"),
-        Settings  = CreateTabAdapter(tabGroup:Tab({ Name = "ตั้งค่า",       Image = "rbxassetid://10734950309" }), "Settings")
+        Combat    = CreateTabAdapter(tabGroup:Tab({ Name = "⚔️ ต่อสู้",       Image = "rbxassetid://10709810948" }), "Combat"),
+        Visuals   = CreateTabAdapter(tabGroup:Tab({ Name = "👁️ มองทะลุ",      Image = "rbxassetid://10747373176" }), "Visuals"),
+        Character = CreateTabAdapter(tabGroup:Tab({ Name = "🏃 ตัวละคร",      Image = "rbxassetid://10747372702" }), "Character"),
+        World     = CreateTabAdapter(tabGroup:Tab({ Name = "🌾 ฟาร์ม ",  Image = "rbxassetid://10723405360" }), "World"),
+        Settings  = CreateTabAdapter(tabGroup:Tab({ Name = "⚙️ ตั้งค่า",       Image = "rbxassetid://10734950309" }), "Settings")
     }
     -- Compatibility aliases
     Tabs.Aimbot = Tabs.Combat
@@ -4200,6 +4482,59 @@ local function InitUI()
     -- ================================================
     -- ⚔️ COMBAT TAB (หมวดต่อสู้)
     -- ================================================
+        Tabs.Combat:AddSection("Camlock (ล็อกมุมกล้องตามเป้า)", "Left")
+
+    local CamlockToggle = Tabs.Combat:AddToggle("CamlockToggle", {
+        Title = "เปิดใช้งาน Camlock (Camera Lock)",
+        Description = "หันมุมกล้องล็อกติดเป้าหมายศัตรูในวง FOV อัตโนมัติ (รองรับทั้งมือถือและคอม)",
+        Default = Hub.Settings.Camlock
+    })
+    CamlockToggle:OnChanged(function(v)
+        Hub.Settings.Camlock = v
+    end)
+
+    local CamlockPartDrop = Tabs.Combat:AddDropdown("CamlockPartDrop", {
+        Title = "ชิ้นส่วนล็อกกล้อง (Lock Part)",
+        Description = "เลือกจุดที่ต้องการให้มุมกล้องล็อกหันไปหา",
+        Values = {"Head", "UpperTorso"},
+        Default = Hub.Settings.CamlockTargetPart or "Head"
+    })
+    CamlockPartDrop:OnChanged(function(v)
+        Hub.Settings.CamlockTargetPart = v
+    end)
+
+    local CamlockSmoothSlider = Tabs.Combat:AddSlider("CamlockSmoothSlider", {
+        Title = "ความนุ่มนวลการหันกล้อง (Smoothness)",
+        Description = "ปรับความนุ่มนวลในการหันกล้อง (0 = Snap ล็อกทันที, 0.5 = หันสมูทเนียนตา)",
+        Default = Hub.Settings.CamlockSmoothness or 0.25,
+        Min = 0,
+        Max = 0.8,
+        Rounding = 2
+    })
+    CamlockSmoothSlider:OnChanged(function(v)
+        Hub.Settings.CamlockSmoothness = v
+    end)
+
+    local MobileAimBtnToggle = Tabs.Combat:AddToggle("MobileAimBtnToggle", {
+        Title = "ปุ่มช่วยเล็งลอยบนจอมือถือ (HUD Aim Button)",
+        Description = "แสดงปุ่มสัมผัส 🎯 AIM บนหน้าจอมือถือ แตะหนึ่งครั้งเพื่อล็อกเป้าและซูมเล็ง",
+        Default = Hub.Settings.MobileAimButton
+    })
+    MobileAimBtnToggle:OnChanged(function(v)
+        Hub.Settings.MobileAimButton = v
+        if v then
+            if not Hub.MobileAimHUD and Hub.CreateMobileAimButton then
+                Hub.CreateMobileAimButton()
+            elseif Hub.MobileAimHUD then
+                Hub.MobileAimHUD.Enabled = true
+            end
+        else
+            if Hub.MobileAimHUD then
+                Hub.MobileAimHUD.Enabled = false
+            end
+        end
+    end)
+
     Tabs.Combat:AddSection("Silent Aim (ระบบล็อกเป้า)", "Left")
 
     local SilentAimToggle = Tabs.Combat:AddToggle("SilentAimToggle", {
