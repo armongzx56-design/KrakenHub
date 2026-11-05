@@ -1823,16 +1823,21 @@ end)
 
 
 -- ================================================
--- 📱 MOBILE CONTINUOUS FULL-AUTO & TOUCH AIM ENGINE
--- รองรับมือถือ 100%: กดยิงค้าง ลั่นกระสุนรัวไม่หยุดชะงัก
+-- 📱 CROSS-PLATFORM DEVICE CONTROLLER (แยกคอม / มือถือ 100%)
+-- คอม: คลิกเม้าส์ เล็งคลิกขวา ยิงคลิกซ้าย ปกติตามเกม ไม่มีการล็อกเล็งค้าง
+-- มือถือ: แตะจอขวาค้างเพื่อเล็งและยิงรัว ปล่อยมือปืนลดลงทันที
 -- ================================================
+local isPC = UserInputService.KeyboardEnabled and UserInputService.MouseEnabled
+local isMobile = not isPC
+
 local _mobileHoldingFire = false
 local _activeFireTouch = nil
 local _lastMobilePulseTick = 0
 
--- ตรวจจับการแตะค้างปุ่มยิงหรือสัมผัสหน้าจอยิงบนมือถือ
-if UserInputService.TouchEnabled then
+-- ตรวจจับการแตะค้างปุ่มยิงหรือสัมผัสหน้าจอยิง (เฉพาะบนมือถือเท่านั้น)
+if isMobile and UserInputService.TouchEnabled then
     UserInputService.TouchStarted:Connect(function(touchInput, gameProcessed)
+        if gameProcessed then return end
         if not (Hub and Hub.Running) then return end
         local myChar = LocalPlayer.Character
         local tool = myChar and myChar:FindFirstChildOfClass("Tool")
@@ -1841,8 +1846,8 @@ if UserInputService.TouchEnabled then
         local vp = (Camera and Camera.ViewportSize) or Vector2.new(1920, 1080)
         local pos = touchInput.Position
 
-        -- แตะจอฝั่งขวา (โซนปุ่มยิง/มุมกล้องขวา) หรือสัมผัสเริ่มยิง
-        if pos.X > vp.X * 0.35 and pos.Y > vp.Y * 0.15 then
+        -- แตะจอฝั่งขวา (โซนปุ่มยิง / มุมกล้องขวาบนมือถือ)
+        if pos.X > vp.X * 0.4 and pos.Y > vp.Y * 0.15 then
             _mobileHoldingFire = true
             _activeFireTouch = touchInput
             if ClientState then
@@ -1937,14 +1942,9 @@ Hub.Connections.CoreEnforcer = RunService.RenderStepped:Connect(function(dt)
             end
         end
 
-        -- 🎯 Mobile & Combat Aim Automation
-        -- บนมือถือหรือตอนยิง ล็อก Aiming ไว้ตลอด ทำให้กดยิงค้างแล้วยิงรัวต่อเนื่อง ไม่สะดุด
-        if ClientState.Equipped then
-            local isFiring = (Controls and typeof(Controls.IsDown) == "function" and Controls.IsDown("Fire"))
-                          or _mobileHoldingFire
-                          or Hub.Settings.AlwaysShoot
-
-            if isFiring then
+        -- 🎯 Mobile Fire & Hold Automation (เฉพาะมือถือเท่านั้น - บนคอมใช้ระบบเม้าส์คลิกปกติ 100%)
+        if isMobile and ClientState.Equipped then
+            if _mobileHoldingFire then
                 ClientState.Aiming = true
                 ClientState.Rolling = false
                 ClientState.CaseRolling = false
