@@ -1571,7 +1571,7 @@ local function getActiveFireFunction()
     end
 
     local nowTick = os.clock()
-    if nowTick - lastFireScanTick < 2.0 then
+    if nowTick - lastFireScanTick < 0.1 then
         return nil
     end
     lastFireScanTick = nowTick
@@ -1816,11 +1816,12 @@ Hub.Connections.VenyxRenderStep = RunService.RenderStepped:Connect(function()
 
         if not isTargetSafe and not isSelfSafe then
             local now = os.clock()
+            if ClientState and Hub.Settings.InfiniteAmmo then ClientState.Reloading = false end
             local isBusy = ClientState and (ClientState.Reloading or ClientState.Rolling or ClientState.CaseRolling)
             local myChar = LocalPlayer.Character
             local tool = myChar and myChar:FindFirstChildOfClass("Tool")
 
-            if not isBusy and tool then
+            if (not isBusy or Hub.Settings.AlwaysShoot) and tool then
                 local currentRPM = cfg.RPM or 900
                 local shotInterval = (60 / currentRPM) + ((cfg.AutoShootDelay or 0) / 1000)
 
@@ -2447,10 +2448,14 @@ Hub.Connections.ESPUpdate = RunService:BindToRenderStep("KrakenESP", Enum.Render
         end
         obj.Dist.Visible = false
 
-        
+        -- hp/hpColor declared here so Billboard block can read them
+        local hp = math.clamp(math.floor((hum.Health / math.max(hum.MaxHealth, 1)) * 100), 0, 100)
+        local hpColor = GetHealthColor(hp)
+
         -- 🌟 3D Native Billboard ESP (Always visible on iOS Delta & Mobile devices)
         if obj.Billboard then
-            if showName or showDist or Hub.Settings.ESPHealthBar or Hub.Settings.ESPWeapon then
+            if showName or showDist or Hub.Settings.ESPHealthBar or Hub.Settings.ESPWeapon
+               or Hub.Settings.PlayerESP or Hub.Settings.ESPBox or Hub.Settings.ESPChams then
                 obj.Billboard.Adornee = head
                 if obj.Billboard.Parent ~= head then
                     pcall(function() obj.Billboard.Parent = head end)
@@ -2485,9 +2490,6 @@ Hub.Connections.ESPUpdate = RunService:BindToRenderStep("KrakenESP", Enum.Render
         end
 
         -- 3. Dynamic Health & Health Bar (Left of target, fully independent of 2D Box)
-        local hp = math.clamp(math.floor((hum.Health / math.max(hum.MaxHealth, 1)) * 100), 0, 100)
-        local hpColor = GetHealthColor(hp)
-
         if Hub.Settings.ESPHealthBar then
             local barW = 3
             local barOutlineW = barW + 2
