@@ -2076,56 +2076,6 @@ end)
 local function MakePlayerESP(player)
     if Hub.ESP[player] then return end
 
-    -- Native 3D BillboardGui for 100% Guaranteed ESP on iOS Delta & Mobile
-    local bb = Instance.new("BillboardGui")
-    bb.Name = "KrakenPlayerBillboard_" .. player.Name
-    bb.Size = UDim2.new(0, 160, 0, 44)
-    bb.StudsOffset = Vector3.new(0, 2.8, 0)
-    bb.AlwaysOnTop = true
-    bb.MaxDistance = 650
-    bb.ResetOnSpawn = false
-    bb.Enabled = false
-    CollectionService:AddTag(bb, "OwnFX")
-    pcall(function() bb.Parent = GetDrawingGui() end)
-
-    local nameLabel = Instance.new("TextLabel")
-    nameLabel.Name = "NameLabel"
-    nameLabel.Size = UDim2.new(1, 0, 0, 16)
-    nameLabel.BackgroundTransparency = 1
-    nameLabel.Font = Enum.Font.GothamBold
-    nameLabel.TextSize = 13
-    nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-    nameLabel.TextStrokeTransparency = 0.2
-    nameLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-    nameLabel.Parent = bb
-
-    local barBg = Instance.new("Frame")
-    barBg.Name = "BarBg"
-    barBg.Size = UDim2.new(1, -20, 0, 4)
-    barBg.Position = UDim2.new(0, 10, 0, 18)
-    barBg.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-    barBg.BorderSizePixel = 0
-    barBg.Parent = bb
-
-    local barFill = Instance.new("Frame")
-    barFill.Name = "BarFill"
-    barFill.Size = UDim2.new(1, 0, 1, 0)
-    barFill.BackgroundColor3 = Color3.fromRGB(60, 255, 60)
-    barFill.BorderSizePixel = 0
-    barFill.Parent = barBg
-
-    local weaponLabel = Instance.new("TextLabel")
-    weaponLabel.Name = "WeaponLabel"
-    weaponLabel.Size = UDim2.new(1, 0, 0, 14)
-    weaponLabel.Position = UDim2.new(0, 0, 0, 24)
-    weaponLabel.BackgroundTransparency = 1
-    weaponLabel.Font = Enum.Font.GothamMedium
-    weaponLabel.TextSize = 11
-    weaponLabel.TextColor3 = Color3.fromRGB(255, 215, 80)
-    weaponLabel.TextStrokeTransparency = 0.2
-    weaponLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-    weaponLabel.Parent = bb
-
     local obj = {
         BoxOutline = SafeDrawing("Square"),
         Box = SafeDrawing("Square"),
@@ -2137,7 +2087,6 @@ local function MakePlayerESP(player)
         Weapon = SafeDrawing("Text"),
         Tracer = SafeDrawing("Line"),
         Highlight = nil,
-        Billboard = bb,
     }
 
     local fontId = (Drawing and Drawing.Fonts and Drawing.Fonts[Hub.Settings.ESPFont]) or 0
@@ -2225,10 +2174,6 @@ local function RemovePlayerESP(player)
         pcall(function() obj.Highlight:Destroy() end)
         obj.Highlight = nil
     end
-    if obj.Billboard then
-        pcall(function() obj.Billboard:Destroy() end)
-        obj.Billboard = nil
-    end
     for k, d in pairs(obj) do
         if k ~= "Highlight" then
             pcall(function() d:Remove() end)
@@ -2269,10 +2214,6 @@ Hub.Connections.ESPUpdate = RunService:BindToRenderStep("KrakenESP", Enum.Render
         if obj.Highlight and obj.Highlight.Enabled then
             obj.Highlight.Enabled = false
             obj.Highlight.Adornee = nil
-        end
-        if obj.Billboard and obj.Billboard.Enabled then
-            obj.Billboard.Enabled = false
-            obj.Billboard.Adornee = nil
         end
     end
 
@@ -2373,165 +2314,139 @@ Hub.Connections.ESPUpdate = RunService:BindToRenderStep("KrakenESP", Enum.Render
             local boxY = topScreen.Y
             local onScreen2D = isFront and (boxH >= 3) and (boxX + boxW >= -25) and (boxX <= vpX + 25) and (boxY + boxH >= -25) and (boxY <= vpY + 25)
 
-            -- 1. Precision 2D Box with High-Contrast Black Border
-            local showBox = onScreen2D and ((Hub.Settings.ESPBox == true) or (Hub.Settings.PlayerESP == true))
-            if obj.BoxOutline then
-                obj.BoxOutline.Visible = showBox
-                if showBox then
-                    obj.BoxOutline.Position = Vector2.new(boxX - 1, boxY - 1)
-                    obj.BoxOutline.Size = Vector2.new(boxW + 2, boxH + 2)
+            if onScreen2D then
+                -- 1. Precision 2D Box with High-Contrast Black Border
+                local showBox = ((Hub.Settings.ESPBox == true) or (Hub.Settings.PlayerESP == true))
+                if obj.BoxOutline then
+                    obj.BoxOutline.Visible = showBox
+                    if showBox then
+                        obj.BoxOutline.Position = Vector2.new(boxX - 1, boxY - 1)
+                        obj.BoxOutline.Size = Vector2.new(boxW + 2, boxH + 2)
+                    end
                 end
-            end
 
-            if obj.Box then
-                obj.Box.Visible = showBox
-                if showBox then
-                    obj.Box.Position = Vector2.new(boxX, boxY)
-                    obj.Box.Size = Vector2.new(boxW, boxH)
-                    obj.Box.Color = isImmune and safeColor or (Hub.Settings.BoxColor or Color3.fromRGB(255, 60, 60))
+                if obj.Box then
+                    obj.Box.Visible = showBox
+                    if showBox then
+                        obj.Box.Position = Vector2.new(boxX, boxY)
+                        obj.Box.Size = Vector2.new(boxW, boxH)
+                        obj.Box.Color = isImmune and safeColor or (Hub.Settings.BoxColor or Color3.fromRGB(255, 60, 60))
+                    end
                 end
-            end
 
-            -- 2. Clean Header (Single-line Name + Distance on top of Box)
-            local distMeters = math.floor(dist * 0.28)
-            local nameStr = player.DisplayName
-            if Hub.Settings.ESPNameMode == "Username" then
-                nameStr = player.Name
-            elseif Hub.Settings.ESPNameMode == "Both" then
-                nameStr = player.DisplayName .. " (@" .. player.Name .. ")"
-            end
-
-            local showName = (Hub.Settings.ESPName == true) or (Hub.Settings.PlayerESP == true)
-            local showDist = (Hub.Settings.ESPDistance == true)
-            local headerText = ""
-            if showName and showDist then
-                headerText = nameStr .. "  [" .. distMeters .. "m]"
-            elseif showName then
-                headerText = nameStr
-            elseif showDist then
-                headerText = distMeters .. "m"
-            end
-
-            if onScreen2D and headerText ~= "" then
-                obj.Name.Visible = true
-                obj.Name.Font = fontId
-                obj.Name.Size = fontSize
-                obj.Name.Position = Vector2.new(centerX, boxY - (fontSize + 3))
-                obj.Name.Text = headerText
-                obj.Name.Color = isImmune and safeColor or (Hub.Settings.NameColor or Color3.fromRGB(255, 255, 255))
-            else
-                obj.Name.Visible = false
-            end
-            if obj.Dist then obj.Dist.Visible = false end
-
-            -- hp/hpColor declared here so Billboard block can read them
-            local hp = math.clamp(math.floor((hum.Health / math.max(hum.MaxHealth, 1)) * 100), 0, 100)
-            local hpColor = GetHealthColor(hp)
-
-            -- 🌟 3D Native Billboard ESP (Always visible on iOS Delta & Mobile devices)
-            if obj.Billboard then
-                if showName or showDist or Hub.Settings.ESPHealthBar or Hub.Settings.ESPWeapon
-                   or Hub.Settings.PlayerESP or Hub.Settings.ESPBox or Hub.Settings.ESPChams then
-                    obj.Billboard.Adornee = head
-                    if not obj.Billboard.Parent or not obj.Billboard.Parent.Parent then
-                        pcall(function() obj.Billboard.Parent = GetDrawingGui() end)
-                    end
-                    local nb = obj.Billboard:FindFirstChild("NameLabel")
-                    if nb then
-                        nb.Text = headerText
-                        nb.TextColor3 = isImmune and safeColor or (Hub.Settings.NameColor or Color3.fromRGB(255, 255, 255))
-                        nb.Visible = (showName or showDist) and (headerText ~= "")
-                    end
-                    local bg = obj.Billboard:FindFirstChild("BarBg")
-                    local bf = bg and bg:FindFirstChild("BarFill")
-                    if bf and bg then
-                        bf.Size = UDim2.new(math.clamp(hp / 100, 0, 1), 0, 1, 0)
-                        bf.BackgroundColor3 = hpColor
-                        bg.Visible = (Hub.Settings.ESPHealthBar == true)
-                    end
-                    local wb = obj.Billboard:FindFirstChild("WeaponLabel")
-                    if wb then
-                        local tool = char:FindFirstChildOfClass("Tool")
-                        local rawName = tool and tool.Name
-                        local wName = rawName and GetFormattedWeaponName(rawName) or ""
-                        wb.Text = wName ~= "" and ("🔫 " .. wName) or ""
-                        wb.Visible = (Hub.Settings.ESPWeapon == true and wName ~= "")
-                    end
-                    if not obj.Billboard.Enabled then
-                        obj.Billboard.Enabled = true
-                    end
-                elseif obj.Billboard.Enabled then
-                    obj.Billboard.Enabled = false
-                    obj.Billboard.Adornee = nil
+                -- 2. Clean Header (Single-line Name + Distance on top of Box)
+                local distMeters = math.floor(dist * 0.28)
+                local nameStr = player.DisplayName
+                if Hub.Settings.ESPNameMode == "Username" then
+                    nameStr = player.Name
+                elseif Hub.Settings.ESPNameMode == "Both" then
+                    nameStr = player.DisplayName .. " (@" .. player.Name .. ")"
                 end
-            end
 
-        -- 3. Dynamic Health & Health Bar (Left of target, fully independent of 2D Box)
-        if Hub.Settings.ESPHealthBar then
-            local barW = 3
-            local barOutlineW = barW + 2
-            local barX = boxX - barOutlineW - 3
-            local currentBarH = math.clamp(math.floor(boxH * (hp / 100)), 1, math.max(1, boxH))
+                local showName = (Hub.Settings.ESPName == true) or (Hub.Settings.PlayerESP == true)
+                local showDist = (Hub.Settings.ESPDistance == true)
+                local headerText = ""
+                if showName and showDist then
+                    headerText = nameStr .. "  [" .. distMeters .. "m]"
+                elseif showName then
+                    headerText = nameStr
+                elseif showDist then
+                    headerText = distMeters .. "m"
+                end
 
-            obj.HealthBarOutline.Visible = true
-            obj.HealthBarOutline.Position = Vector2.new(barX, boxY - 1)
-            obj.HealthBarOutline.Size = Vector2.new(barOutlineW, boxH + 2)
+                if headerText ~= "" then
+                    obj.Name.Visible = true
+                    obj.Name.Font = fontId
+                    obj.Name.Size = fontSize
+                    obj.Name.Position = Vector2.new(centerX, boxY - (fontSize + 3))
+                    obj.Name.Text = headerText
+                    obj.Name.Color = isImmune and safeColor or (Hub.Settings.NameColor or Color3.fromRGB(255, 255, 255))
+                else
+                    obj.Name.Visible = false
+                end
+                if obj.Dist then obj.Dist.Visible = false end
 
-            obj.HealthBar.Visible = true
-            obj.HealthBar.Position = Vector2.new(barX + 1, (boxY + boxH) - currentBarH)
-            obj.HealthBar.Size = Vector2.new(barW, currentBarH)
-            obj.HealthBar.Color = hpColor
+                -- 3. Standing Vertical Health Bar & HP Text (Left of target, fully independent of 2D Box)
+                local hp = math.clamp(math.floor((hum.Health / math.max(hum.MaxHealth, 1)) * 100), 0, 100)
+                local hpColor = GetHealthColor(hp)
 
-            if Hub.Settings.ESPHealth and hp < 100 then
-                obj.Health.Visible = true
-                obj.Health.Font = fontId
-                obj.Health.Size = math.max(10, subSize - 1)
-                obj.Health.Position = Vector2.new(barX - 22, (boxY + boxH) - currentBarH - 4)
-                obj.Health.Text = hp .. "%"
-                obj.Health.Color = hpColor
+                if Hub.Settings.ESPHealthBar then
+                    local barW = 3
+                    local barOutlineW = barW + 2
+                    local barX = boxX - barOutlineW - 3
+                    local currentBarH = math.clamp(math.floor(boxH * (hp / 100)), 1, math.max(1, boxH))
+
+                    obj.HealthBarOutline.Visible = true
+                    obj.HealthBarOutline.Position = Vector2.new(barX, boxY - 1)
+                    obj.HealthBarOutline.Size = Vector2.new(barOutlineW, boxH + 2)
+
+                    obj.HealthBar.Visible = true
+                    obj.HealthBar.Position = Vector2.new(barX + 1, (boxY + boxH) - currentBarH)
+                    obj.HealthBar.Size = Vector2.new(barW, currentBarH)
+                    obj.HealthBar.Color = hpColor
+
+                    if Hub.Settings.ESPHealth and hp < 100 then
+                        obj.Health.Visible = true
+                        obj.Health.Font = fontId
+                        obj.Health.Size = math.max(10, subSize - 1)
+                        obj.Health.Position = Vector2.new(barX - 22, (boxY + boxH) - currentBarH - 4)
+                        obj.Health.Text = hp .. "%"
+                        obj.Health.Color = hpColor
+                    else
+                        obj.Health.Visible = false
+                    end
+                else
+                    obj.HealthBarOutline.Visible = false
+                    obj.HealthBar.Visible = false
+
+                    if Hub.Settings.ESPHealth then
+                        obj.Health.Visible = true
+                        obj.Health.Font = fontId
+                        obj.Health.Size = subSize
+                        obj.Health.Position = Vector2.new(centerX, boxY + boxH + 2)
+                        obj.Health.Text = hp .. "% HP"
+                        obj.Health.Color = hpColor
+                    else
+                        obj.Health.Visible = false
+                    end
+                end
+
+                -- 4. Clean Weapon Footer (Single-line below Box with cached string)
+                local tool = char:FindFirstChildOfClass("Tool")
+                if Hub.Settings.ESPWeapon and tool and dist <= 250 then
+                    local rawWeaponName = GetFormattedWeaponName(tool.Name)
+                    obj.Weapon.Visible = true
+                    obj.Weapon.Font = fontId
+                    obj.Weapon.Size = subSize
+                    local weaponY = (not Hub.Settings.ESPHealthBar and Hub.Settings.ESPHealth) and (boxY + boxH + subSize + 4) or (boxY + boxH + 3)
+                    obj.Weapon.Position = Vector2.new(centerX, weaponY)
+                    obj.Weapon.Text = rawWeaponName
+                    obj.Weapon.Color = Color3.fromRGB(255, 215, 80)
+                else
+                    obj.Weapon.Visible = false
+                end
+
+                -- 5. Tracer
+                if Hub.Settings.ESPTracers and isFront then
+                    obj.Tracer.Visible = true
+                    obj.Tracer.From = tracerOrigin
+                    obj.Tracer.To = bottomScreen
+                    obj.Tracer.Color = isImmune and safeColor or (Hub.Settings.TracerColor or Color3.fromRGB(0, 200, 255))
+                else
+                    obj.Tracer.Visible = false
+                end
             else
-                obj.Health.Visible = false
+                -- Off-screen: Hide all 2D Drawing elements completely
+                if obj.BoxOutline then obj.BoxOutline.Visible = false end
+                if obj.Box then obj.Box.Visible = false end
+                if obj.Name then obj.Name.Visible = false end
+                if obj.HealthBarOutline then obj.HealthBarOutline.Visible = false end
+                if obj.HealthBar then obj.HealthBar.Visible = false end
+                if obj.Health then obj.Health.Visible = false end
+                if obj.Dist then obj.Dist.Visible = false end
+                if obj.Weapon then obj.Weapon.Visible = false end
+                if obj.Tracer then obj.Tracer.Visible = false end
             end
-        else
-            obj.HealthBarOutline.Visible = false
-            obj.HealthBar.Visible = false
-
-            if Hub.Settings.ESPHealth then
-                obj.Health.Visible = true
-                obj.Health.Font = fontId
-                obj.Health.Size = subSize
-                obj.Health.Position = Vector2.new(centerX, boxY + boxH + 2)
-                obj.Health.Text = hp .. "% HP"
-                obj.Health.Color = hpColor
-            else
-                obj.Health.Visible = false
-            end
-        end
-
-        -- 4. Clean Weapon Footer (Single-line below Box with cached string)
-        local tool = char:FindFirstChildOfClass("Tool")
-        if Hub.Settings.ESPWeapon and tool and dist <= 250 then
-            local rawWeaponName = GetFormattedWeaponName(tool.Name)
-            obj.Weapon.Visible = true
-            obj.Weapon.Font = fontId
-            obj.Weapon.Size = subSize
-            local weaponY = (not Hub.Settings.ESPHealthBar and Hub.Settings.ESPHealth) and (boxY + boxH + subSize + 4) or (boxY + boxH + 3)
-            obj.Weapon.Position = Vector2.new(centerX, weaponY)
-            obj.Weapon.Text = rawWeaponName
-            obj.Weapon.Color = Color3.fromRGB(255, 215, 80)
-        else
-            obj.Weapon.Visible = false
-        end
-
-        -- 5. Tracer
-        if Hub.Settings.ESPTracers then
-            obj.Tracer.Visible = true
-            obj.Tracer.From = tracerOrigin
-            obj.Tracer.To = bottomScreen
-            obj.Tracer.Color = isImmune and safeColor or Hub.Settings.TracerColor
-        else
-            obj.Tracer.Visible = false
-        end
     end
     end)
 end)
@@ -3071,9 +2986,11 @@ local function InitUI()
         if not parent then return end
         for _, c in ipairs(parent:GetChildren()) do
             if c:IsA("ScreenGui") then
-                if c.Name == "KrakenHub_ToggleButton" or c.Name == "KrakenHub_UI" or c.Name == "Maclib" or c.Name == "Fluent" or c.Name == "KrakenHub_MobileAimHUD" or c:FindFirstChild("Base") then
+                if c.Name == "KrakenHub_ToggleButton" or c.Name == "KrakenHub_UI" or c.Name == "Maclib" or c.Name == "Fluent" or c.Name == "KrakenHub_MobileAimHUD" or c.Name:find("KrakenPlayerBillboard") or c:FindFirstChild("Base") then
                     pcall(function() c:Destroy() end)
                 end
+            elseif c:IsA("BillboardGui") and c.Name:find("KrakenPlayerBillboard") then
+                pcall(function() c:Destroy() end)
             end
         end
     end
