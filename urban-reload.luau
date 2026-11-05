@@ -64,12 +64,6 @@ local Hub = {
         IconTheme = "Themed",
 
         -- ⚔️ ระบบต่อสู้ (Combat System) - Pure & Unified Engine
-                -- 🎯 ระบบช่วยเล็ง & ล็อกเป้า (Camlock & Mobile Aim System)
-        Camlock = true,                       -- ล็อกมุมกล้องตามเป้าหมาย (Camera Aim Lock)
-        CamlockSmoothness = 0.25,             -- ความนุ่มนวลการหันกล้อง (0 = Snap ทันที, 0.5 = ค่อยๆ หัน)
-        CamlockTargetPart = "Head",           -- ชิ้นส่วนล็อกกล้อง (Head, UpperTorso)
-        MobileAimButton = true,               -- แสดงปุ่มช่วยเล็งลอยบนจอมือถือ (HUD Touch Button)
-        MobileAimMode = "Toggle",             -- รูปแบบการกด ("Toggle" แตะเพื่อเปิด/ปิด, "Hold" แตะค้าง)
         SilentAim = true,                     -- กระสุนล็อกเป้า 100% (Homing / Bullet Redirection)
         SilentAimTargetPart = "Head",         -- ชิ้นส่วนเป้าหมาย (Head, UpperTorso)
         ShowFOV = true,                       -- แสดงวงกลม FOV
@@ -1764,46 +1758,6 @@ Hub.Connections.VenyxRenderStep = RunService.RenderStepped:Connect(function()
 
     LockedTarget = GetBestFOVTarget()
 
-    -- 🎯 CAMLOCK / CAMERA AIM TRACKING (Cross-Platform Mobile Touch & PC Right Click)
-    local isCamlockActive = false
-    if isMobileDevice then
-        isCamlockActive = (Hub.MobileAimActive == true)
-    else
-        local isM2 = false
-        pcall(function()
-            isM2 = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
-        end)
-        isCamlockActive = isM2 or (Hub.MobileAimActive == true)
-    end
-
-    if (Hub.Settings.Camlock ~= false) and isCamlockActive and LockedTarget and LockedTarget.Character then
-        local bone = Hub.Settings.CamlockTargetPart or Hub.Settings.SilentAimTargetPart or "Head"
-        local targetPart = LockedTarget.Part or LockedTarget.Character:FindFirstChild(bone) or LockedTarget.Character:FindFirstChild("Head")
-        if targetPart then
-            local camPos = Camera.CFrame.Position
-            local targetLook = CFrame.new(camPos, targetPart.Position)
-            local smooth = Hub.Settings.CamlockSmoothness or 0.25
-            if smooth <= 0 then
-                Camera.CFrame = targetLook
-            else
-                Camera.CFrame = Camera.CFrame:Lerp(targetLook, math.clamp(1 - (smooth * 0.4), 0.2, 1))
-            end
-            if ClientState then
-                ClientState.Aiming = true
-            end
-        end
-    elseif isCamlockActive and not LockedTarget then
-        if ClientState then
-            ClientState.Aiming = true
-        end
-    elseif not isCamlockActive and Hub.WasCamlockActive then
-        if ClientState then
-            ClientState.Aiming = false
-        end
-    end
-    Hub.WasCamlockActive = isCamlockActive
-
-
     -- อัปเดตพิกัดเป้าหมาย (รองรับทั้ง SilentAim และ AutoShoot)
     if (cfg.SilentAim or cfg.AutoShoot) and LockedTarget then
         _G.UrbanReloadSilentAimTarget = LockedTarget.Position
@@ -1914,11 +1868,6 @@ Hub.Connections.CoreEnforcer = RunService.RenderStepped:Connect(function(dt)
         if Hub.Settings.AlwaysShoot then
             ClientState.Rolling = false
             ClientState.CaseRolling = false
-        end
-
-        -- Keep Aiming active during combat or touch aim to prevent firing cutoff
-        if Hub.MobileAimActive then
-            ClientState.Aiming = true
         end
     end
 end)
@@ -3122,7 +3071,7 @@ local function InitUI()
         if not parent then return end
         for _, c in ipairs(parent:GetChildren()) do
             if c:IsA("ScreenGui") then
-                if c.Name == "KrakenHub_ToggleButton" or c.Name == "KrakenHub_UI" or c.Name == "Maclib" or c.Name == "Fluent" or c:FindFirstChild("Base") then
+                if c.Name == "KrakenHub_ToggleButton" or c.Name == "KrakenHub_UI" or c.Name == "Maclib" or c.Name == "Fluent" or c.Name == "KrakenHub_MobileAimHUD" or c:FindFirstChild("Base") then
                     pcall(function() c:Destroy() end)
                 end
             end
@@ -4131,20 +4080,6 @@ local function InitUI()
         end)
         table.insert(Hub.Connections, rgbConn)
 
-        -- Mascot Fallback Icon (100% visible on iOS, Android, and PC)
-        local fallbackLogo = Instance.new("TextLabel")
-        fallbackLogo.Name = "FallbackMascot"
-        fallbackLogo.Size = UDim2.fromScale(1, 1)
-        fallbackLogo.Position = UDim2.fromScale(0.5, 0.5)
-        fallbackLogo.AnchorPoint = Vector2.new(0.5, 0.5)
-        fallbackLogo.BackgroundTransparency = 1
-        fallbackLogo.Text = "🐙"
-        fallbackLogo.TextSize = 26
-        fallbackLogo.TextColor3 = Color3.fromRGB(0, 230, 255)
-        fallbackLogo.Font = Enum.Font.GothamBold
-        fallbackLogo.ZIndex = 2
-        fallbackLogo.Parent = mainBtn
-
         -- Logo Image
         local logoImg = Instance.new("ImageLabel")
         logoImg.Name = "Logo"
@@ -4299,133 +4234,6 @@ local function InitUI()
     end
 
     CreateFloatingToggleButton(Window)
-
-    -- 🎯 5.1 FLOATING MOBILE TOUCH AIM BUTTON ENGINE
-    local function CreateMobileAimButton()
-        local isMobile = UserInputService.TouchEnabled or (UserInputService.KeyboardEnabled == false)
-        if not isMobile and not Hub.Settings.MobileAimButton then return end
-
-        local oldGui = (targetGuiParent and targetGuiParent:FindFirstChild("KrakenHub_MobileAimHUD"))
-            or (LocalPlayer and LocalPlayer:FindFirstChildOfClass("PlayerGui") and LocalPlayer.PlayerGui:FindFirstChild("KrakenHub_MobileAimHUD"))
-        if oldGui then pcall(function() oldGui:Destroy() end) end
-
-        local screenGui = Instance.new("ScreenGui")
-        screenGui.Name = "KrakenHub_MobileAimHUD"
-        screenGui.ResetOnSpawn = false
-        screenGui.DisplayOrder = 998
-        screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-
-        local aimBtn = Instance.new("TextButton")
-        aimBtn.Name = "MobileAimButton"
-        aimBtn.Size = UDim2.fromOffset(56, 56)
-        aimBtn.Position = UDim2.new(1, -125, 0.58, -28)
-        aimBtn.BackgroundColor3 = Color3.fromRGB(18, 20, 26)
-        aimBtn.BackgroundTransparency = 0.2
-        aimBtn.Text = ""
-        aimBtn.AutoButtonColor = false
-        aimBtn.BorderSizePixel = 0
-        aimBtn.Parent = screenGui
-
-        local corner = Instance.new("UICorner")
-        corner.CornerRadius = UDim.new(1, 0)
-        corner.Parent = aimBtn
-
-        local stroke = Instance.new("UIStroke")
-        stroke.Name = "Stroke"
-        stroke.Color = Color3.fromRGB(0, 220, 255)
-        stroke.Thickness = 2.5
-        stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-        stroke.Parent = aimBtn
-
-        local icon = Instance.new("TextLabel")
-        icon.Name = "Icon"
-        icon.Size = UDim2.new(1, 0, 0, 22)
-        icon.Position = UDim2.new(0, 0, 0, 8)
-        icon.BackgroundTransparency = 1
-        icon.Text = "🎯"
-        icon.TextSize = 19
-        icon.Parent = aimBtn
-
-        local label = Instance.new("TextLabel")
-        label.Name = "Label"
-        label.Size = UDim2.new(1, 0, 0, 16)
-        label.Position = UDim2.new(0, 0, 0, 30)
-        label.BackgroundTransparency = 1
-        label.Text = "AIM"
-        label.Font = Enum.Font.GothamBold
-        label.TextSize = 11
-        label.TextColor3 = Color3.fromRGB(0, 230, 255)
-        label.Parent = aimBtn
-
-        -- Smooth Touch & Mouse Dragging
-        local dragging = false
-        local dragStart = nil
-        local startPos = nil
-
-        aimBtn.InputBegan:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                dragging = true
-                dragStart = input.Position
-                startPos = aimBtn.Position
-
-                input.Changed:Connect(function()
-                    if input.UserInputState == Enum.UserInputState.End then
-                        dragging = false
-                    end
-                end)
-            end
-        end)
-
-        UserInputService.InputChanged:Connect(function(input)
-            if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-                local delta = input.Position - dragStart
-                aimBtn.Position = UDim2.new(
-                    startPos.X.Scale,
-                    startPos.X.Offset + delta.X,
-                    startPos.Y.Scale,
-                    startPos.Y.Offset + delta.Y
-                )
-            end
-        end)
-
-        -- Visual Toggle Logic
-        local function SetAimVisual(active)
-            if active then
-                aimBtn.BackgroundColor3 = Color3.fromRGB(225, 35, 55)
-                aimBtn.BackgroundTransparency = 0.05
-                stroke.Color = Color3.fromRGB(255, 255, 255)
-                label.Text = "LOCK"
-                label.TextColor3 = Color3.fromRGB(255, 255, 255)
-                icon.Text = "🔒"
-            else
-                aimBtn.BackgroundColor3 = Color3.fromRGB(18, 20, 26)
-                aimBtn.BackgroundTransparency = 0.2
-                stroke.Color = Color3.fromRGB(0, 220, 255)
-                label.Text = "AIM"
-                label.TextColor3 = Color3.fromRGB(0, 230, 255)
-                icon.Text = "🎯"
-            end
-        end
-
-        aimBtn.Activated:Connect(function()
-            Hub.MobileAimActive = not Hub.MobileAimActive
-            SetAimVisual(Hub.MobileAimActive)
-            if ClientState then
-                ClientState.Aiming = Hub.MobileAimActive
-            end
-        end)
-
-        local okP = pcall(function() screenGui.Parent = targetGuiParent end)
-        if not okP or not screenGui.Parent then
-            pcall(function() screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end)
-        end
-        Hub.MobileAimHUD = screenGui
-        return screenGui
-    end
-    Hub.CreateMobileAimButton = CreateMobileAimButton
-    if Hub.Settings.MobileAimButton then
-        task.defer(CreateMobileAimButton)
-    end
 
     -- 🧩 6. FLUENT COMPATIBILITY ADAPTER LAYER
     local tabGroup = Window:TabGroup()
@@ -4809,59 +4617,6 @@ local function InitUI()
     -- ================================================
     -- ⚔️ COMBAT TAB (หมวดต่อสู้)
     -- ================================================
-        Tabs.Combat:AddSection("Camlock (ล็อกมุมกล้องตามเป้า)", "Left")
-
-    local CamlockToggle = Tabs.Combat:AddToggle("CamlockToggle", {
-        Title = "เปิดใช้งาน Camlock (Camera Lock)",
-        Description = "หันมุมกล้องล็อกติดเป้าหมายศัตรูในวง FOV อัตโนมัติ (รองรับทั้งมือถือและคอม)",
-        Default = Hub.Settings.Camlock
-    })
-    CamlockToggle:OnChanged(function(v)
-        Hub.Settings.Camlock = v
-    end)
-
-    local CamlockPartDrop = Tabs.Combat:AddDropdown("CamlockPartDrop", {
-        Title = "ชิ้นส่วนล็อกกล้อง (Lock Part)",
-        Description = "เลือกจุดที่ต้องการให้มุมกล้องล็อกหันไปหา",
-        Values = {"Head", "UpperTorso"},
-        Default = Hub.Settings.CamlockTargetPart or "Head"
-    })
-    CamlockPartDrop:OnChanged(function(v)
-        Hub.Settings.CamlockTargetPart = v
-    end)
-
-    local CamlockSmoothSlider = Tabs.Combat:AddSlider("CamlockSmoothSlider", {
-        Title = "ความนุ่มนวลการหันกล้อง (Smoothness)",
-        Description = "ปรับความนุ่มนวลในการหันกล้อง (0 = Snap ล็อกทันที, 0.5 = หันสมูทเนียนตา)",
-        Default = Hub.Settings.CamlockSmoothness or 0.25,
-        Min = 0,
-        Max = 0.8,
-        Rounding = 2
-    })
-    CamlockSmoothSlider:OnChanged(function(v)
-        Hub.Settings.CamlockSmoothness = v
-    end)
-
-    local MobileAimBtnToggle = Tabs.Combat:AddToggle("MobileAimBtnToggle", {
-        Title = "ปุ่มช่วยเล็งลอยบนจอมือถือ (HUD Aim Button)",
-        Description = "แสดงปุ่มสัมผัส 🎯 AIM บนหน้าจอมือถือ แตะหนึ่งครั้งเพื่อล็อกเป้าและซูมเล็ง",
-        Default = Hub.Settings.MobileAimButton
-    })
-    MobileAimBtnToggle:OnChanged(function(v)
-        Hub.Settings.MobileAimButton = v
-        if v then
-            if not Hub.MobileAimHUD and Hub.CreateMobileAimButton then
-                Hub.CreateMobileAimButton()
-            elseif Hub.MobileAimHUD then
-                Hub.MobileAimHUD.Enabled = true
-            end
-        else
-            if Hub.MobileAimHUD then
-                Hub.MobileAimHUD.Enabled = false
-            end
-        end
-    end)
-
     Tabs.Combat:AddSection("Silent Aim (ระบบล็อกเป้า)", "Left")
 
     local SilentAimToggle = Tabs.Combat:AddToggle("SilentAimToggle", {
