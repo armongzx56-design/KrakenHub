@@ -969,19 +969,16 @@ local lastAutoShotTime = 0
 -- 📱 CROSS-PLATFORM SYSTEM & UNIVERSAL GUI DRAWING ADAPTER
 -- Supports iOS Delta, AppleWare, Android, and PC
 -- ================================================
+local CoreGui = (pcall(function() return game:GetService("CoreGui") end) and game:GetService("CoreGui")) or nil
 local isMobileDevice = UserInputService.TouchEnabled or (UserInputService.KeyboardEnabled == false)
 
 local DrawingGui = nil
 local function GetDrawingGui()
     if DrawingGui and DrawingGui.Parent then return DrawingGui end
     local p = nil
-    if gethui then
-        local ok, h = pcall(gethui)
-        if ok and h and typeof(h) == "Instance" then
-            p = h
-        end
-    end
-    if not p and CoreGui then
+
+    -- 1. Check CoreGui first (standard, direct rendering for executors like Delta iOS, AppleWare, PC)
+    if CoreGui then
         local canCore = pcall(function()
             local test = Instance.new("Folder")
             test.Parent = CoreGui
@@ -989,6 +986,16 @@ local function GetDrawingGui()
         end)
         if canCore then p = CoreGui end
     end
+
+    -- 2. Check gethui ONLY if it is an instance that can directly host ScreenGuis
+    if not p and gethui then
+        local ok, h = pcall(gethui)
+        if ok and h and typeof(h) == "Instance" and not h:IsA("Folder") then
+            p = h
+        end
+    end
+
+    -- 3. Fallback to PlayerGui
     if not p then
         p = (LocalPlayer and LocalPlayer:FindFirstChildOfClass("PlayerGui"))
             or (LocalPlayer and LocalPlayer:WaitForChild("PlayerGui", 5))
@@ -1036,6 +1043,7 @@ local function CreateGuiDrawing(kind)
 
     if kind == "Square" then
         inst = Instance.new("Frame")
+        inst.Active = false
         inst.BorderSizePixel = 0
         inst.ZIndex = 30
         inst.Visible = false
@@ -1045,11 +1053,15 @@ local function CreateGuiDrawing(kind)
         stroke.Parent = inst
     elseif kind == "Text" then
         inst = Instance.new("TextLabel")
+        inst.Active = false
         inst.BackgroundTransparency = 1
         inst.BorderSizePixel = 0
         inst.Font = Enum.Font.GothamBold
+        inst.TextSize = 13
+        inst.Size = UDim2.new(0, 200, 0, 18)
         inst.TextXAlignment = Enum.TextXAlignment.Left
         inst.TextYAlignment = Enum.TextYAlignment.Center
+        inst.ZIndex = 35
         inst.Visible = false
         pcall(function() inst.Parent = gui end)
         stroke = Instance.new("UIStroke")
@@ -1058,16 +1070,18 @@ local function CreateGuiDrawing(kind)
         stroke.Parent = inst
     elseif kind == "Line" then
         inst = Instance.new("Frame")
+        inst.Active = false
         inst.AnchorPoint = Vector2.new(0.5, 0.5)
         inst.BorderSizePixel = 0
-        inst.ZIndex = 30
+        inst.ZIndex = 25
         inst.Visible = false
         pcall(function() inst.Parent = gui end)
     elseif kind == "Circle" then
         inst = Instance.new("Frame")
+        inst.Active = false
         inst.AnchorPoint = Vector2.new(0.5, 0.5)
         inst.BorderSizePixel = 0
-        inst.ZIndex = 30
+        inst.ZIndex = 20
         inst.Visible = false
         pcall(function() inst.Parent = gui end)
         corner = Instance.new("UICorner")
@@ -1103,10 +1117,10 @@ local function CreateGuiDrawing(kind)
             end
         elseif kind == "Text" then
             if rawProps.Center then
-                inst.AnchorPoint = Vector2.new(0.5, 0)
+                inst.AnchorPoint = Vector2.new(0.5, 0.5)
                 inst.TextXAlignment = Enum.TextXAlignment.Center
             else
-                inst.AnchorPoint = Vector2.new(0, 0)
+                inst.AnchorPoint = Vector2.new(0, 0.5)
                 inst.TextXAlignment = Enum.TextXAlignment.Left
             end
             inst.Position = UDim2.fromOffset(rawProps.Position.X, rawProps.Position.Y)
@@ -1187,7 +1201,7 @@ pcall(function()
 end)
 
 local function SafeDrawing(kind)
-    if not isMobileDevice and hasNativeDrawing then
+    if hasNativeDrawing then
         local ok, d = pcall(Drawing.new, kind)
         if ok and d then return d end
     end
@@ -1485,16 +1499,25 @@ local function ApplyWeaponMods()
                 makeWritable(wData.Fire)
                 wData.Fire.Mode = "Auto"
                 wData.Fire.RPM = cfg.RPM or 900
-                wData.Fire.BoltTime = 0       -- Remove bolt action pause between shots
-                wData.Fire.SwapCooldown = 0   -- Remove weapon swap pause
-                wData.Fire.Burst = nil        -- Convert burst to true continuous full auto
-                wData.Fire.BurstDelay = 0     -- Remove burst pause
+                if orig.Fire.BoltTime ~= nil then
+                    wData.Fire.BoltTime = 0.01       -- Fast cycle for bolt-action rifles
+                end
+                if orig.Fire.SwapCooldown ~= nil then
+                    wData.Fire.SwapCooldown = 0   -- Remove weapon swap pause
+                end
+                if orig.Fire.Burst ~= nil then
+                    wData.Fire.Burst = nil        -- Convert burst to true continuous full auto
+                end
+                if orig.Fire.BurstDelay ~= nil then
+                    wData.Fire.BurstDelay = 0     -- Remove burst pause
+                end
             end
 
             -- 4. Fast Reload & Large Mag
             if wData.Ammo then
                 makeWritable(wData.Ammo)
-                wData.Ammo.ReloadTime = cfg.FastReload and 0.01 or orig.Ammo.ReloadTime
+                local origReload = (orig.Ammo and orig.Ammo.ReloadTime) or 1.5
+                wData.Ammo.ReloadTime = cfg.FastReload and 0.05 or origReload
                 if cfg.InfiniteAmmo then
                     wData.Ammo.Mag = 999
                     wData.Ammo.MaxMag = 999
@@ -1609,11 +1632,6 @@ local function getActiveFireFunction()
                 end
             end
             if hasClientState and hasFireConfig then
-                for idx, upv in pairs(upvals) do
-                    if typeof(upv) == "boolean" and upv == false then
-                        pcall(debug.setupvalue, v, idx, true)
-                    end
-                end
                 cachedFireFunction = v
                 return v
             end
@@ -1651,11 +1669,23 @@ local function UniversalFireShot(targetPos, targetChar, targetPart)
         if ok then return true end
     end
 
-    -- 2. Tool activate (fires naturally through Roblox Tool system on all platforms)
+    -- 2. Native Urban Reload Controls.Press (smooth, non-stuttering game engine firing)
+    if Controls and Controls.Press then
+        pcall(function()
+            Controls.Press("Fire", true)
+            task.delay(0.04, function()
+                pcall(Controls.Press, "Fire", false)
+            end)
+        end)
+        return true
+    end
+
+    -- 3. Tool activate (fires naturally through Roblox Tool system on all platforms)
     local char = LocalPlayer.Character
     local tool = char and char:FindFirstChildOfClass("Tool")
     if tool and tool:IsA("Tool") then
         pcall(function() tool:Activate() end)
+        return true
     end
 
     -- 3. Direct packet fallback via FireRemote (Packet Spoofing 100% Headshot)
@@ -1863,17 +1893,22 @@ Hub.Connections.CoreEnforcer = RunService.RenderStepped:Connect(function(dt)
             ClientState.RecoilScale = 0
         end
 
-        -- 🛡️ True Infinite Ammo Replenishment (Stops Reload Interruption Loop)
+        -- 🛡️ True Infinite Ammo Replenishment (Maintains high ammo, completely prevents reload stutter)
         if Hub.Settings.InfiniteAmmo then
             local myChar = LocalPlayer.Character
             local tool = myChar and myChar:FindFirstChildOfClass("Tool")
-            if tool then
-                local curAmmo = tool:GetAttribute("Ammo") or 0
-                if curAmmo < 10 then
+            if tool and tool:IsA("Tool") then
+                local curAmmo = tool:GetAttribute("Ammo")
+                if typeof(curAmmo) == "number" and curAmmo < 25 then
                     tool:SetAttribute("Ammo", 60)
                 end
+                if tool:GetAttribute("Reloading") == true and curAmmo and curAmmo > 10 then
+                    tool:SetAttribute("Reloading", false)
+                end
             end
-            ClientState.Reloading = false
+            if ClientState and not Hub.Settings.FastReload then
+                ClientState.Reloading = false
+            end
         end
 
         if Hub.Settings.AlwaysShoot then
@@ -2102,6 +2137,7 @@ local function MakePlayerESP(player)
     bb.ResetOnSpawn = false
     bb.Enabled = false
     CollectionService:AddTag(bb, "OwnFX")
+    pcall(function() bb.Parent = GetDrawingGui() end)
 
     local nameLabel = Instance.new("TextLabel")
     nameLabel.Name = "NameLabel"
@@ -2227,6 +2263,7 @@ local function MakePlayerESP(player)
     hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
     hl.Enabled = false
     CollectionService:AddTag(hl, "OwnFX")
+    pcall(function() hl.Parent = GetDrawingGui() end)
     obj.Highlight = hl
 
     Hub.ESP[player] = obj
@@ -2267,19 +2304,19 @@ local function GetFormattedWeaponName(rawName)
     return cached
 end
 
-Hub.Connections.ESPUpdate = RunService:BindToRenderStep("KrakenESP", Enum.RenderPriority.Camera.Value - 2, function()
+Hub.Connections.ESPUpdate = RunService:BindToRenderStep("KrakenESP", Enum.RenderPriority.Camera.Value + 1, function()
     if not Hub.Running then return end
 
     local function hideESP(obj)
         if obj.BoxOutline then obj.BoxOutline.Visible = false end
-        obj.Box.Visible = false
-        obj.Name.Visible = false
-        obj.Health.Visible = false
-        obj.Dist.Visible = false
-        obj.Weapon.Visible = false
-        obj.Tracer.Visible = false
-        obj.HealthBarOutline.Visible = false
-        obj.HealthBar.Visible = false
+        if obj.Box then obj.Box.Visible = false end
+        if obj.Name then obj.Name.Visible = false end
+        if obj.Health then obj.Health.Visible = false end
+        if obj.Dist then obj.Dist.Visible = false end
+        if obj.Weapon then obj.Weapon.Visible = false end
+        if obj.Tracer then obj.Tracer.Visible = false end
+        if obj.HealthBarOutline then obj.HealthBarOutline.Visible = false end
+        if obj.HealthBar then obj.HealthBar.Visible = false end
         if obj.Highlight and obj.Highlight.Enabled then
             obj.Highlight.Enabled = false
             obj.Highlight.Adornee = nil
@@ -2308,186 +2345,177 @@ Hub.Connections.ESPUpdate = RunService:BindToRenderStep("KrakenESP", Enum.Render
         return
     end
 
-    local fontId = (Drawing and Drawing.Fonts and Drawing.Fonts[Hub.Settings.ESPFont]) or 0
-    local fontSize = Hub.Settings.ESPFontSize or 14
-    local subSize = math.max(10, fontSize - 2)
+    pcall(function()
+        local fontId = (Drawing and Drawing.Fonts and Drawing.Fonts[Hub.Settings.ESPFont]) or 0
+        local fontSize = Hub.Settings.ESPFontSize or 14
+        local subSize = math.max(10, fontSize - 2)
 
-    local camPos = Camera.CFrame.Position
-    local maxDist = Hub.Settings.ESPMaxDistance or 650
-    local maxDistSq = maxDist * maxDist
-    local vp = Camera.ViewportSize
-    local vpX = vp.X
-    local vpY = vp.Y
-    local tracerOrigin = Vector2.new(vpX * 0.5, vpY)
-    local sTime = nil
-    pcall(function() sTime = workspace:GetServerTimeNow() end)
+        local camPos = Camera.CFrame.Position
+        local maxDist = Hub.Settings.ESPMaxDistance or 650
+        local maxDistSq = maxDist * maxDist
+        local vp = Camera.ViewportSize
+        local vpX = vp.X
+        local vpY = vp.Y
+        local tracerOrigin = Vector2.new(vpX * 0.5, vpY)
+        local sTime = nil
+        pcall(function() sTime = workspace:GetServerTimeNow() end)
 
-    for player, obj in pairs(Hub.ESP) do
-        if player == LocalPlayer or (Hub.Settings.ESPTeamCheck and player.Team and LocalPlayer.Team and player.Team == LocalPlayer.Team) then
-            hideESP(obj)
-            continue
-        end
+        for player, obj in pairs(Hub.ESP) do
+            if player == LocalPlayer or (Hub.Settings.ESPTeamCheck and player.Team and LocalPlayer.Team and player.Team == LocalPlayer.Team) then
+                hideESP(obj)
+                continue
+            end
 
-        local char = player.Character
-        local root = char and char:FindFirstChild("HumanoidRootPart")
-        local head = char and char:FindFirstChild("Head")
-        local hum = char and char:FindFirstChildOfClass("Humanoid")
+            local char = player.Character
+            local root = char and char:FindFirstChild("HumanoidRootPart")
+            local head = char and char:FindFirstChild("Head")
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
 
-        local isDowned = (char:GetAttribute("Downed") == true)
-        if not root or not head or not hum or (hum.Health <= 0 and not isDowned) then
-            hideESP(obj)
-            continue
-        end
+            local isDowned = (char:GetAttribute("Downed") == true)
+            if not root or not head or not hum or (hum.Health <= 0 and not isDowned) then
+                hideESP(obj)
+                continue
+            end
 
-        local rootPos = root.Position
-        local distSq = (camPos.X - rootPos.X)^2 + (camPos.Y - rootPos.Y)^2 + (camPos.Z - rootPos.Z)^2
-        if distSq > maxDistSq then
-            hideESP(obj)
-            continue
-        end
+            local rootPos = root.Position
+            local distSq = (camPos.X - rootPos.X)^2 + (camPos.Y - rootPos.Y)^2 + (camPos.Z - rootPos.Z)^2
+            if distSq > maxDistSq then
+                hideESP(obj)
+                continue
+            end
 
-        local headHalfY = (head.Size and head.Size.Y * 0.5) or 0.6
-        local topWorld = head.Position + Vector3.new(0, headHalfY + 0.15, 0)
-        local bottomWorld = root.Position - Vector3.new(0, 2.75, 0)
+            local dist = math.sqrt(distSq)
+            local isImmune = IsPlayerInvulnerable(char, player, sTime)
+            local safeColor = Color3.fromRGB(0, 255, 120) -- เขียว Neon สำหรับคนติดโล่เกิด/อยู่ใน SafeZone ยิงไม่ได้
 
-        local topScreen, topDepth = WorldToViewport(topWorld)
-        local bottomScreen, bottomDepth = WorldToViewport(bottomWorld)
-
-        -- Target behind camera frustum: hide
-        if topDepth <= 0 and bottomDepth <= 0 then
-            hideESP(obj)
-            continue
-        end
-
-        local boxH = math.abs(bottomScreen.Y - topScreen.Y)
-        if boxH < 3 then
-            hideESP(obj)
-            continue
-        end
-
-        -- Fast 2D Bounding Box Calculation
-        local boxW = math.clamp(math.floor(boxH * 0.46), 4, 300)
-        local centerX = topScreen.X
-        local boxX = centerX - boxW * 0.5
-        local boxY = topScreen.Y
-
-        -- Frustum visibility check: intersects screen borders (with 25px leeway to stop flickering)
-        if (boxX + boxW < -25) or (boxX > vpX + 25) or (boxY + boxH < -25) or (boxY > vpY + 25) then
-            hideESP(obj)
-            continue
-        end
-
-        local dist = math.sqrt(distSq)
-        local isImmune = IsPlayerInvulnerable(char, player, sTime)
-        local safeColor = Color3.fromRGB(0, 255, 120) -- เขียว Neon สำหรับคนติดโล่เกิด/อยู่ใน SafeZone ยิงไม่ได้
-
-        -- 0. Glowing Body Chams (Optimized: capped to 200 studs to prevent mobile/low-end GPU fillrate drops)
-        if Hub.Settings.ESPChams and obj.Highlight and dist <= 200 then
-            if obj.Highlight.Adornee ~= char then
-                obj.Highlight.Adornee = char
-                obj.Highlight.Parent = char
+            -- 0. Glowing Body Chams (Optimized: capped to 200 studs to prevent mobile/low-end GPU fillrate drops)
+            if Hub.Settings.ESPChams and obj.Highlight and dist <= 200 then
+                if obj.Highlight.Adornee ~= char then
+                    obj.Highlight.Adornee = char
+                end
+                if not obj.Highlight.Parent or not obj.Highlight.Parent.Parent then
+                    pcall(function() obj.Highlight.Parent = GetDrawingGui() end)
+                end
+                obj.Highlight.FillColor = isImmune and safeColor or (Hub.Settings.ChamsColor or Color3.fromRGB(255, 35, 35))
+                obj.Highlight.OutlineColor = isImmune and Color3.fromRGB(0, 255, 160) or (Hub.Settings.ChamsOutlineColor or Color3.fromRGB(255, 45, 45))
                 obj.Highlight.FillTransparency = Hub.Settings.ChamsTransparency or 0.78
                 obj.Highlight.OutlineTransparency = 0.25
+                if not obj.Highlight.Enabled then
+                    obj.Highlight.Enabled = true
+                end
+            elseif obj.Highlight and obj.Highlight.Enabled then
+                obj.Highlight.Enabled = false
+                obj.Highlight.Adornee = nil
             end
-            obj.Highlight.FillColor = isImmune and safeColor or (Hub.Settings.ChamsColor or Color3.fromRGB(255, 35, 35))
-            obj.Highlight.OutlineColor = isImmune and Color3.fromRGB(0, 255, 160) or (Hub.Settings.ChamsOutlineColor or Color3.fromRGB(255, 45, 45))
-            if not obj.Highlight.Enabled then
-                obj.Highlight.Enabled = true
+
+            local headHalfY = (head.Size and head.Size.Y * 0.5) or 0.6
+            local topWorld = head.Position + Vector3.new(0, headHalfY + 0.15, 0)
+            local bottomWorld = root.Position - Vector3.new(0, 2.75, 0)
+
+            local topScreen, topDepth = WorldToViewport(topWorld)
+            local bottomScreen, bottomDepth = WorldToViewport(bottomWorld)
+
+            -- Fast 2D Bounding Box Calculation
+            local isFront = (topDepth > 0 and bottomDepth > 0)
+            local boxH = math.abs(bottomScreen.Y - topScreen.Y)
+            local boxW = math.clamp(math.floor(boxH * 0.46), 4, 300)
+            local centerX = topScreen.X
+            local boxX = centerX - boxW * 0.5
+            local boxY = topScreen.Y
+            local onScreen2D = isFront and (boxH >= 3) and (boxX + boxW >= -25) and (boxX <= vpX + 25) and (boxY + boxH >= -25) and (boxY <= vpY + 25)
+
+            -- 1. Precision 2D Box with High-Contrast Black Border
+            local showBox = onScreen2D and ((Hub.Settings.ESPBox == true) or (Hub.Settings.PlayerESP == true))
+            if obj.BoxOutline then
+                obj.BoxOutline.Visible = showBox
+                if showBox then
+                    obj.BoxOutline.Position = Vector2.new(boxX - 1, boxY - 1)
+                    obj.BoxOutline.Size = Vector2.new(boxW + 2, boxH + 2)
+                end
             end
-        elseif obj.Highlight and obj.Highlight.Enabled then
-            obj.Highlight.Enabled = false
-            obj.Highlight.Adornee = nil
-        end
 
-        -- 1. Precision 2D Box with High-Contrast Black Border
-        local showBox = (Hub.Settings.ESPBox == true) or (Hub.Settings.PlayerESP == true)
-        if obj.BoxOutline then
-            obj.BoxOutline.Visible = showBox
-            if showBox then
-                obj.BoxOutline.Position = Vector2.new(boxX - 1, boxY - 1)
-                obj.BoxOutline.Size = Vector2.new(boxW + 2, boxH + 2)
+            if obj.Box then
+                obj.Box.Visible = showBox
+                if showBox then
+                    obj.Box.Position = Vector2.new(boxX, boxY)
+                    obj.Box.Size = Vector2.new(boxW, boxH)
+                    obj.Box.Color = isImmune and safeColor or (Hub.Settings.BoxColor or Color3.fromRGB(255, 60, 60))
+                end
             end
-        end
 
-        obj.Box.Visible = showBox
-        if showBox then
-            obj.Box.Position = Vector2.new(boxX, boxY)
-            obj.Box.Size = Vector2.new(boxW, boxH)
-            obj.Box.Color = isImmune and safeColor or (Hub.Settings.BoxColor or Color3.fromRGB(255, 60, 60))
-        end
-
-        -- 2. Clean Header (Single-line Name + Distance on top of Box)
-        local distMeters = math.floor(dist * 0.28)
-        local nameStr = player.DisplayName
-        if Hub.Settings.ESPNameMode == "Username" then
-            nameStr = player.Name
-        elseif Hub.Settings.ESPNameMode == "Both" then
-            nameStr = player.DisplayName .. " (@" .. player.Name .. ")"
-        end
-
-        local showName = (Hub.Settings.ESPName == true) or (Hub.Settings.PlayerESP == true)
-        local showDist = (Hub.Settings.ESPDistance == true)
-        local headerText = ""
-        if showName and showDist then
-            headerText = nameStr .. "  [" .. distMeters .. "m]"
-        elseif showName then
-            headerText = nameStr
-        elseif showDist then
-            headerText = distMeters .. "m"
-        end
-
-        if headerText ~= "" then
-            obj.Name.Visible = true
-            obj.Name.Font = fontId
-            obj.Name.Size = fontSize
-            obj.Name.Position = Vector2.new(centerX, boxY - (fontSize + 3))
-            obj.Name.Text = headerText
-            obj.Name.Color = isImmune and safeColor or Hub.Settings.NameColor
-        else
-            obj.Name.Visible = false
-        end
-        obj.Dist.Visible = false
-
-        -- hp/hpColor declared here so Billboard block can read them
-        local hp = math.clamp(math.floor((hum.Health / math.max(hum.MaxHealth, 1)) * 100), 0, 100)
-        local hpColor = GetHealthColor(hp)
-
-        -- 🌟 3D Native Billboard ESP (Always visible on iOS Delta & Mobile devices)
-        if obj.Billboard then
-            if showName or showDist or Hub.Settings.ESPHealthBar or Hub.Settings.ESPWeapon
-               or Hub.Settings.PlayerESP or Hub.Settings.ESPBox or Hub.Settings.ESPChams then
-                obj.Billboard.Adornee = head
-                if obj.Billboard.Parent ~= head then
-                    pcall(function() obj.Billboard.Parent = head end)
-                end
-                local nb = obj.Billboard:FindFirstChild("NameLabel")
-                if nb then
-                    nb.Text = headerText
-                    nb.TextColor3 = isImmune and safeColor or (Hub.Settings.NameColor or Color3.fromRGB(255, 255, 255))
-                    nb.Visible = (showName or showDist) and (headerText ~= "")
-                end
-                local bg = obj.Billboard:FindFirstChild("BarBg")
-                local bf = bg and bg:FindFirstChild("BarFill")
-                if bf and bg then
-                    bf.Size = UDim2.new(math.clamp(hp / 100, 0, 1), 0, 1, 0)
-                    bf.BackgroundColor3 = hpColor
-                    bg.Visible = (Hub.Settings.ESPHealthBar == true)
-                end
-                local wb = obj.Billboard:FindFirstChild("WeaponLabel")
-                if wb then
-                    local tool = char:FindFirstChildOfClass("Tool")
-                    local rawName = tool and tool.Name
-                    local wName = rawName and GetFormattedWeaponName(rawName) or ""
-                    wb.Text = wName ~= "" and ("🔫 " .. wName) or ""
-                    wb.Visible = (Hub.Settings.ESPWeapon == true and wName ~= "")
-                end
-                if not obj.Billboard.Enabled then
-                    obj.Billboard.Enabled = true
-                end
-            elseif obj.Billboard.Enabled then
-                obj.Billboard.Enabled = false
+            -- 2. Clean Header (Single-line Name + Distance on top of Box)
+            local distMeters = math.floor(dist * 0.28)
+            local nameStr = player.DisplayName
+            if Hub.Settings.ESPNameMode == "Username" then
+                nameStr = player.Name
+            elseif Hub.Settings.ESPNameMode == "Both" then
+                nameStr = player.DisplayName .. " (@" .. player.Name .. ")"
             end
-        end
+
+            local showName = (Hub.Settings.ESPName == true) or (Hub.Settings.PlayerESP == true)
+            local showDist = (Hub.Settings.ESPDistance == true)
+            local headerText = ""
+            if showName and showDist then
+                headerText = nameStr .. "  [" .. distMeters .. "m]"
+            elseif showName then
+                headerText = nameStr
+            elseif showDist then
+                headerText = distMeters .. "m"
+            end
+
+            if onScreen2D and headerText ~= "" then
+                obj.Name.Visible = true
+                obj.Name.Font = fontId
+                obj.Name.Size = fontSize
+                obj.Name.Position = Vector2.new(centerX, boxY - (fontSize + 3))
+                obj.Name.Text = headerText
+                obj.Name.Color = isImmune and safeColor or (Hub.Settings.NameColor or Color3.fromRGB(255, 255, 255))
+            else
+                obj.Name.Visible = false
+            end
+            if obj.Dist then obj.Dist.Visible = false end
+
+            -- hp/hpColor declared here so Billboard block can read them
+            local hp = math.clamp(math.floor((hum.Health / math.max(hum.MaxHealth, 1)) * 100), 0, 100)
+            local hpColor = GetHealthColor(hp)
+
+            -- 🌟 3D Native Billboard ESP (Always visible on iOS Delta & Mobile devices)
+            if obj.Billboard then
+                if showName or showDist or Hub.Settings.ESPHealthBar or Hub.Settings.ESPWeapon
+                   or Hub.Settings.PlayerESP or Hub.Settings.ESPBox or Hub.Settings.ESPChams then
+                    obj.Billboard.Adornee = head
+                    if not obj.Billboard.Parent or not obj.Billboard.Parent.Parent then
+                        pcall(function() obj.Billboard.Parent = GetDrawingGui() end)
+                    end
+                    local nb = obj.Billboard:FindFirstChild("NameLabel")
+                    if nb then
+                        nb.Text = headerText
+                        nb.TextColor3 = isImmune and safeColor or (Hub.Settings.NameColor or Color3.fromRGB(255, 255, 255))
+                        nb.Visible = (showName or showDist) and (headerText ~= "")
+                    end
+                    local bg = obj.Billboard:FindFirstChild("BarBg")
+                    local bf = bg and bg:FindFirstChild("BarFill")
+                    if bf and bg then
+                        bf.Size = UDim2.new(math.clamp(hp / 100, 0, 1), 0, 1, 0)
+                        bf.BackgroundColor3 = hpColor
+                        bg.Visible = (Hub.Settings.ESPHealthBar == true)
+                    end
+                    local wb = obj.Billboard:FindFirstChild("WeaponLabel")
+                    if wb then
+                        local tool = char:FindFirstChildOfClass("Tool")
+                        local rawName = tool and tool.Name
+                        local wName = rawName and GetFormattedWeaponName(rawName) or ""
+                        wb.Text = wName ~= "" and ("🔫 " .. wName) or ""
+                        wb.Visible = (Hub.Settings.ESPWeapon == true and wName ~= "")
+                    end
+                    if not obj.Billboard.Enabled then
+                        obj.Billboard.Enabled = true
+                    end
+                elseif obj.Billboard.Enabled then
+                    obj.Billboard.Enabled = false
+                    obj.Billboard.Adornee = nil
+                end
+            end
 
         -- 3. Dynamic Health & Health Bar (Left of target, fully independent of 2D Box)
         if Hub.Settings.ESPHealthBar then
@@ -2556,6 +2584,7 @@ Hub.Connections.ESPUpdate = RunService:BindToRenderStep("KrakenESP", Enum.Render
             obj.Tracer.Visible = false
         end
     end
+    end)
 end)
 
 -- ================================================
@@ -4270,6 +4299,133 @@ local function InitUI()
     end
 
     CreateFloatingToggleButton(Window)
+
+    -- 🎯 5.1 FLOATING MOBILE TOUCH AIM BUTTON ENGINE
+    local function CreateMobileAimButton()
+        local isMobile = UserInputService.TouchEnabled or (UserInputService.KeyboardEnabled == false)
+        if not isMobile and not Hub.Settings.MobileAimButton then return end
+
+        local oldGui = (targetGuiParent and targetGuiParent:FindFirstChild("KrakenHub_MobileAimHUD"))
+            or (LocalPlayer and LocalPlayer:FindFirstChildOfClass("PlayerGui") and LocalPlayer.PlayerGui:FindFirstChild("KrakenHub_MobileAimHUD"))
+        if oldGui then pcall(function() oldGui:Destroy() end) end
+
+        local screenGui = Instance.new("ScreenGui")
+        screenGui.Name = "KrakenHub_MobileAimHUD"
+        screenGui.ResetOnSpawn = false
+        screenGui.DisplayOrder = 998
+        screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+        local aimBtn = Instance.new("TextButton")
+        aimBtn.Name = "MobileAimButton"
+        aimBtn.Size = UDim2.fromOffset(56, 56)
+        aimBtn.Position = UDim2.new(1, -125, 0.58, -28)
+        aimBtn.BackgroundColor3 = Color3.fromRGB(18, 20, 26)
+        aimBtn.BackgroundTransparency = 0.2
+        aimBtn.Text = ""
+        aimBtn.AutoButtonColor = false
+        aimBtn.BorderSizePixel = 0
+        aimBtn.Parent = screenGui
+
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(1, 0)
+        corner.Parent = aimBtn
+
+        local stroke = Instance.new("UIStroke")
+        stroke.Name = "Stroke"
+        stroke.Color = Color3.fromRGB(0, 220, 255)
+        stroke.Thickness = 2.5
+        stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+        stroke.Parent = aimBtn
+
+        local icon = Instance.new("TextLabel")
+        icon.Name = "Icon"
+        icon.Size = UDim2.new(1, 0, 0, 22)
+        icon.Position = UDim2.new(0, 0, 0, 8)
+        icon.BackgroundTransparency = 1
+        icon.Text = "🎯"
+        icon.TextSize = 19
+        icon.Parent = aimBtn
+
+        local label = Instance.new("TextLabel")
+        label.Name = "Label"
+        label.Size = UDim2.new(1, 0, 0, 16)
+        label.Position = UDim2.new(0, 0, 0, 30)
+        label.BackgroundTransparency = 1
+        label.Text = "AIM"
+        label.Font = Enum.Font.GothamBold
+        label.TextSize = 11
+        label.TextColor3 = Color3.fromRGB(0, 230, 255)
+        label.Parent = aimBtn
+
+        -- Smooth Touch & Mouse Dragging
+        local dragging = false
+        local dragStart = nil
+        local startPos = nil
+
+        aimBtn.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                dragging = true
+                dragStart = input.Position
+                startPos = aimBtn.Position
+
+                input.Changed:Connect(function()
+                    if input.UserInputState == Enum.UserInputState.End then
+                        dragging = false
+                    end
+                end)
+            end
+        end)
+
+        UserInputService.InputChanged:Connect(function(input)
+            if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+                local delta = input.Position - dragStart
+                aimBtn.Position = UDim2.new(
+                    startPos.X.Scale,
+                    startPos.X.Offset + delta.X,
+                    startPos.Y.Scale,
+                    startPos.Y.Offset + delta.Y
+                )
+            end
+        end)
+
+        -- Visual Toggle Logic
+        local function SetAimVisual(active)
+            if active then
+                aimBtn.BackgroundColor3 = Color3.fromRGB(225, 35, 55)
+                aimBtn.BackgroundTransparency = 0.05
+                stroke.Color = Color3.fromRGB(255, 255, 255)
+                label.Text = "LOCK"
+                label.TextColor3 = Color3.fromRGB(255, 255, 255)
+                icon.Text = "🔒"
+            else
+                aimBtn.BackgroundColor3 = Color3.fromRGB(18, 20, 26)
+                aimBtn.BackgroundTransparency = 0.2
+                stroke.Color = Color3.fromRGB(0, 220, 255)
+                label.Text = "AIM"
+                label.TextColor3 = Color3.fromRGB(0, 230, 255)
+                icon.Text = "🎯"
+            end
+        end
+
+        aimBtn.Activated:Connect(function()
+            Hub.MobileAimActive = not Hub.MobileAimActive
+            SetAimVisual(Hub.MobileAimActive)
+            if ClientState then
+                ClientState.Aiming = Hub.MobileAimActive
+            end
+        end)
+
+        local okP = pcall(function() screenGui.Parent = targetGuiParent end)
+        if not okP or not screenGui.Parent then
+            pcall(function() screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end)
+        end
+        Hub.MobileAimHUD = screenGui
+        return screenGui
+    end
+    Hub.CreateMobileAimButton = CreateMobileAimButton
+    if Hub.Settings.MobileAimButton then
+        task.defer(CreateMobileAimButton)
+    end
 
     -- 🧩 6. FLUENT COMPATIBILITY ADAPTER LAYER
     local tabGroup = Window:TabGroup()
