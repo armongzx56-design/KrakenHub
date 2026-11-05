@@ -1838,69 +1838,12 @@ end)
 
 
 -- ================================================
--- 📱 CROSS-PLATFORM DEVICE CONTROLLER (แยกคอม / มือถือ 100%)
--- คอม: คลิกเม้าส์ เล็งคลิกขวา ยิงคลิกซ้าย ปกติตามเกม ไม่มีการล็อกเล็งค้าง
--- มือถือ: แตะจอขวาค้างเพื่อเล็งและยิงรัว ปล่อยมือปืนลดลงทันที
+-- 📱 CROSS-PLATFORM DEVICE DETECTION
+-- คอม: ใช้เมาส์และคีย์บอร์ดปกติตามระบบเกม 100%
+-- มือถือ: ใช้ปุ่มสัมผัสตามระบบเกม 100% ไม่ดักจับการหันมุมกล้อง
 -- ================================================
 local isPC = UserInputService.KeyboardEnabled and UserInputService.MouseEnabled
 local isMobile = not isPC
-
-local _mobileHoldingFire = false
-local _activeFireTouch = nil
-local _lastMobilePulseTick = 0
-
--- ตรวจจับการแตะค้างปุ่มยิงหรือสัมผัสหน้าจอยิง (เฉพาะบนมือถือเท่านั้น)
-if isMobile and UserInputService.TouchEnabled then
-    UserInputService.TouchStarted:Connect(function(touchInput, gameProcessed)
-        if gameProcessed then return end
-        if not (Hub and Hub.Running) then return end
-        local myChar = LocalPlayer.Character
-        local tool = myChar and myChar:FindFirstChildOfClass("Tool")
-        if not tool then return end
-
-        local vp = (Camera and Camera.ViewportSize) or Vector2.new(1920, 1080)
-        local pos = touchInput.Position
-
-        -- แตะจอฝั่งขวา (โซนปุ่มยิง / มุมกล้องขวาบนมือถือ)
-        if pos.X > vp.X * 0.4 and pos.Y > vp.Y * 0.15 then
-            _mobileHoldingFire = true
-            _activeFireTouch = touchInput
-            if ClientState then
-                ClientState.Aiming = true
-                ClientState.Rolling = false
-            end
-            if Controls and typeof(Controls.Press) == "function" then
-                pcall(Controls.Press, "Fire", true)
-            end
-        end
-    end)
-
-    UserInputService.TouchEnded:Connect(function(touchInput)
-        if _activeFireTouch and touchInput == _activeFireTouch then
-            _mobileHoldingFire = false
-            _activeFireTouch = nil
-            if Controls and typeof(Controls.Press) == "function" then
-                pcall(Controls.Press, "Fire", false)
-            end
-            if ClientState and not (Controls and typeof(Controls.IsDown) == "function" and Controls.IsDown("Aim")) then
-                ClientState.Aiming = false
-            end
-        end
-    end)
-
-    UserInputService.TouchCancelled:Connect(function(touchInput)
-        if _activeFireTouch and touchInput == _activeFireTouch then
-            _mobileHoldingFire = false
-            _activeFireTouch = nil
-            if Controls and typeof(Controls.Press) == "function" then
-                pcall(Controls.Press, "Fire", false)
-            end
-            if ClientState then
-                ClientState.Aiming = false
-            end
-        end
-    end)
-end
 
 -- ================================================
 -- 🔄 8. HEARTBEAT / RENDERSTEPPED CORE LOOP (OPTIMIZED)
@@ -1946,26 +1889,6 @@ Hub.Connections.CoreEnforcer = RunService.RenderStepped:Connect(function(dt)
                     local c = ammo:FindFirstChildOfClass("UITextSizeConstraint")
                     if c and c.MaxTextSize < 42 then
                         c.MaxTextSize = 42
-                    end
-                end
-            end
-        end
-
-        -- 🎯 Mobile Fire & Hold Automation (เฉพาะมือถือเท่านั้น - บนคอมใช้ระบบเม้าส์คลิกปกติ 100%)
-        if isMobile and ClientState.Equipped then
-            if _mobileHoldingFire then
-                ClientState.Aiming = true
-                ClientState.Rolling = false
-                ClientState.CaseRolling = false
-
-                -- Full-Auto Rapid Pulse สำหรับปืน Semi-Auto / ปืนพก / ลูกซองบนมือถือ
-                local now = os.clock()
-                local currentRPM = Hub.Settings.RPM or 900
-                local shotInterval = 60 / currentRPM
-                if now - _lastMobilePulseTick >= shotInterval then
-                    _lastMobilePulseTick = now
-                    if Controls and typeof(Controls.Press) == "function" then
-                        pcall(Controls.Press, "Fire", true)
                     end
                 end
             end
@@ -3069,9 +2992,16 @@ end)
 -- ==============================================================
 local function InitUI()
     Hub.InitUI = InitUI
-    -- GUI Container resolution (supports gethui / CoreGui / PlayerGui)
+    -- GUI Container resolution (supports gethui / PlayerGui / CoreGui with mobile executor priority)
     local CoreGui = (pcall(function() return game:GetService("CoreGui") end) and game:GetService("CoreGui")) or nil
-    local targetGuiParent = (function()
+    local function GetSafeGuiParent()
+        local gethuiFn = gethui or get_hui or get_hidden_gui
+        if typeof(gethuiFn) == "function" then
+            local ok, h = pcall(gethuiFn)
+            if ok and h then return h end
+        end
+        local pGui = LocalPlayer:FindFirstChildOfClass("PlayerGui") or LocalPlayer:FindFirstChild("PlayerGui")
+        if pGui then return pGui end
         if CoreGui then
             local canCore = pcall(function()
                 local test = Instance.new("Folder")
@@ -3080,14 +3010,11 @@ local function InitUI()
             end)
             if canCore then return CoreGui end
         end
-        if gethui then
-            local ok, h = pcall(gethui)
-            if ok and h then return h end
-        end
         return LocalPlayer:WaitForChild("PlayerGui")
-    end)()
+    end
+    local targetGuiParent = GetSafeGuiParent()
 
-    -- Clean up previous UI instances (thorough sweep of both targetGuiParent and CoreGui)
+    -- Clean up previous UI instances (thorough sweep of targetGuiParent, CoreGui and PlayerGui)
     local function SweepOldGuis(parent)
         if not parent then return end
         for _, c in ipairs(parent:GetChildren()) do
@@ -3104,9 +3031,13 @@ local function InitUI()
     if CoreGui and CoreGui ~= targetGuiParent then
         SweepOldGuis(CoreGui)
     end
+    local pGui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+    if pGui and pGui ~= targetGuiParent then
+        SweepOldGuis(pGui)
+    end
 
     -- 🏷️ 1. LOGO ASSET LOADER (K COMMUNITY LOGO)
-    local function GetLogoAsset()
+    local function GetLogoAsset(onLoaded)
         task.spawn(function()
             if typeof(isfile) == "function" and typeof(writefile) == "function" and typeof(getcustomasset) == "function" then
                 if not isfile("k_community_logo.png") then
@@ -3117,6 +3048,12 @@ local function InitUI()
                             writefile("k_community_logo.png", data)
                         end
                     end)
+                end
+                if isfile("k_community_logo.png") then
+                    local s, asset = pcall(getcustomasset, "k_community_logo.png")
+                    if s and asset and onLoaded then
+                        pcall(onLoaded, asset)
+                    end
                 end
             end
         end)
@@ -4011,6 +3948,13 @@ local function InitUI()
     function Window:Minimize()
         local base = (targetGuiParent and targetGuiParent:FindFirstChild("Base", true))
                   or (CoreGui and CoreGui:FindFirstChild("Base", true))
+        if not base then
+            local pGui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+            if pGui then base = pGui:FindFirstChild("Base", true) end
+        end
+        if not base and typeof(gethui) == "function" then
+            pcall(function() base = gethui():FindFirstChild("Base", true) end)
+        end
         local cur = Window:GetState()
         if cur == nil and base then
             cur = base.Visible
@@ -4060,13 +4004,14 @@ local function InitUI()
         local screenGui = Instance.new("ScreenGui")
         screenGui.Name = "KrakenHub_ToggleButton"
         screenGui.ResetOnSpawn = false
-        screenGui.DisplayOrder = 999
+        screenGui.DisplayOrder = 999999
+        screenGui.IgnoreGuiInset = true
         screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
         local mainBtn = Instance.new("ImageButton")
         mainBtn.Name = "OpenCloseBtn"
         mainBtn.Size = UDim2.fromOffset(48, 48)
-        mainBtn.Position = UDim2.new(0, 15, 0.5, -24)
+        mainBtn.Position = UDim2.new(0, 15, 0.45, 0)
         mainBtn.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
         mainBtn.BackgroundTransparency = 0.15
         mainBtn.AutoButtonColor = false
@@ -4110,7 +4055,11 @@ local function InitUI()
         logoImg.Position = UDim2.fromScale(0.5, 0.5)
         logoImg.AnchorPoint = Vector2.new(0.5, 0.5)
         logoImg.BackgroundTransparency = 1
-        logoImg.Image = GetLogoAsset()
+        logoImg.Image = GetLogoAsset(function(asset)
+            if logoImg and logoImg.Parent then
+                logoImg.Image = asset
+            end
+        end)
         logoImg.ScaleType = Enum.ScaleType.Fit
         logoImg.ZIndex = 3
         logoImg.Parent = mainBtn
@@ -4157,7 +4106,7 @@ local function InitUI()
         local dragStartPos = nil
         local startFramePos = nil
         local movedEnough = false
-        local dragThreshold = 8
+        local dragThreshold = 14
 
         mainBtn.InputBegan:Connect(function(input)
             if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
@@ -4209,6 +4158,13 @@ local function InitUI()
             else
                 local base = (targetGuiParent and targetGuiParent:FindFirstChild("Base", true))
                           or (CoreGui and CoreGui:FindFirstChild("Base", true))
+                if not base then
+                    local pGui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+                    if pGui then base = pGui:FindFirstChild("Base", true) end
+                end
+                if not base and typeof(gethui) == "function" then
+                    pcall(function() base = gethui():FindFirstChild("Base", true) end)
+                end
                 if base then
                     base.Visible = not base.Visible
                 end
@@ -4216,20 +4172,29 @@ local function InitUI()
         end
 
         local lastClickTime = 0
-        mainBtn.Activated:Connect(function()
+        local function OnButtonClicked()
             if not movedEnough then
                 local now = os.clock()
                 if now - lastClickTime < 0.15 then return end
                 lastClickTime = now
                 TriggerToggle()
             end
-        end)
+        end
+        mainBtn.Activated:Connect(OnButtonClicked)
+        mainBtn.MouseButton1Click:Connect(OnButtonClicked)
 
         -- Right Click / Long Press re-centers window to center of screen
         mainBtn.MouseButton2Click:Connect(function()
             pcall(function()
                 local base = (targetGuiParent and targetGuiParent:FindFirstChild("Base", true))
                           or (CoreGui and CoreGui:FindFirstChild("Base", true))
+                if not base then
+                    local pGui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+                    if pGui then base = pGui:FindFirstChild("Base", true) end
+                end
+                if not base and typeof(gethui) == "function" then
+                    pcall(function() base = gethui():FindFirstChild("Base", true) end)
+                end
                 if base then
                     base.Position = UDim2.fromScale(0.5, 0.5)
                     if windowObj and windowObj.SetState then
@@ -4248,11 +4213,27 @@ local function InitUI()
             TweenService:Create(stroke, TweenInfo.new(0.2), { Thickness = 2.0 }):Play()
         end)
 
-        local okP = pcall(function() screenGui.Parent = targetGuiParent end)
-        if not okP or not screenGui.Parent then
-            pcall(function() screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end)
+        local function EnsureGuiParent()
+            local p = GetSafeGuiParent()
+            local okP = pcall(function() screenGui.Parent = p end)
+            if not okP or not screenGui.Parent then
+                local pGui = LocalPlayer:FindFirstChildOfClass("PlayerGui") or LocalPlayer:FindFirstChild("PlayerGui")
+                if pGui then pcall(function() screenGui.Parent = pGui end) end
+            end
         end
+        EnsureGuiParent()
+
+        -- Auto re-parent if lost on player respawn
+        LocalPlayer.CharacterAdded:Connect(function()
+            task.wait(0.5)
+            if not screenGui.Parent or not screenGui.Parent.Parent then
+                EnsureGuiParent()
+            end
+        end)
+
         Hub.ToggleButtonGui = screenGui
+        return screenGui
+    end
         return screenGui
     end
 
