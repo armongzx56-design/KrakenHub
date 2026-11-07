@@ -4,7 +4,26 @@
 -- ==============================================================
 
 local KEY_FILE = "KrakenHub_Key.txt"
-local MAIN_SCRIPT_URL = "https://raw.githubusercontent.com/armongzx56-design/KrakenHub/main/sailueatarchiwa_cheat.luau"
+
+-- 🗺️ Game Map Router (Auto-detect PlaceId / GameId)
+local GAME_MAPS = {
+    [104549080643413] = "https://raw.githubusercontent.com/armongzx56-design/KrakenHub/main/mahanakhon-racing.luau", -- MAHANAKHON RACING
+    [84448037861644]  = "https://raw.githubusercontent.com/armongzx56-design/KrakenHub/main/urban-reload.luau",      -- Urban Reload
+    [17300701837]     = "https://raw.githubusercontent.com/armongzx56-design/KrakenHub/main/sailueatarchiwa_cheat.luau", -- สายเลือดอาชีวะ
+    [131481383443764] = "https://raw.githubusercontent.com/armongzx56-design/KrakenHub/main/sailueatarchiwa_cheat.luau", -- สายเลือดอาชีวะ Mixue
+}
+
+local function GetScriptUrlForGame()
+    if GAME_MAPS[game.PlaceId] then
+        return GAME_MAPS[game.PlaceId]
+    end
+    -- Fallback by GameId (for sub-places / universes)
+    if game.GameId == 10771935715 then
+        return GAME_MAPS[104549080643413]
+    end
+    -- Default fallback
+    return "https://raw.githubusercontent.com/armongzx56-design/KrakenHub/main/sailueatarchiwa_cheat.luau"
+end
 
 -------------------------------------------------------------------------------
 -- [ 1. Platoboost Core Cryptography & JSON Engine ]
@@ -130,7 +149,7 @@ end
 local savedKey = ReadSavedKey()
 if savedKey and savedKey ~= "" then
     if verifyKey(savedKey) then
-        loadstring(game:HttpGet(MAIN_SCRIPT_URL))()
+        loadstring(game:HttpGet(GetScriptUrlForGame()))()
         return
     end
 end
@@ -544,7 +563,7 @@ SubmitBtn.MouseButton1Click:Connect(function()
         Tween(CloseBtn, {BackgroundTransparency = 1, TextTransparency = 1}, 0.3)
         task.wait(0.45)
         ScreenGui:Destroy()
-        loadstring(game:HttpGet(MAIN_SCRIPT_URL))()
+        loadstring(game:HttpGet(GetScriptUrlForGame()))()
     else
         SubmitBtn.Text = "Verify Key"
         Tween(SubmitBtn, {BackgroundColor3 = Color3.fromRGB(0, 150, 240)}, 0.2)
