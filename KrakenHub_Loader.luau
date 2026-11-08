@@ -232,7 +232,11 @@ local function SaveKeyToFile(key)
 end
 
 -- ตรวจสอบคีย์จาก _G.KrakenKey หรือ getgenv().KrakenKey หรือไฟล์เซฟ
-local preProvidedKey = _G.KrakenKey or (getgenv and getgenv().KrakenKey) or ReadSavedKey()
+local explicitKey = _G.KrakenKey or (getgenv and getgenv().KrakenKey)
+_G.KrakenKey = nil
+if getgenv then pcall(function() getgenv().KrakenKey = nil end) end
+
+local preProvidedKey = explicitKey or ReadSavedKey()
 if preProvidedKey and type(preProvidedKey) == "string" and preProvidedKey ~= "" then
     preProvidedKey = string.upper(string.gsub(preProvidedKey, "%s+", ""))
     local isValid, errReason = verifyKey(preProvidedKey)
