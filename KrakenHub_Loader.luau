@@ -105,8 +105,29 @@ local function redeemKey(key)
     return false;
 end
 
+local KRAKEN_API = "https://wlwr6mnuuu.apps.bot-hosting.cloud/api/whitelist/verify"
+local lastErrorMsg = nil
+
 local function verifyKey(key)
-    if not key or key == "" then return false end
+    if not key or key == "" then return false, "Please enter your key!" end
+    key = string.gsub(key, "%s+", "")
+    lastErrorMsg = nil
+
+    -- 1. Check KrakenHub Discord Whitelist Key (KRAKEN-XXXX-XXXX-XXXX)
+    local krakenUrl = KRAKEN_API .. "?key=" .. key .. "&hwid=" .. tostring(fGetHwid())
+    local kResponse = fRequest({ Url = krakenUrl, Method = "GET" })
+    if kResponse and kResponse.StatusCode == 200 then
+        local success, kDecoded = pcall(function() return lDecode(kResponse.Body) end)
+        if success and kDecoded then
+            if kDecoded.valid == true then
+                return true
+            elseif kDecoded.error then
+                lastErrorMsg = kDecoded.error
+            end
+        end
+    end
+
+    -- 2. Check Platoboost Key System (Fallback)
     local nonce = generateNonce();
     local endpoint = host .. "/public/whitelist/" .. fToString(service) .. "?identifier=" .. lDigest(fGetHwid()) .. "&key=" .. key;
     if useNonce then endpoint = endpoint .. "&nonce=" .. nonce end
@@ -114,20 +135,21 @@ local function verifyKey(key)
     local response = fRequest({ Url = endpoint, Method = "GET" });
     if response and response.StatusCode == 200 then
         local decoded = lDecode(response.Body);
-        if decoded.success == true then
+        if decoded and decoded.success == true then
             if decoded.data.valid == true then
                 if useNonce and decoded.data.hash ~= lDigest("true-" .. nonce .. "-" .. secret) then
-                    StatusCallback("Integrity check failed."); return false;
+                    StatusCallback("Integrity check failed."); return false, "Integrity check failed.";
                 end
                 return true;
             else
                 if fStringSub(key, 1, 4) == "KEY_" then
-                    return redeemKey(key);
+                    local redSuccess = redeemKey(key);
+                    if redSuccess then return true end
                 end
             end
         end
     end
-    return false;
+    return false, lastErrorMsg or "Invalid or Expired Key! Please check again."
 end
 
 -------------------------------------------------------------------------------
@@ -537,7 +559,7 @@ SubmitBtn.MouseButton1Click:Connect(function()
     Tween(SubmitBtn, {BackgroundColor3 = Color3.fromRGB(0, 100, 180)}, 0.2)
     task.wait(0.2)
 
-    local isValid = verifyKey(enteredKey)
+    local isValid, errReason = verifyKey(enteredKey)
     if isValid then
         SaveKeyToFile(enteredKey)
         StatusLabel.Text = "Key Accepted! Welcome to KrakenHub"
@@ -567,7 +589,7 @@ SubmitBtn.MouseButton1Click:Connect(function()
     else
         SubmitBtn.Text = "Verify Key"
         Tween(SubmitBtn, {BackgroundColor3 = Color3.fromRGB(0, 150, 240)}, 0.2)
-        StatusLabel.Text = "Invalid or Expired Key! Please check again."
+        StatusLabel.Text = errReason or "Invalid or Expired Key! Please check again."
         StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
     end
 end)
