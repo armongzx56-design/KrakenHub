@@ -91,50 +91,69 @@ return (function()
         key = string.gsub(tostring(key), "%s+", "")
         local upperKey = string.upper(key)
 
-        -- 1. ตรวจสอบคีย์ประเภท KrakenHub License Key จาก Discord Bot (KRAKEN-XXXX-XXXX-XXXX)
+        -- 1. Check KrakenHub Discord Bot Whitelist API (KRAKEN-XXXX-XXXX-XXXX)
         if string.sub(upperKey, 1, 7) == "KRAKEN-" then
-            local p1, p2, p3 = string.match(upperKey, "^KRAKEN%-([%w]+)%-([%w]+)%-([%w]+)$")
-            if p1 and p2 and p3 and #p1 >= 3 and #p2 >= 3 and #p3 >= 3 then
-                -- ตรวจสอบประวัติคีย์ที่เคยหมดอายุแล้ว
-                if readfile and isfile and isfile("KrakenHub_Expired_Keys.txt") then
-                    local hist = readfile("KrakenHub_Expired_Keys.txt")
-                    if hist and string.find(hist, key, 1, true) then
-                        StatusCallback("This key has expired! Please enter a new key.")
-                        return false
-                    end
+            local hwid = (typeof(gethwid) == "function" and gethwid()) or (typeof(get_hwid) == "function" and get_hwid()) or tostring(game:GetService("Players").LocalPlayer.UserId)
+            local apiUrl = "https://wlwr6mnuuu.apps.bot-hosting.cloud/api/whitelist/verify?key=" .. upperKey .. "&hwid=" .. tostring(hwid)
+            
+            local respBody = nil
+            local getSuccess = pcall(function()
+                if game and game.HttpGet then
+                    respBody = game:HttpGet(apiUrl)
                 end
-
-                local existingExpiry = nil
-                if readfile and isfile and isfile("KrakenHub_Key_Expiry.txt") then
-                    local rawExp = readfile("KrakenHub_Key_Expiry.txt")
-                    if rawExp and tonumber(rawExp) then
-                        local expNum = tonumber(rawExp)
-                        if expNum <= os.time() then
-                            -- คีย์นี้หมดอายุแล้ว! บันทึกเข้าประวัติและล้างไฟล์
-                            if writefile then
-                                local hist = (readfile and isfile and isfile("KrakenHub_Expired_Keys.txt") and readfile("KrakenHub_Expired_Keys.txt")) or ""
-                                if not string.find(hist, key, 1, true) then
-                                    pcall(writefile, "KrakenHub_Expired_Keys.txt", hist .. "\n" .. key)
-                                end
-                                pcall(delfile or writefile, KEY_FILE, "")
-                                pcall(delfile or writefile, "KrakenHub_Key_Expiry.txt", "0")
-                            end
-                            StatusCallback("This key has expired! Please enter a new key.")
-                            return false
-                        else
-                            existingExpiry = expNum
+            end)
+            
+            if not getSuccess or not respBody or respBody == "" then
+                pcall(function()
+                    local req = request or http_request or syn_request
+                    if req then
+                        local r = req({ Url = apiUrl, Method = "GET" })
+                        if r and (r.StatusCode == 200 or r.Status == 200) then
+                            respBody = r.Body
                         end
                     end
-                end
+                end)
+            end
 
-                local expiry = existingExpiry or (os.time() + (30 * 86400))
+            if respBody and respBody ~= "" then
+                local okDec, data = pcall(function()
+                    return game:GetService("HttpService"):JSONDecode(respBody)
+                end)
+                if not okDec or not data then
+                    pcall(function() data = lDecode(respBody) end)
+                end
+                
+                if data and (data.valid == true or data.success == true) then
+                    local exp = (data.user and data.user.expiresAt) or data.expiresAt or (os.time() + (30 * 86400))
+                    if typeof(exp) == "number" and exp > 1000000000000 then
+                        exp = math.floor(exp / 1000)
+                    end
+                    _G._KrakenKeyExpiry = exp
+                    if writefile then
+                        pcall(writefile, "KrakenHub_Key_Expiry.txt", tostring(exp))
+                        pcall(writefile, KEY_FILE, upperKey)
+                    end
+                    return true
+                elseif data and data.valid == false then
+                    if StatusCallback then
+                        StatusCallback(data.reason or data.error or "Invalid key or HWID mismatch")
+                    end
+                    return false
+                end
+            end
+
+            -- Fallback pattern match if bot API is unreachable
+            local p1, p2, p3 = string.match(upperKey, "^KRAKEN%-([%w]+)%-([%w]+)%-([%w]+)$")
+            if p1 and p2 and p3 and #p1 >= 3 and #p2 >= 3 and #p3 >= 3 then
+                local expiry = os.time() + (30 * 86400)
                 _G._KrakenKeyExpiry = expiry
                 if writefile then
                     pcall(writefile, "KrakenHub_Key_Expiry.txt", tostring(expiry))
-                    pcall(writefile, KEY_FILE, key)
+                    pcall(writefile, KEY_FILE, upperKey)
                 end
                 return true
             end
+            return false
         end
 
         -- 2. ตรวจสอบคีย์ Platoboost
@@ -237,16 +256,22 @@ return (function()
             error("[KrakenHub Protection] Payload integrity error: " .. tostring(_0xErr), 2)
         end
 
+        _G._KrakenKeyVerified = true
+        if getgenv then getgenv()._KrakenKeyVerified = true end
         return _0xFn()
     end
 
     -------------------------------------------------------------------------------
     -- [ 4. Auto Login Verification ]
     -------------------------------------------------------------------------------
-    local savedKey = (_G.KrakenKey and tostring(_G.KrakenKey)) or ReadSavedKey()
+    local preKey = _G.KrakenKey or (typeof(getgenv) == "function" and getgenv().KrakenKey)
+    local savedKey = (preKey and tostring(preKey)) or ReadSavedKey()
     if savedKey and savedKey ~= "" then
         if verifyKey(savedKey) then
             _G._KrakenKeyVerified = true
+            if getgenv then getgenv()._KrakenKeyVerified = true end
+            _G.KrakenKey = nil
+            if getgenv then getgenv().KrakenKey = nil end
             return _0xLaunchPayload()
         end
     end
@@ -624,6 +649,7 @@ return (function()
         if isValid then
             SaveKeyToFile(enteredKey)
             _G._KrakenKeyVerified = true
+            if getgenv then getgenv()._KrakenKeyVerified = true end
             StatusLabel.Text = "Key Accepted! Welcome to KrakenHub"
             StatusLabel.TextColor3 = Color3.fromRGB(0, 255, 160)
             SubmitBtn.Text = "Success!"
