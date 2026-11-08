@@ -248,149 +248,159 @@ local NetBeatRatioFn = nil
 local NetBeatESPList = nil
 local AntiHitboxFn = nil
 
-pcall(function()
-    local get_upvalues = getupvalues or (debug and debug.getupvalues)
-    local get_constants = getconstants or (debug and debug.getconstants)
-    local is_l = islclosure or is_l_closure or function(f) return type(f) == "function" end
-    local is_exec = isexecutorclosure or is_executor_closure or checkcaller or function() return false end
+-- 1.2 In-Memory NetBeat & Anti-Cheat Neutralizer via GC (Non-blocking Background Task)
+task.spawn(function()
+    pcall(function()
+        local get_upvalues = getupvalues or (debug and debug.getupvalues)
+        local get_constants = getconstants or (debug and debug.getconstants)
+        local is_l = islclosure or is_l_closure or function(f) return type(f) == "function" end
+        local is_exec = isexecutorclosure or is_executor_closure or checkcaller or function() return false end
+        local isTouchDevice = UserInputService.TouchEnabled or (UserInputService.KeyboardEnabled == false)
 
-    if typeof(getgc) == "function" then
-        local gc = getgc(false)
+        if typeof(getgc) == "function" then
+            local gc = getgc(false)
 
-        -- Pass 1: Scan GC objects for NetBeat bencode, report, and ESP tables
-        for _, item in ipairs(gc) do
-            if type(item) == "function" and is_l(item) and not is_exec(item) then
-                -- A. Identify bencode by mathematical constant 1831565813 or 181
-                if typeof(get_constants) == "function" then
-                    local consts = get_constants(item)
-                    if consts then
-                        for _, c in pairs(consts) do
-                            if c == 1831565813 or c == 181 then
-                                NetBeatBencode = item
-                            elseif c == 7701 then
-                                NetBeatReportFn = item
-                            end
-                        end
-                    end
+            -- Pass 1: Scan GC objects for NetBeat bencode, report, and ESP tables
+            local gcCount = 0
+            for _, item in ipairs(gc) do
+                gcCount = gcCount + 1
+                if isTouchDevice and gcCount % 350 == 0 then
+                    task.wait()
                 end
 
-                -- B. Inspect upvalues for Beat, HHeartbeatB, and report queue
-                if typeof(get_upvalues) == "function" then
-                    local ups = get_upvalues(item)
-                    if ups then
-                        for _, val in pairs(ups) do
-                            if typeof(val) == "Instance" then
-                                if val.Name == "Beat" and not NetBeatBencode then
-                                    for _, u in pairs(ups) do
-                                        if type(u) == "function" then
-                                            NetBeatBencode = u
-                                        end
-                                    end
-                                elseif val.Name == "HHeartbeatB" then
-                                    AntiHitboxFn = item
+                if type(item) == "function" and is_l(item) and not is_exec(item) then
+                    -- A. Identify bencode by mathematical constant 1831565813 or 181
+                    if typeof(get_constants) == "function" then
+                        local consts = get_constants(item)
+                        if consts then
+                            for _, c in pairs(consts) do
+                                if c == 1831565813 or c == 181 then
+                                    NetBeatBencode = item
+                                elseif c == 7701 then
+                                    NetBeatReportFn = item
                                 end
-                            elseif type(val) == "table" and val.Highlight == true and val.BillboardGui == true then
-                                NetBeatESPList = val
-                                pcall(table.clear, val)
                             end
                         end
                     end
-                end
-            elseif type(item) == "table" then
-                -- Clear NetBeat ESP blacklist tables unconditionally
-                if rawget(item, "Highlight") == true or rawget(item, "BillboardGui") == true then
-                    pcall(table.clear, item)
-                end
-                -- Clear NetBeat weapon watchlist
-                local first = rawget(item, 1)
-                if type(first) == "table" and rawget(first, "name") ~= nil and rawget(first, "s") ~= nil then
-                    NetBeatWatchList = item
-                    pcall(table.clear, item)
+
+                    -- B. Inspect upvalues for Beat, HHeartbeatB, and report queue
+                    if typeof(get_upvalues) == "function" then
+                        local ups = get_upvalues(item)
+                        if ups then
+                            for _, val in pairs(ups) do
+                                if typeof(val) == "Instance" then
+                                    if val.Name == "Beat" and not NetBeatBencode then
+                                        for _, u in pairs(ups) do
+                                            if type(u) == "function" then
+                                                NetBeatBencode = u
+                                            end
+                                        end
+                                    elseif val.Name == "HHeartbeatB" then
+                                        AntiHitboxFn = item
+                                    end
+                                elseif type(val) == "table" and val.Highlight == true and val.BillboardGui == true then
+                                    NetBeatESPList = val
+                                    pcall(table.clear, val)
+                                end
+                            end
+                        end
+                    end
+                elseif type(item) == "table" then
+                    -- Clear NetBeat ESP blacklist tables unconditionally
+                    if rawget(item, "Highlight") == true or rawget(item, "BillboardGui") == true then
+                        pcall(table.clear, item)
+                    end
+                    -- Clear NetBeat weapon watchlist
+                    local first = rawget(item, 1)
+                    if type(first) == "table" and rawget(first, "name") ~= nil and rawget(first, "s") ~= nil then
+                        NetBeatWatchList = item
+                        pcall(table.clear, item)
+                    end
                 end
             end
-        end
 
-        -- Pass 2: Extract NetBeatQueue directly from NetBeatReportFn upvalues
-        if NetBeatReportFn and typeof(get_upvalues) == "function" then
-            local rups = get_upvalues(NetBeatReportFn)
-            if rups then
-                for _, u in pairs(rups) do
-                    if type(u) == "table" and u ~= NetBeatReportFn then
-                        NetBeatQueue = u
-                        pcall(table.clear, u)
+            -- Pass 2: Extract NetBeatQueue directly from NetBeatReportFn upvalues
+            if NetBeatReportFn and typeof(get_upvalues) == "function" then
+                local rups = get_upvalues(NetBeatReportFn)
+                if rups then
+                    for _, u in pairs(rups) do
+                        if type(u) == "table" and u ~= NetBeatReportFn then
+                            NetBeatQueue = u
+                            pcall(table.clear, u)
+                        end
                     end
                 end
             end
         end
-    end
+
+        -- 1.2 Lock & Neutralize Anomaly Queue (u28)
+        if NetBeatQueue then
+            pcall(table.clear, NetBeatQueue)
+            pcall(setmetatable, NetBeatQueue, {
+                __newindex = function() return end,
+                __index = function() return nil end
+            })
+        end
+
+        -- 1.3 Neutralize Report Filter (u103) & report() function
+        if NetBeatFilter then
+            pcall(table.clear, NetBeatFilter)
+            pcall(setmetatable, NetBeatFilter, {
+                __index = function() return true end
+            })
+        end
+
+        if NetBeatReportFn and typeof(hookfunction) == "function" then
+            pcall(function()
+                hookfunction(NetBeatReportFn, function(...) return end)
+            end)
+        end
+
+        -- 1.4 Clear Weapon Watchlist (u140) & Bait (u177)
+        if NetBeatWatchList then
+            pcall(table.clear, NetBeatWatchList)
+        end
+        if NetBeatBaitList then
+            pcall(table.clear, NetBeatBaitList)
+        end
+
+        -- 1.5 Clear ESP Blacklist (u180)
+        if NetBeatESPList then
+            pcall(table.clear, NetBeatESPList)
+        end
+
+        -- 1.6 Hook namecallRatio to always return clean 0.5 (Neutralize 7801 detection)
+        if NetBeatRatioFn and typeof(hookfunction) == "function" then
+            pcall(function()
+                hookfunction(NetBeatRatioFn, function() return 0.5 end)
+            end)
+        end
+
+        -- 1.7 Hook bencode to force all heartbeat anomaly codes to 0
+        if NetBeatBencode and typeof(hookfunction) == "function" then
+            pcall(function()
+                local oldBencode = nil
+                oldBencode = hookfunction(NetBeatBencode, function(p15, p16, p17, p18)
+                    if p17 ~= 0 and p17 ~= 1 then
+                        print(string.format("[Kraken Shield] [SHIELDED] Anomaly code %s intercepted -> forced to 0 (Clean Heartbeat)", tostring(p17)))
+                        p17 = 0
+                        p18 = ""
+                    end
+                    if oldBencode then
+                        return oldBencode(p15, p16, p17, p18)
+                    end
+                end)
+            end)
+        end
+
+        -- 1.8 Anti-Hitbox Closure Neutralizer
+        if AntiHitboxFn and typeof(hookfunction) == "function" then
+            pcall(function()
+                hookfunction(AntiHitboxFn, function(...) return false, nil end)
+            end)
+        end
+    end)
 end)
-
--- 1.2 Lock & Neutralize Anomaly Queue (u28)
-if NetBeatQueue then
-    pcall(table.clear, NetBeatQueue)
-    pcall(setmetatable, NetBeatQueue, {
-        __newindex = function() return end,
-        __index = function() return nil end
-    })
-end
-
--- 1.3 Neutralize Report Filter (u103) & report() function
-if NetBeatFilter then
-    pcall(table.clear, NetBeatFilter)
-    pcall(setmetatable, NetBeatFilter, {
-        __index = function() return true end
-    })
-end
-
-if NetBeatReportFn and typeof(hookfunction) == "function" then
-    pcall(function()
-        hookfunction(NetBeatReportFn, function(...) return end)
-    end)
-end
-
--- 1.4 Clear Weapon Watchlist (u140) & Bait (u177)
-if NetBeatWatchList then
-    pcall(table.clear, NetBeatWatchList)
-end
-if NetBeatBaitList then
-    pcall(table.clear, NetBeatBaitList)
-end
-
--- 1.5 Clear ESP Blacklist (u180)
-if NetBeatESPList then
-    pcall(table.clear, NetBeatESPList)
-end
-
--- 1.6 Hook namecallRatio to always return clean 0.5 (Neutralize 7801 detection)
-if NetBeatRatioFn and typeof(hookfunction) == "function" then
-    pcall(function()
-        hookfunction(NetBeatRatioFn, function() return 0.5 end)
-    end)
-end
-
--- 1.7 Hook bencode to force all heartbeat anomaly codes to 0
-if NetBeatBencode and typeof(hookfunction) == "function" then
-    pcall(function()
-        local oldBencode = nil
-        oldBencode = hookfunction(NetBeatBencode, function(p15, p16, p17, p18)
-            if p17 ~= 0 and p17 ~= 1 then
-                print(string.format("[Kraken Shield] [SHIELDED] Anomaly code %s intercepted -> forced to 0 (Clean Heartbeat)", tostring(p17)))
-                p17 = 0
-                p18 = ""
-            end
-            if oldBencode then
-                return oldBencode(p15, p16, p17, p18)
-            end
-        end)
-    end)
-end
-
--- 1.8 Anti-Hitbox Closure Neutralizer
-if AntiHitboxFn and typeof(hookfunction) == "function" then
-    pcall(function()
-        hookfunction(AntiHitboxFn, function(...) return false, nil end)
-    end)
-end
 
 local oldNamecall = nil
 
@@ -467,11 +477,24 @@ end)
 -- ==============================================================
 -- 📦 2. GAME REFERENCES & WEAPON MODULES
 -- ==============================================================
-local Weapons = ReplicatedStorage:WaitForChild("Weapons", 10)
-ClientState = (Weapons and require(Weapons:WaitForChild("ClientState", 5))) or ClientState
-local Config = Weapons and require(Weapons:WaitForChild("Config", 5))
-local WeaponData = Weapons and require(Weapons:WaitForChild("WeaponData", 5))
-local Remotes = ReplicatedStorage:WaitForChild("Remotes", 5)
+local Weapons = ReplicatedStorage:WaitForChild("Weapons", 15)
+local Config = nil
+local WeaponData = nil
+if Weapons then
+    pcall(function()
+        local cs = Weapons:WaitForChild("ClientState", 10)
+        if cs then ClientState = require(cs) end
+    end)
+    pcall(function()
+        local cfg = Weapons:WaitForChild("Config", 10)
+        if cfg then Config = require(cfg) end
+    end)
+    pcall(function()
+        local wd = Weapons:WaitForChild("WeaponData", 10)
+        if wd then WeaponData = require(wd) end
+    end)
+end
+local Remotes = ReplicatedStorage:WaitForChild("Remotes", 10)
 local SafeZoneModule = nil
 pcall(function()
     local sz = ReplicatedStorage:FindFirstChild("SafeZone")
@@ -1434,7 +1457,13 @@ if WeaponData then
 end
 
 local OriginalGlobal = { InfiniteAmmo = false }
-local WeaponsConfig = Weapons and require(Weapons:WaitForChild("Config", 5))
+local WeaponsConfig = nil
+pcall(function()
+    if Weapons then
+        local cfg = Weapons:WaitForChild("Config", 5)
+        if cfg then WeaponsConfig = require(cfg) end
+    end
+end)
 
 local function makeWritable(tbl)
     if typeof(tbl) ~= "table" then return end
@@ -1605,7 +1634,7 @@ local function getActiveFireFunction()
     end
 
     local nowTick = os.clock()
-    if nowTick - lastFireScanTick < 0.1 then
+    if nowTick - lastFireScanTick < 2.0 then
         return nil
     end
     lastFireScanTick = nowTick
@@ -3036,6 +3065,35 @@ local function InitUI()
         SweepOldGuis(pGui)
     end
 
+    -- 🌐 UNIVERSAL HTTP GET (Resilient to Mobile Delta/Arceus/Codex network security)
+    local function UniversalHttpGet(url)
+        -- 1. Standard game:HttpGet
+        local s1, b1 = pcall(function() return game:HttpGet(url) end)
+        if s1 and type(b1) == "string" and #b1 > 500 and not b1:find("<html") then
+            return b1
+        end
+
+        -- 2. Executor request fallback (Delta / Fluxus / Synapse / Hydrogen / Codex)
+        local req = (syn and syn.request) or (http and http.request) or request or http_request
+        if req then
+            local s2, r2 = pcall(function()
+                return req({
+                    Url = url,
+                    Method = "GET",
+                    Headers = { ["User-Agent"] = "KrakenHub-Client/2.0" }
+                })
+            end)
+            if s2 and type(r2) == "table" then
+                local body = r2.Body or r2.body
+                local code = r2.StatusCode or r2.status_code or r2.Status
+                if (code == 200 or not code) and type(body) == "string" and #body > 500 and not body:find("<html") then
+                    return body
+                end
+            end
+        end
+        return nil
+    end
+
     -- 🏷️ 1. LOGO ASSET LOADER (K COMMUNITY LOGO)
     local function GetLogoAsset(onLoaded)
         task.spawn(function()
@@ -3043,7 +3101,7 @@ local function InitUI()
                 if not isfile("k_community_logo.png") then
                     pcall(function()
                         local url = "https://raw.githubusercontent.com/armongzx56-design/KrakenHub/main/k_community_logo.png"
-                        local data = game:HttpGet(url)
+                        local data = UniversalHttpGet(url)
                         if type(data) == "string" and #data > 1000 and data:sub(1, 4) == "\137PNG" then
                             writefile("k_community_logo.png", data)
                         end
@@ -3069,14 +3127,15 @@ local function InitUI()
     local MacLib = nil
     local maclibCode = nil
     local maclibUrls = {
-        "https://raw.githubusercontent.com/armongzx56-design/KrakenHub/main/maclib.txt", -- Direct 200 OK (KrakenHub Mirror)
+        "https://cdn.jsdelivr.net/gh/armongzx56-design/KrakenHub@main/maclib.txt", -- Ultra-Fast Global CDN Mirror (Bypasses mobile ISP blocks)
+        "https://raw.githubusercontent.com/armongzx56-design/KrakenHub/main/maclib.txt", -- KrakenHub Direct Mirror
         "https://github.com/biggaboy212/Maclib/releases/latest/download/maclib.txt",      -- Official Release
         "https://raw.githubusercontent.com/biggaboy212/Maclib/main/maclib.txt"           -- Raw Backup
     }
 
     for _, url in ipairs(maclibUrls) do
-        local s, res = pcall(function() return game:HttpGet(url) end)
-        if s and type(res) == "string" and #res > 5000 and not res:find("<html") then
+        local res = UniversalHttpGet(url)
+        if res and type(res) == "string" and #res > 5000 then
             maclibCode = res
             break
         end
@@ -3100,6 +3159,33 @@ local function InitUI()
 
     local ok, lib = pcall(function()
         local code = maclibCode
+
+        -- 0. Patch GetGui to prevent CoreGui permission crashes on Mobile Delta / Codex
+        code = code:gsub(
+            "newGui%.Parent%s*=%s*parent",
+            [[local safeParent = nil
+	if typeof(gethui) == "function" then
+		local s, h = pcall(gethui)
+		if s and h then safeParent = h end
+	end
+	if not safeParent then
+		pcall(function()
+			local cg = game:GetService("CoreGui")
+			local t = Instance.new("Folder")
+			t.Parent = cg
+			t:Destroy()
+			safeParent = cg
+		end)
+	end
+	if not safeParent then
+		safeParent = LocalPlayer:FindFirstChildOfClass("PlayerGui") or LocalPlayer:WaitForChild("PlayerGui", 5)
+	end
+	local okP = pcall(function() newGui.Parent = safeParent end)
+	if not okP or not newGui.Parent then
+		pcall(function() newGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end)
+	end]]
+        )
+
         -- 1. Patch toggle ON state to vibrant red Color3.fromRGB(235, 50, 50)
         code = code:gsub(
             "Tween%(toggle1,%s*TweenSettings%.Info,%s*{%s*ImageTransparency%s*=%s*transparencyValues%[1%]%s*}%)",
@@ -3195,7 +3281,7 @@ local function InitUI()
     if ok and lib then
         MacLib = lib
     else
-        warn("[KrakenHub] Failed to load MacLib from release URL")
+        warn("[KrakenHub] Failed to load MacLib from release URL: " .. tostring(lib))
         return
     end
 
@@ -5679,6 +5765,75 @@ task.spawn(function()
         print("[KrakenHub] รันสคริปต์ติดเรียบร้อย")
     else
         warn("[KrakenHub] Init error: " .. tostring(err))
+        pcall(function()
+            local pGui = LocalPlayer:FindFirstChildOfClass("PlayerGui") or LocalPlayer:WaitForChild("PlayerGui", 5)
+            if pGui then
+                local errGui = Instance.new("ScreenGui")
+                errGui.Name = "KrakenHub_InitError"
+                errGui.ResetOnSpawn = false
+                
+                local frame = Instance.new("Frame")
+                frame.Size = UDim2.new(0, 320, 0, 110)
+                frame.Position = UDim2.new(0.5, -160, 0.1, 0)
+                frame.BackgroundColor3 = Color3.fromRGB(25, 20, 30)
+                frame.BorderSizePixel = 0
+                frame.Parent = errGui
+                
+                local corner = Instance.new("UICorner")
+                corner.CornerRadius = UDim.new(0, 10)
+                corner.Parent = frame
+                
+                local stroke = Instance.new("UIStroke")
+                stroke.Color = Color3.fromRGB(255, 75, 75)
+                stroke.Thickness = 1.5
+                stroke.Parent = frame
+                
+                local title = Instance.new("TextLabel")
+                title.Size = UDim2.new(1, -20, 0, 24)
+                title.Position = UDim2.new(0, 10, 0, 8)
+                title.BackgroundTransparency = 1
+                title.Text = "⚠️ KrakenHub Mobile - พบข้อผิดพลาด"
+                title.TextColor3 = Color3.fromRGB(255, 90, 90)
+                title.Font = Enum.Font.GothamBold
+                title.TextSize = 13
+                title.TextXAlignment = Enum.TextXAlignment.Left
+                title.Parent = frame
+                
+                local msg = Instance.new("TextLabel")
+                msg.Size = UDim2.new(1, -20, 0, 36)
+                msg.Position = UDim2.new(0, 10, 0, 32)
+                msg.BackgroundTransparency = 1
+                msg.Text = tostring(err):sub(1, 100)
+                msg.TextColor3 = Color3.fromRGB(220, 220, 220)
+                msg.Font = Enum.Font.Gotham
+                msg.TextSize = 11
+                msg.TextWrapped = true
+                msg.TextXAlignment = Enum.TextXAlignment.Left
+                msg.Parent = frame
+                
+                local retryBtn = Instance.new("TextButton")
+                retryBtn.Size = UDim2.new(0, 100, 0, 26)
+                retryBtn.Position = UDim2.new(1, -110, 1, -34)
+                retryBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
+                retryBtn.Text = "ลองใหม่ (Retry)"
+                retryBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+                retryBtn.Font = Enum.Font.GothamBold
+                retryBtn.TextSize = 11
+                retryBtn.BorderSizePixel = 0
+                retryBtn.Parent = frame
+                
+                local btnCorner = Instance.new("UICorner")
+                btnCorner.CornerRadius = UDim.new(0, 6)
+                btnCorner.Parent = retryBtn
+                
+                retryBtn.MouseButton1Click:Connect(function()
+                    errGui:Destroy()
+                    task.spawn(InitUI)
+                end)
+                
+                errGui.Parent = pGui
+            end
+        end)
     end
 end)
 

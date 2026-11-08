@@ -258,7 +258,12 @@ if not forceUI and preProvidedKey and type(preProvidedKey) == "string" and prePr
     if isValid then
         SaveKeyToFile(preProvidedKey)
         print("[KrakenHub] License verified (" .. preProvidedKey .. ")! Loading script...")
-        loadstring(game:HttpGet(GetScriptUrlForGame()))()
+        local scriptCode = performGet(GetScriptUrlForGame())
+        if scriptCode and type(scriptCode) == "string" and #scriptCode > 0 then
+            loadstring(scriptCode)()
+        else
+            loadstring(game:HttpGet(GetScriptUrlForGame()))()
+        end
         return
     end
 end
@@ -272,11 +277,28 @@ local UserInputService = game:GetService("UserInputService")
 
 pcall(function() if CoreGui:FindFirstChild("KrakenKeyUI") then CoreGui.KrakenKeyUI:Destroy() end end)
 
+local function GetSafeLoaderParent()
+    local gethuiFn = gethui or get_hui or get_hidden_gui
+    if typeof(gethuiFn) == "function" then
+        local ok, h = pcall(gethuiFn)
+        if ok and h then return h end
+    end
+    local canCore = pcall(function()
+        local test = Instance.new("Folder")
+        test.Parent = CoreGui
+        test:Destroy()
+    end)
+    if canCore then return CoreGui end
+    local lp = game:GetService("Players").LocalPlayer
+    local pGui = lp and (lp:FindFirstChildOfClass("PlayerGui") or lp:WaitForChild("PlayerGui", 5))
+    return pGui or CoreGui
+end
+
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "KrakenKeyUI"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.DisplayOrder = 999999
-ScreenGui.Parent = CoreGui
+ScreenGui.Parent = GetSafeLoaderParent()
 
 local function Tween(obj, props, duration, style, dir)
     duration = duration or 0.3
@@ -672,7 +694,12 @@ SubmitBtn.MouseButton1Click:Connect(function()
         Tween(CloseBtn, {BackgroundTransparency = 1, TextTransparency = 1}, 0.3)
         task.wait(0.45)
         ScreenGui:Destroy()
-        loadstring(game:HttpGet(GetScriptUrlForGame()))()
+        local scriptCode = performGet(GetScriptUrlForGame())
+        if scriptCode and type(scriptCode) == "string" and #scriptCode > 0 then
+            loadstring(scriptCode)()
+        else
+            loadstring(game:HttpGet(GetScriptUrlForGame()))()
+        end
     else
         SubmitBtn.Text = "Verify Key"
         Tween(SubmitBtn, {BackgroundColor3 = Color3.fromRGB(0, 150, 240)}, 0.2)

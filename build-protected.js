@@ -57,7 +57,14 @@ const footer = `    }
 
     local _0xG = (typeof(getgenv) == "function" and getgenv()) or _G
     local _0xP = game:GetService("Players")
-    local _0xLP = _0xP.LocalPlayer or _0xP:GetPropertyChangedSignal("LocalPlayer"):Wait()
+    local _0xLP = _0xP.LocalPlayer
+    if not _0xLP then
+        local _0xTimeout = tick() + 6
+        repeat
+            task.wait(0.05)
+            _0xLP = _0xP.LocalPlayer
+        until _0xLP or tick() > _0xTimeout
+    end
 
     -- 🔓 High-Speed Native Byte Assembler
     local _0xT = {}
