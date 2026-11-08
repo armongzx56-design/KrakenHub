@@ -37,34 +37,98 @@ local useNonce = true;
 
 local StatusCallback = function(msg) end
 local fSetClipboard = setclipboard or toclipboard or function() end
-local fRequest = request or http_request or syn_request
 local fStringChar, fToString, fStringSub, fOsTime, fMathRandom, fMathFloor = string.char, tostring, string.sub, os.time, math.random, math.floor
-local fGetHwid = gethwid or function() return game:GetService("Players").LocalPlayer.UserId end
-local cachedLink, cachedTime = "", 0;
 
-local host = "https://api.platoboost.com";
-local hostResponse = fRequest({ Url = host .. "/public/connectivity", Method = "GET" });
-if not hostResponse or hostResponse.StatusCode ~= 200 then
-    host = "https://api.platoboost.net";
+local function getClientHwid()
+    local hwid = nil
+    if gethwid then pcall(function() hwid = gethwid() end) end
+    if not hwid and (syn and syn.get_hwid) then pcall(function() hwid = syn.get_hwid() end) end
+    if not hwid and (getgenv and getgenv().gethwid) then pcall(function() hwid = getgenv().gethwid() end) end
+    if not hwid and identifyexecutor then pcall(function() hwid = identifyexecutor() .. "-" .. tostring(game:GetService("Players").LocalPlayer.UserId) end) end
+    if not hwid then
+        pcall(function()
+            local lp = game:GetService("Players").LocalPlayer
+            if lp and lp.UserId then hwid = tostring(lp.UserId) end
+        end)
+    end
+    return tostring(hwid or "KRAKEN-CLIENT")
 end
 
+local function performGet(url)
+    -- 1. game:HttpGet (Standard across 100% Roblox executors)
+    local s1, b1 = pcall(function()
+        return game:HttpGet(url)
+    end)
+    if s1 and type(b1) == "string" and #b1 > 0 then
+        return b1
+    end
+
+    -- 2. Executor request function fallback
+    local req = (syn and syn.request) or (http and http.request) or request or http_request
+    if req then
+        local s2, r2 = pcall(function()
+            return req({
+                Url = url,
+                Method = "GET",
+                Headers = { ["User-Agent"] = "KrakenHub-Client/2.0" }
+            })
+        end)
+        if s2 and type(r2) == "table" then
+            local body = r2.Body or r2.body
+            local code = r2.StatusCode or r2.status_code or r2.Status
+            if (code == 200 or not code) and type(body) == "string" and #body > 0 then
+                return body
+            end
+        end
+    end
+    return nil
+end
+
+local function performPost(url, bodyStr, headers)
+    local req = (syn and syn.request) or (http and http.request) or request or http_request
+    if req then
+        local s, r = pcall(function()
+            return req({
+                Url = url,
+                Method = "POST",
+                Body = bodyStr,
+                Headers = headers or { ["Content-Type"] = "application/json" }
+            })
+        end)
+        if s and type(r) == "table" then
+            local body = r.Body or r.body
+            local code = r.StatusCode or r.status_code or r.Status
+            return (code == 200 or not code), body
+        end
+    end
+    return false, nil
+end
+
+local host = "https://api.platoboost.com";
+task.spawn(function()
+    local conn = performGet(host .. "/public/connectivity")
+    if not conn then
+        host = "https://api.platoboost.net"
+    end
+end)
+
+local cachedLink, cachedTime = "", 0;
 local function cacheLink()
     if cachedTime + (10*60) < fOsTime() then
-        local response = fRequest({
-            Url = host .. "/public/start",
-            Method = "POST",
-            Body = lEncode({ service = service, identifier = lDigest(fGetHwid()) }),
-            Headers = { ["Content-Type"] = "application/json" }
-        });
-        if response and response.StatusCode == 200 then
-            local decoded = lDecode(response.Body);
-            if decoded.success == true then
+        local ok, body = performPost(
+            host .. "/public/start",
+            lEncode({ service = service, identifier = lDigest(getClientHwid()) }),
+            { ["Content-Type"] = "application/json" }
+        )
+        if ok and body then
+            local decoded = lDecode(body);
+            if decoded and decoded.success == true then
                 cachedLink = decoded.data.url;
                 cachedTime = fOsTime();
                 return true, cachedLink;
             else
-                StatusCallback(decoded.message or "Error");
-                return false, decoded.message;
+                StatusCallback(decoded and decoded.message or "Error");
+                return false, decoded and decoded.message;
             end
         end
         return false, "Failed to get link";
@@ -84,18 +148,13 @@ end
 local function redeemKey(key)
     local nonce = generateNonce();
     local endpoint = host .. "/public/redeem/" .. fToString(service);
-    local body = { identifier = lDigest(fGetHwid()), key = key }
+    local body = { identifier = lDigest(getClientHwid()), key = key }
     if useNonce then body.nonce = nonce end
 
-    local response = fRequest({
-        Url = endpoint,
-        Method = "POST",
-        Body = lEncode(body),
-        Headers = { ["Content-Type"] = "application/json" }
-    });
-    if response and response.StatusCode == 200 then
-        local decoded = lDecode(response.Body);
-        if decoded.success == true and decoded.data.valid == true then
+    local ok, resBody = performPost(endpoint, lEncode(body), { ["Content-Type"] = "application/json" })
+    if ok and resBody then
+        local decoded = lDecode(resBody);
+        if decoded and decoded.success == true and decoded.data.valid == true then
             if useNonce and decoded.data.hash ~= lDigest("true-" .. nonce .. "-" .. secret) then
                 StatusCallback("Failed to verify integrity."); return false;
             end
@@ -108,47 +167,50 @@ end
 local KRAKEN_API = "https://wlwr6mnuuu.apps.bot-hosting.cloud/api/whitelist/verify"
 local lastErrorMsg = nil
 
-local function verifyKey(key)
-    if not key or key == "" then return false, "Please enter your key!" end
-    key = string.gsub(key, "%s+", "")
+local function verifyKey(rawKey)
+    if not rawKey or rawKey == "" then return false, "Please enter your key!" end
+    local key = string.upper(string.gsub(tostring(rawKey), "%s+", ""))
     lastErrorMsg = nil
 
     -- 1. Check KrakenHub Discord Whitelist Key (KRAKEN-XXXX-XXXX-XXXX)
-    local krakenUrl = KRAKEN_API .. "?key=" .. key .. "&hwid=" .. tostring(fGetHwid())
-    local kResponse = fRequest({ Url = krakenUrl, Method = "GET" })
-    if kResponse and kResponse.StatusCode == 200 then
-        local success, kDecoded = pcall(function() return lDecode(kResponse.Body) end)
-        if success and kDecoded then
+    local hwid = getClientHwid()
+    local krakenUrl = KRAKEN_API .. "?key=" .. key .. "&hwid=" .. hwid
+    local krakenBody = performGet(krakenUrl)
+    if krakenBody then
+        local success, kDecoded = pcall(function() return lDecode(krakenBody) end)
+        if success and type(kDecoded) == "table" then
             if kDecoded.valid == true then
-                return true
+                return true, nil
             elseif kDecoded.error then
                 lastErrorMsg = kDecoded.error
+                return false, kDecoded.error
             end
         end
     end
 
     -- 2. Check Platoboost Key System (Fallback)
     local nonce = generateNonce();
-    local endpoint = host .. "/public/whitelist/" .. fToString(service) .. "?identifier=" .. lDigest(fGetHwid()) .. "&key=" .. key;
+    local endpoint = host .. "/public/whitelist/" .. fToString(service) .. "?identifier=" .. lDigest(hwid) .. "&key=" .. key;
     if useNonce then endpoint = endpoint .. "&nonce=" .. nonce end
 
-    local response = fRequest({ Url = endpoint, Method = "GET" });
-    if response and response.StatusCode == 200 then
-        local decoded = lDecode(response.Body);
-        if decoded and decoded.success == true then
-            if decoded.data.valid == true then
+    local platoBody = performGet(endpoint)
+    if platoBody then
+        local success, decoded = pcall(function() return lDecode(platoBody) end)
+        if success and decoded and decoded.success == true then
+            if decoded.data and decoded.data.valid == true then
                 if useNonce and decoded.data.hash ~= lDigest("true-" .. nonce .. "-" .. secret) then
                     StatusCallback("Integrity check failed."); return false, "Integrity check failed.";
                 end
-                return true;
+                return true, nil
             else
                 if fStringSub(key, 1, 4) == "KEY_" then
                     local redSuccess = redeemKey(key);
-                    if redSuccess then return true end
+                    if redSuccess then return true, nil end
                 end
             end
         end
     end
+
     return false, lastErrorMsg or "Invalid or Expired Key! Please check again."
 end
 
@@ -157,20 +219,26 @@ end
 -------------------------------------------------------------------------------
 local function ReadSavedKey()
     if readfile and isfile and isfile(KEY_FILE) then
-        return readfile(KEY_FILE)
+        local s, content = pcall(function() return readfile(KEY_FILE) end)
+        if s and content then return content end
     end
     return nil
 end
 
 local function SaveKeyToFile(key)
     if writefile then
-        writefile(KEY_FILE, key)
+        pcall(function() writefile(KEY_FILE, key) end)
     end
 end
 
-local savedKey = ReadSavedKey()
-if savedKey and savedKey ~= "" then
-    if verifyKey(savedKey) then
+-- ตรวจสอบคีย์จาก _G.KrakenKey หรือ getgenv().KrakenKey หรือไฟล์เซฟ
+local preProvidedKey = _G.KrakenKey or (getgenv and getgenv().KrakenKey) or ReadSavedKey()
+if preProvidedKey and type(preProvidedKey) == "string" and preProvidedKey ~= "" then
+    preProvidedKey = string.upper(string.gsub(preProvidedKey, "%s+", ""))
+    local isValid, errReason = verifyKey(preProvidedKey)
+    if isValid then
+        SaveKeyToFile(preProvidedKey)
+        print("[KrakenHub] License verified (" .. preProvidedKey .. ")! Loading script...")
         loadstring(game:HttpGet(GetScriptUrlForGame()))()
         return
     end
@@ -336,7 +404,7 @@ Title.TextTransparency = 1
 local SubTitle = Instance.new("TextLabel", MainFrame)
 SubTitle.Size = UDim2.new(1, -110, 0, 18)
 SubTitle.Position = UDim2.new(0, 24, 0, 46)
-SubTitle.Text = "Sailueatarchiwa Edition | Powered by Platoboost"
+SubTitle.Text = "Sailueatarchiwa Edition | KrakenHub Security"
 SubTitle.TextColor3 = Color3.fromRGB(110, 120, 145)
 SubTitle.Font = Enum.Font.GothamMedium
 SubTitle.TextSize = 11
@@ -388,7 +456,7 @@ KeyInput.Position = UDim2.new(0, 12, 0, 0)
 KeyInput.BackgroundTransparency = 1
 KeyInput.PlaceholderText = "Paste your license key here..."
 KeyInput.PlaceholderColor3 = Color3.fromRGB(80, 90, 115)
-KeyInput.Text = ""
+KeyInput.Text = (preProvidedKey and preProvidedKey ~= "") and preProvidedKey or ""
 KeyInput.TextColor3 = Color3.fromRGB(240, 245, 255)
 KeyInput.Font = Enum.Font.GothamMedium
 KeyInput.TextSize = 13
@@ -546,7 +614,7 @@ DiscordBtn.MouseButton1Click:Connect(function()
 end)
 
 SubmitBtn.MouseButton1Click:Connect(function()
-    local enteredKey = KeyInput.Text:gsub("%s+", "")
+    local enteredKey = string.upper(KeyInput.Text:gsub("%s+", ""))
     if enteredKey == "" then
         StatusLabel.Text = "Please enter your key first!"
         StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
