@@ -233,11 +233,26 @@ end
 
 -- ตรวจสอบคีย์จาก _G.KrakenKey หรือ getgenv().KrakenKey หรือไฟล์เซฟ
 local explicitKey = _G.KrakenKey or (getgenv and getgenv().KrakenKey)
+local forceUI = _G.ForceKeyUI or (getgenv and getgenv().ForceKeyUI)
+
 _G.KrakenKey = nil
-if getgenv then pcall(function() getgenv().KrakenKey = nil end) end
+_G.ForceKeyUI = nil
+if getgenv then
+    pcall(function()
+        getgenv().KrakenKey = nil
+        getgenv().ForceKeyUI = nil
+    end)
+end
+
+-- ถ้าสั่ง ForceKeyUI ให้ลบไฟล์คีย์เก่าทิ้งด้วย เพื่อให้เข้าสู่โหมดกรอกคีย์ใหม่ 100%
+if forceUI then
+    if delfile and isfile and isfile(KEY_FILE) then
+        pcall(function() delfile(KEY_FILE) end)
+    end
+end
 
 local preProvidedKey = explicitKey or ReadSavedKey()
-if preProvidedKey and type(preProvidedKey) == "string" and preProvidedKey ~= "" then
+if not forceUI and preProvidedKey and type(preProvidedKey) == "string" and preProvidedKey ~= "" then
     preProvidedKey = string.upper(string.gsub(preProvidedKey, "%s+", ""))
     local isValid, errReason = verifyKey(preProvidedKey)
     if isValid then
@@ -460,7 +475,7 @@ KeyInput.Position = UDim2.new(0, 12, 0, 0)
 KeyInput.BackgroundTransparency = 1
 KeyInput.PlaceholderText = "Paste your license key here..."
 KeyInput.PlaceholderColor3 = Color3.fromRGB(80, 90, 115)
-KeyInput.Text = (preProvidedKey and preProvidedKey ~= "") and preProvidedKey or ""
+KeyInput.Text = (not forceUI and preProvidedKey and preProvidedKey ~= "") and preProvidedKey or ""
 KeyInput.TextColor3 = Color3.fromRGB(240, 245, 255)
 KeyInput.Font = Enum.Font.GothamMedium
 KeyInput.TextSize = 13
