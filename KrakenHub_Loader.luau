@@ -164,7 +164,10 @@ local function redeemKey(key)
     return false;
 end
 
-local KRAKEN_API = "https://wlwr6mnuuu.apps.bot-hosting.cloud/api/whitelist/verify"
+local KRAKEN_APIS = {
+    "https://krakenhub-three.vercel.app/api/whitelist/verify",
+    "https://fynw54wx6g.apps.bot-hosting.cloud/api/whitelist/verify"
+}
 local lastErrorMsg = nil
 
 local function verifyKey(rawKey)
@@ -172,18 +175,20 @@ local function verifyKey(rawKey)
     local key = string.upper(string.gsub(tostring(rawKey), "%s+", ""))
     lastErrorMsg = nil
 
-    -- 1. Check KrakenHub Discord Whitelist Key (KRAKEN-XXXX-XXXX-XXXX)
+    -- 1. Check KrakenHub Whitelist Key (KRAKEN-XXXX-XXXX-XXXX)
     local hwid = getClientHwid()
-    local krakenUrl = KRAKEN_API .. "?key=" .. key .. "&hwid=" .. hwid
-    local krakenBody = performGet(krakenUrl)
-    if krakenBody then
-        local success, kDecoded = pcall(function() return lDecode(krakenBody) end)
-        if success and type(kDecoded) == "table" then
-            if kDecoded.valid == true then
-                return true, nil
-            elseif kDecoded.error then
-                lastErrorMsg = kDecoded.error
-                return false, kDecoded.error
+    for _, apiUrl in ipairs(KRAKEN_APIS) do
+        local krakenUrl = apiUrl .. "?key=" .. key .. "&hwid=" .. hwid
+        local krakenBody = performGet(krakenUrl)
+        if krakenBody then
+            local success, kDecoded = pcall(function() return lDecode(krakenBody) end)
+            if success and type(kDecoded) == "table" then
+                if kDecoded.valid == true then
+                    return true, nil
+                elseif kDecoded.error then
+                    lastErrorMsg = kDecoded.error
+                    return false, kDecoded.error
+                end
             end
         end
     end
@@ -258,12 +263,7 @@ if not forceUI and preProvidedKey and type(preProvidedKey) == "string" and prePr
     if isValid then
         SaveKeyToFile(preProvidedKey)
         print("[KrakenHub] License verified (" .. preProvidedKey .. ")! Loading script...")
-        local scriptCode = performGet(GetScriptUrlForGame())
-        if scriptCode and type(scriptCode) == "string" and #scriptCode > 0 then
-            loadstring(scriptCode)()
-        else
-            loadstring(game:HttpGet(GetScriptUrlForGame()))()
-        end
+        loadstring(game:HttpGet(GetScriptUrlForGame()))()
         return
     end
 end
@@ -277,28 +277,11 @@ local UserInputService = game:GetService("UserInputService")
 
 pcall(function() if CoreGui:FindFirstChild("KrakenKeyUI") then CoreGui.KrakenKeyUI:Destroy() end end)
 
-local function GetSafeLoaderParent()
-    local gethuiFn = gethui or get_hui or get_hidden_gui
-    if typeof(gethuiFn) == "function" then
-        local ok, h = pcall(gethuiFn)
-        if ok and h then return h end
-    end
-    local canCore = pcall(function()
-        local test = Instance.new("Folder")
-        test.Parent = CoreGui
-        test:Destroy()
-    end)
-    if canCore then return CoreGui end
-    local lp = game:GetService("Players").LocalPlayer
-    local pGui = lp and (lp:FindFirstChildOfClass("PlayerGui") or lp:WaitForChild("PlayerGui", 5))
-    return pGui or CoreGui
-end
-
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "KrakenKeyUI"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.DisplayOrder = 999999
-ScreenGui.Parent = GetSafeLoaderParent()
+ScreenGui.Parent = CoreGui
 
 local function Tween(obj, props, duration, style, dir)
     duration = duration or 0.3
@@ -694,12 +677,7 @@ SubmitBtn.MouseButton1Click:Connect(function()
         Tween(CloseBtn, {BackgroundTransparency = 1, TextTransparency = 1}, 0.3)
         task.wait(0.45)
         ScreenGui:Destroy()
-        local scriptCode = performGet(GetScriptUrlForGame())
-        if scriptCode and type(scriptCode) == "string" and #scriptCode > 0 then
-            loadstring(scriptCode)()
-        else
-            loadstring(game:HttpGet(GetScriptUrlForGame()))()
-        end
+        loadstring(game:HttpGet(GetScriptUrlForGame()))()
     else
         SubmitBtn.Text = "Verify Key"
         Tween(SubmitBtn, {BackgroundColor3 = Color3.fromRGB(0, 150, 240)}, 0.2)
