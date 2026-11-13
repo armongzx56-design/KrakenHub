@@ -91,54 +91,60 @@ return (function()
         key = string.gsub(tostring(key), "%s+", "")
         local upperKey = string.upper(key)
 
-        -- 1. Check KrakenHub Discord Bot Whitelist API (KRAKEN-XXXX-XXXX-XXXX)
+        -- 1. Check KrakenHub Whitelist APIs (KRAKEN-XXXX-XXXX-XXXX)
         if string.sub(upperKey, 1, 7) == "KRAKEN-" then
             local hwid = (typeof(gethwid) == "function" and gethwid()) or (typeof(get_hwid) == "function" and get_hwid()) or tostring(game:GetService("Players").LocalPlayer.UserId)
-            local apiUrl = "https://wlwr6mnuuu.apps.bot-hosting.cloud/api/whitelist/verify?key=" .. upperKey .. "&hwid=" .. tostring(hwid)
+            local krakenApis = {
+                "https://krakenhub-three.vercel.app/api/whitelist/verify",
+                "https://fynw54wx6g.apps.bot-hosting.cloud/api/whitelist/verify"
+            }
             
-            local respBody = nil
-            local getSuccess = pcall(function()
-                if game and game.HttpGet then
-                    respBody = game:HttpGet(apiUrl)
-                end
-            end)
-            
-            if not getSuccess or not respBody or respBody == "" then
-                pcall(function()
-                    local req = request or http_request or syn_request
-                    if req then
-                        local r = req({ Url = apiUrl, Method = "GET" })
-                        if r and (r.StatusCode == 200 or r.Status == 200) then
-                            respBody = r.Body
-                        end
+            for _, apiUrl in ipairs(krakenApis) do
+                local fullUrl = apiUrl .. "?key=" .. upperKey .. "&hwid=" .. tostring(hwid)
+                local respBody = nil
+                local getSuccess = pcall(function()
+                    if game and game.HttpGet then
+                        respBody = game:HttpGet(fullUrl)
                     end
                 end)
-            end
-
-            if respBody and respBody ~= "" then
-                local okDec, data = pcall(function()
-                    return game:GetService("HttpService"):JSONDecode(respBody)
-                end)
-                if not okDec or not data then
-                    pcall(function() data = lDecode(respBody) end)
-                end
                 
-                if data and (data.valid == true or data.success == true) then
-                    local exp = (data.user and data.user.expiresAt) or data.expiresAt or (os.time() + (30 * 86400))
-                    if typeof(exp) == "number" and exp > 1000000000000 then
-                        exp = math.floor(exp / 1000)
+                if not getSuccess or not respBody or respBody == "" then
+                    pcall(function()
+                        local req = request or http_request or syn_request
+                        if req then
+                            local r = req({ Url = fullUrl, Method = "GET" })
+                            if r and (r.StatusCode == 200 or r.Status == 200) then
+                                respBody = r.Body
+                            end
+                        end
+                    end)
+                end
+
+                if respBody and respBody ~= "" then
+                    local okDec, data = pcall(function()
+                        return game:GetService("HttpService"):JSONDecode(respBody)
+                    end)
+                    if not okDec or not data then
+                        pcall(function() data = lDecode(respBody) end)
                     end
-                    _G._KrakenKeyExpiry = exp
-                    if writefile then
-                        pcall(writefile, "KrakenHub_Key_Expiry.txt", tostring(exp))
-                        pcall(writefile, KEY_FILE, upperKey)
+                    
+                    if data and (data.valid == true or data.success == true) then
+                        local exp = (data.user and data.user.expiresAt) or data.expiresAt or (os.time() + (30 * 86400))
+                        if typeof(exp) == "number" and exp > 1000000000000 then
+                            exp = math.floor(exp / 1000)
+                        end
+                        _G._KrakenKeyExpiry = exp
+                        if writefile then
+                            pcall(writefile, "KrakenHub_Key_Expiry.txt", tostring(exp))
+                            pcall(writefile, KEY_FILE, upperKey)
+                        end
+                        return true
+                    elseif data and data.valid == false then
+                        if StatusCallback then
+                            StatusCallback(data.reason or data.error or "Invalid key or HWID mismatch")
+                        end
+                        return false
                     end
-                    return true
-                elseif data and data.valid == false then
-                    if StatusCallback then
-                        StatusCallback(data.reason or data.error or "Invalid key or HWID mismatch")
-                    end
-                    return false
                 end
             end
 
@@ -283,13 +289,35 @@ return (function()
     local TweenService = game:GetService("TweenService")
     local UserInputService = game:GetService("UserInputService")
 
+    local function GetSafeLoaderParent()
+        local gethuiFn = gethui or get_hui or get_hidden_gui
+        if typeof(gethuiFn) == "function" then
+            local ok, h = pcall(gethuiFn)
+            if ok and h then return h end
+        end
+        local ok, cg = pcall(function() return game:GetService("CoreGui") end)
+        if ok and cg then
+            local canCore = pcall(function()
+                local test = Instance.new("Folder")
+                test.Parent = cg
+                test:Destroy()
+            end)
+            if canCore then return cg end
+        end
+        local lp = game:GetService("Players").LocalPlayer
+        local pGui = lp and (lp:FindFirstChildOfClass("PlayerGui") or lp:WaitForChild("PlayerGui", 5))
+        return pGui or CoreGui
+    end
+
+    local safeLoaderParent = GetSafeLoaderParent()
+    pcall(function() if safeLoaderParent:FindFirstChild("KrakenKeyUI") then safeLoaderParent.KrakenKeyUI:Destroy() end end)
     pcall(function() if CoreGui:FindFirstChild("KrakenKeyUI") then CoreGui.KrakenKeyUI:Destroy() end end)
 
     local ScreenGui = Instance.new("ScreenGui")
     ScreenGui.Name = "KrakenKeyUI"
     ScreenGui.ResetOnSpawn = false
     ScreenGui.DisplayOrder = 999999
-    ScreenGui.Parent = CoreGui
+    ScreenGui.Parent = safeLoaderParent
 
     local function Tween(obj, props, duration, style, dir)
         duration = duration or 0.3

@@ -21,6 +21,9 @@ local function GetScriptUrlForGame()
     if game.GameId == 10771935715 then
         return GAME_MAPS[104549080643413]
     end
+    if game.GameId == 8879733500 then
+        return GAME_MAPS[131481383443764]
+    end
     -- Default fallback
     return "https://raw.githubusercontent.com/armongzx56-design/KrakenHub/main/sailueatarchiwa_cheat.luau"
 end
@@ -275,13 +278,35 @@ local CoreGui = game:GetService("CoreGui")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
+local function GetSafeLoaderParent()
+    local gethuiFn = gethui or get_hui or get_hidden_gui
+    if typeof(gethuiFn) == "function" then
+        local ok, h = pcall(gethuiFn)
+        if ok and h then return h end
+    end
+    local ok, cg = pcall(function() return game:GetService("CoreGui") end)
+    if ok and cg then
+        local canCore = pcall(function()
+            local test = Instance.new("Folder")
+            test.Parent = cg
+            test:Destroy()
+        end)
+        if canCore then return cg end
+    end
+    local lp = game:GetService("Players").LocalPlayer
+    local pGui = lp and (lp:FindFirstChildOfClass("PlayerGui") or lp:WaitForChild("PlayerGui", 5))
+    return pGui or CoreGui
+end
+
+local safeLoaderParent = GetSafeLoaderParent()
+pcall(function() if safeLoaderParent:FindFirstChild("KrakenKeyUI") then safeLoaderParent.KrakenKeyUI:Destroy() end end)
 pcall(function() if CoreGui:FindFirstChild("KrakenKeyUI") then CoreGui.KrakenKeyUI:Destroy() end end)
 
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "KrakenKeyUI"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.DisplayOrder = 999999
-ScreenGui.Parent = CoreGui
+ScreenGui.Parent = safeLoaderParent
 
 local function Tween(obj, props, duration, style, dir)
     duration = duration or 0.3

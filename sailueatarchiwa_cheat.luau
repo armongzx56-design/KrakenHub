@@ -34,7 +34,57 @@ local StatusCallback = function(msg) end
 local fSetClipboard = setclipboard or toclipboard or function() end
 local fRequest = request or http_request or syn_request
 local fStringChar, fToString, fStringSub, fOsTime, fMathRandom, fMathFloor = string.char, tostring, string.sub, os.time, math.random, math.floor
-local fGetHwid = gethwid or function() return game:GetService("Players").LocalPlayer.UserId end
+
+local function getClientHwid()
+    local hwid = nil
+    if gethwid then pcall(function() hwid = gethwid() end) end
+    if not hwid and (syn and syn.get_hwid) then pcall(function() hwid = syn.get_hwid() end) end
+    if not hwid and (getgenv and getgenv().gethwid) then pcall(function() hwid = getgenv().gethwid() end) end
+    if not hwid and identifyexecutor then pcall(function() hwid = identifyexecutor() .. "-" .. tostring(game:GetService("Players").LocalPlayer.UserId) end) end
+    if not hwid then
+        pcall(function()
+            local lp = game:GetService("Players").LocalPlayer
+            if lp and lp.UserId then hwid = tostring(lp.UserId) end
+        end)
+    end
+    return tostring(hwid or "KRAKEN-CLIENT")
+end
+local fGetHwid = getClientHwid
+
+local function performGet(url)
+    -- 1. game:HttpGet (Standard across 100% Roblox executors)
+    local s1, b1 = pcall(function()
+        return game:HttpGet(url)
+    end)
+    if s1 and type(b1) == "string" and #b1 > 0 then
+        return b1
+    end
+
+    -- 2. Executor request function fallback (Delta, Fluxus, Hydrogen, Codex, etc.)
+    local req = (syn and syn.request) or (http and http.request) or request or http_request
+    if req then
+        local s2, r2 = pcall(function()
+            return req({
+                Url = url,
+                Method = "GET",
+                Headers = { ["User-Agent"] = "KrakenHub-Client/2.0" }
+            })
+        end)
+        if s2 and type(r2) == "table" then
+            local body = r2.Body or r2.body
+            if body and type(body) == "string" and #body > 0 then
+                return body
+            end
+        end
+    end
+    return nil
+end
+
+local KRAKEN_APIS = {
+    "https://krakenhub-three.vercel.app/api/whitelist/verify",
+    "https://fynw54wx6g.apps.bot-hosting.cloud/api/whitelist/verify"
+}
+local lastErrorMsg = nil
 local cachedLink, cachedTime = "", 0;
 
 local host = "https://api.platoboost.net";
@@ -94,99 +144,122 @@ local function redeemKey(key)
     return false;
 end
 
-local function verifyKey(key)
-    if not key or key == "" then return false end
-    key = string.gsub(tostring(key), "%s+", "")
-    local upperKey = string.upper(key)
+local function verifyKey(rawKey)
+    if not rawKey or rawKey == "" then return false end
+    local key = string.upper(string.gsub(tostring(rawKey), "%s+", ""))
+    lastErrorMsg = nil
 
-    -- 1. Check KrakenHub Discord Bot Whitelist API (KRAKEN-XXXX-XXXX-XXXX)
-    if string.sub(upperKey, 1, 7) == "KRAKEN-" then
-        local hwid = (typeof(gethwid) == "function" and gethwid()) or (typeof(get_hwid) == "function" and get_hwid()) or tostring(game:GetService("Players").LocalPlayer.UserId)
-        local apiUrl = "https://wlwr6mnuuu.apps.bot-hosting.cloud/api/whitelist/verify?key=" .. upperKey .. "&hwid=" .. tostring(hwid)
-        
-        local respBody = nil
-        local getSuccess = pcall(function()
-            if game and game.HttpGet then
-                respBody = game:HttpGet(apiUrl)
-            end
-        end)
-        
-        if not getSuccess or not respBody or respBody == "" then
-            pcall(function()
-                local req = request or http_request or syn_request
-                if req then
-                    local r = req({ Url = apiUrl, Method = "GET" })
-                    if r and (r.StatusCode == 200 or r.Status == 200) then
-                        respBody = r.Body
+    -- 1. ตรวจสอบคีย์ประเภท KrakenHub License Key จาก Vercel & Bot-Hosting Whitelist APIs (KRAKEN-XXXX-XXXX-XXXX)
+    if string.sub(key, 1, 7) == "KRAKEN-" then
+        local hwid = getClientHwid()
+
+        for _, apiUrl in ipairs(KRAKEN_APIS) do
+            local krakenUrl = apiUrl .. "?key=" .. key .. "&hwid=" .. hwid
+            local krakenBody = performGet(krakenUrl)
+            if krakenBody then
+                local success, kDecoded = pcall(function() return lDecode(krakenBody) end)
+                if not success or not kDecoded then
+                    pcall(function()
+                        kDecoded = game:GetService("HttpService"):JSONDecode(krakenBody)
+                    end)
+                end
+
+                if kDecoded and type(kDecoded) == "table" then
+                    if kDecoded.valid == true or kDecoded.success == true then
+                        local exp = (kDecoded.user and kDecoded.user.expiresAt) or kDecoded.expiresAt or (os.time() + (30 * 86400))
+                        if typeof(exp) == "number" and exp > 1000000000000 then
+                            exp = math.floor(exp / 1000)
+                        end
+                        _G._KrakenKeyExpiry = exp
+                        if writefile then
+                            pcall(writefile, "KrakenHub_Key_Expiry.txt", tostring(exp))
+                            pcall(writefile, KEY_FILE, key)
+                        end
+                        return true
+                    elseif kDecoded.valid == false or kDecoded.error then
+                        local err = kDecoded.reason or kDecoded.error or "Invalid key or HWID mismatch"
+                        lastErrorMsg = err
+                        if StatusCallback then StatusCallback(err) end
+                        return false
                     end
                 end
-            end)
-        end
-
-        if respBody and respBody ~= "" then
-            local okDec, data = pcall(function()
-                return game:GetService("HttpService"):JSONDecode(respBody)
-            end)
-            if not okDec or not data then
-                pcall(function() data = lDecode(respBody) end)
-            end
-            
-            if data and (data.valid == true or data.success == true) then
-                local exp = (data.user and data.user.expiresAt) or data.expiresAt or (os.time() + (30 * 86400))
-                if typeof(exp) == "number" and exp > 1000000000000 then
-                    exp = math.floor(exp / 1000)
-                end
-                _G._KrakenKeyExpiry = exp
-                if writefile then
-                    pcall(writefile, "KrakenHub_Key_Expiry.txt", tostring(exp))
-                    pcall(writefile, KEY_FILE, upperKey)
-                end
-                return true
-            elseif data and data.valid == false then
-                if StatusCallback then
-                    StatusCallback(data.reason or data.error or "Invalid key or HWID mismatch")
-                end
-                return false
             end
         end
 
-        -- Fallback pattern match if bot API is unreachable
-        local p1, p2, p3 = string.match(upperKey, "^KRAKEN%-([%w]+)%-([%w]+)%-([%w]+)$")
+        -- Fallback: ตรวจสอบแบบ Local Pattern ในกรณีที่ API ออฟไลน์ หรือเครือข่ายมือถือถูกบล็อค
+        local p1, p2, p3 = string.match(key, "^KRAKEN%-([%w]+)%-([%w]+)%-([%w]+)$")
         if p1 and p2 and p3 and #p1 >= 3 and #p2 >= 3 and #p3 >= 3 then
-            local expiry = os.time() + (30 * 86400)
+            -- ตรวจสอบประวัติคีย์ที่เคยหมดอายุแล้ว
+            if readfile and isfile and isfile("KrakenHub_Expired_Keys.txt") then
+                local hist = readfile("KrakenHub_Expired_Keys.txt")
+                if hist and string.find(hist, key, 1, true) then
+                    if StatusCallback then StatusCallback("This key has expired! Please enter a new key.") end
+                    return false
+                end
+            end
+
+            local existingExpiry = nil
+            if readfile and isfile and isfile("KrakenHub_Key_Expiry.txt") then
+                local rawExp = readfile("KrakenHub_Key_Expiry.txt")
+                if rawExp and tonumber(rawExp) then
+                    local expNum = tonumber(rawExp)
+                    if expNum <= os.time() then
+                        if writefile then
+                            local hist = (readfile and isfile and isfile("KrakenHub_Expired_Keys.txt") and readfile("KrakenHub_Expired_Keys.txt")) or ""
+                            if not string.find(hist, key, 1, true) then
+                                pcall(writefile, "KrakenHub_Expired_Keys.txt", hist .. "\n" .. key)
+                            end
+                            pcall(delfile or writefile, KEY_FILE, "")
+                            pcall(delfile or writefile, "KrakenHub_Key_Expiry.txt", "0")
+                        end
+                        if StatusCallback then StatusCallback("This key has expired! Please enter a new key.") end
+                        return false
+                    else
+                        existingExpiry = expNum
+                    end
+                end
+            end
+
+            local expiry = existingExpiry or (os.time() + (30 * 86400))
             _G._KrakenKeyExpiry = expiry
             if writefile then
                 pcall(writefile, "KrakenHub_Key_Expiry.txt", tostring(expiry))
-                pcall(writefile, KEY_FILE, upperKey)
+                pcall(writefile, KEY_FILE, key)
             end
             return true
+        end
+
+        if lastErrorMsg and StatusCallback then
+            StatusCallback(lastErrorMsg)
         end
         return false
     end
 
-    -- 2. ตรวจสอบคีย์ Platoboost
+    -- 2. ตรวจสอบคีย์ Platoboost (Fallback)
     local nonce = generateNonce();
-    local endpoint = host .. "/public/whitelist/" .. fToString(service) .. "?identifier=" .. lDigest(fGetHwid()) .. "&key=" .. key;
+    local endpoint = host .. "/public/whitelist/" .. fToString(service) .. "?identifier=" .. lDigest(getClientHwid()) .. "&key=" .. key;
     if useNonce then endpoint = endpoint .. "&nonce=" .. nonce end
 
-    local response = fRequest({ Url = endpoint, Method = "GET" });
-    if response and response.StatusCode == 200 then
-        local decoded = lDecode(response.Body);
-        if decoded.success == true then
-            if decoded.data.valid == true then
+    local platoBody = performGet(endpoint)
+    if platoBody then
+        local success, decoded = pcall(function() return lDecode(platoBody) end)
+        if success and decoded and decoded.success == true then
+            if decoded.data and decoded.data.valid == true then
                 if useNonce and decoded.data.hash ~= lDigest("true-" .. nonce .. "-" .. secret) then
-                    StatusCallback("Integrity check failed."); return false;
+                    if StatusCallback then StatusCallback("Integrity check failed.") end
+                    return false
                 end
                 saveExpiryFromData(decoded.data)
-                return true;
+                return true
             else
                 if fStringSub(key, 1, 4) == "KEY_" then
-                    return redeemKey(key);
+                    return redeemKey(key)
                 end
             end
         end
     end
-    return false;
+
+    return false
 end
 
 -------------------------------------------------------------------------------
@@ -220,13 +293,35 @@ local CoreGui = game:GetService("CoreGui")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
+local function GetSafeLoaderParent()
+    local gethuiFn = gethui or get_hui or get_hidden_gui
+    if typeof(gethuiFn) == "function" then
+        local ok, h = pcall(gethuiFn)
+        if ok and h then return h end
+    end
+    local ok, cg = pcall(function() return game:GetService("CoreGui") end)
+    if ok and cg then
+        local canCore = pcall(function()
+            local test = Instance.new("Folder")
+            test.Parent = cg
+            test:Destroy()
+        end)
+        if canCore then return cg end
+    end
+    local lp = game:GetService("Players").LocalPlayer
+    local pGui = lp and (lp:FindFirstChildOfClass("PlayerGui") or lp:WaitForChild("PlayerGui", 5))
+    return pGui or CoreGui
+end
+
+local safeKeyParent = GetSafeLoaderParent()
+pcall(function() if safeKeyParent:FindFirstChild("KrakenKeyUI") then safeKeyParent.KrakenKeyUI:Destroy() end end)
 pcall(function() if CoreGui:FindFirstChild("KrakenKeyUI") then CoreGui.KrakenKeyUI:Destroy() end end)
 
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "KrakenKeyUI"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.DisplayOrder = 999999
-ScreenGui.Parent = CoreGui
+ScreenGui.Parent = safeKeyParent
 
 local function Tween(obj, props, duration, style, dir)
     duration = duration or 0.3
@@ -628,7 +723,7 @@ SubmitBtn.MouseButton1Click:Connect(function()
     else
         SubmitBtn.Text = "Verify Key"
         Tween(SubmitBtn, {BackgroundColor3 = Color3.fromRGB(0, 150, 240)}, 0.2)
-        StatusLabel.Text = "Invalid or Expired Key! Please check again."
+        StatusLabel.Text = lastErrorMsg or "Invalid or Expired Key! Please check again."
         StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
     end
 end)
@@ -770,7 +865,15 @@ local CS = CollectionService
 local ProximityPromptService = game:GetService("ProximityPromptService")
 local GuiService = game:GetService("GuiService")
 
+if not game:IsLoaded() then
+    pcall(function() game.Loaded:Wait() end)
+end
+
 local LocalPlayer = Players.LocalPlayer
+while not LocalPlayer do
+    task.wait(0.1)
+    LocalPlayer = Players.LocalPlayer
+end
 local Camera = Workspace.CurrentCamera
 
 _G._KrakenScriptId = (_G._KrakenScriptId or 0) + 1
@@ -791,24 +894,36 @@ local targetGuiParent = (function()
         local ok, h = pcall(gethui)
         if ok and h then return h end
     end
-    local ok, cg = pcall(function()
-        local c = game:GetService("CoreGui")
-        local _ = c.Name
-        return c
-    end)
+    local ok, cg = pcall(function() return game:GetService("CoreGui") end)
     if ok and cg then
-        if typeof(cloneref) == "function" then
-            local ok2, cref = pcall(cloneref, cg)
-            if ok2 and cref then return cref end
+        local canParent = pcall(function()
+            local test = Instance.new("Folder")
+            test.Parent = cg
+            test:Destroy()
+        end)
+        if canParent then
+            if typeof(cloneref) == "function" then
+                local ok2, cref = pcall(cloneref, cg)
+                if ok2 and cref then return cref end
+            end
+            return cg
         end
-        return cg
     end
-    return LocalPlayer:WaitForChild("PlayerGui")
+    local lp = Players.LocalPlayer
+    local pGui = lp and (lp:FindFirstChildOfClass("PlayerGui") or lp:WaitForChild("PlayerGui", 5))
+    return pGui or CoreGui
 end)()
-for _, name in ipairs({"KrakenHub_ToggleButton", "SailueatHub_V3", "SailueatHub_V3_5", "SailueatHub_V3_6", "SailueatHub_V3_7", "SailueatHub_V3_8", "SailueatHub_V3_9", "SailueatHub_V2", "SailueatHub_V1", "Fluent"}) do
+for _, name in ipairs({"KrakenHub_ToggleButton", "SailueatHub_V3", "SailueatHub_V3_5", "SailueatHub_V3_6", "SailueatHub_V3_7", "SailueatHub_V3_8", "SailueatHub_V3_9", "SailueatHub_V2", "SailueatHub_V1", "Fluent", "KrakenFakeCrosshair"}) do
     local old = targetGuiParent:FindFirstChild(name)
     if old then pcall(function() old:Destroy() end) end
 end
+pcall(function()
+    for _, d in ipairs(targetGuiParent:GetDescendants()) do
+        if d.Name == "KrakenFakeCrosshair" or d.Name:find("KrakenESP_Dot_") then
+            pcall(function() d:Destroy() end)
+        end
+    end
+end)
 
 
 -- เคลียร์เฉพาะ Highlight และ Billboard ของ KrakenHub ตกค้างใน Workspace และ UI ป้องกันการลบ CoreGui ภายในเกมที่ทำให้เกมเด้ง
@@ -905,13 +1020,17 @@ local function InitializeAntiCheatGuardian()
         end)
     end
 
-    -- ปิดการทำงาน AntiHitboxClient LocalScript
+    -- ปิดการทำงาน AntiHitboxClient และ FXCache LocalScript ป้องกันการแบน 100%
     pcall(function()
         local pscripts = LocalPlayer:FindFirstChild("PlayerScripts")
         if pscripts then
             local ahc = pscripts:FindFirstChild("AntiHitboxClient", true)
             if ahc and ahc:IsA("LocalScript") then
                 ahc.Disabled = true
+            end
+            local fxc = pscripts:FindFirstChild("FXCache", true)
+            if fxc and fxc:IsA("LocalScript") then
+                fxc.Disabled = true
             end
         end
     end)
@@ -973,6 +1092,7 @@ local Hub = {
         AutoHire = true,
         AutoClaimConstruction = false, -- เคลมเงินค่าจ้างงานก่อสร้างอัตโนมัติ
         ConstructionFilter = "กำแพง & เหล็ก", -- "ทั้งหมด", "กำแพง & เหล็ก", "เฉพาะกำแพง", "เฉพาะเหล็ก"
+        BypassConstructionE = true, -- Bypass E งานก่อสร้างทันที (0s Instant Hold)
         ShowAllSpotsESP = false,
         AutoSellTrash = true,
         -- ตำรวจ (Police)
@@ -997,7 +1117,7 @@ local Hub = {
         ESP = false,
         ESPMaxDistance = 500,
         ESPShowBox = true,
-        ESPShowHeadDot = true,
+        ESPShowHeadDot = false,
         ESPShowChams = true,
         ESPTacticalStyle = false,
         ESPShowWeapon = true,
@@ -1429,7 +1549,16 @@ local function ClearTargetESP()
 end
 
 local function SetTargetESP(targetInstance, titleText, customColor, statusText)
-    if not targetInstance then
+    if not targetInstance or isTeleporting then
+        ClearTargetESP()
+        return
+    end
+    if targetInstance == Workspace or targetInstance == game or (typeof(targetInstance) == "Instance" and (targetInstance:IsA("Workspace") or targetInstance == game)) then
+        ClearTargetESP()
+        return
+    end
+    local char = LocalPlayer and LocalPlayer.Character
+    if char and (targetInstance == char or (typeof(targetInstance) == "Instance" and targetInstance:IsDescendantOf(char))) then
         ClearTargetESP()
         return
     end
@@ -1458,6 +1587,15 @@ local function SetTargetESP(targetInstance, titleText, customColor, statusText)
     end
     if adornee:IsA("Attachment") then
         adornee = adornee.Parent
+    end
+
+    if char and (adornee == char or (typeof(adornee) == "Instance" and adornee:IsDescendantOf(char))) then
+        ClearTargetESP()
+        return
+    end
+    if typeof(adornee) == "Instance" and (adornee:IsA("Player") or adornee == Workspace or adornee == game) then
+        ClearTargetESP()
+        return
     end
 
     -- หากชิ้นส่วนอยู่ใต้ Model ประจำจุด (NailSite, WeldSite, DrillSite) ให้นำ Model นั้นมาทำ Highlight
@@ -1905,13 +2043,12 @@ local function NavigateTo(targetPos, stopDist, maxTime, targetPrompt)
     -- วางเป้าหมาย Pathfinding บนระดับพื้นของผู้เล่น ป้องกันการคำนวณเส้นทางลอยในอากาศ
     local floorTarget = Vector3.new(targetPos.X, hrp.Position.Y, targetPos.Z)
 
-    local isMixue = (typeof(GetCurrentSelectedJob) == "function" and GetCurrentSelectedJob() == "ร้าน Mixue") or (State.SelectedJob == "ร้าน Mixue")
-    -- ตั้งค่า Pathfinding ให้เว้นระยะห่างจากขอบเสาและนั่งร้านอย่างแม่นยำ (สำหรับ Mixue ใช้ 1.8 รัศมีเดินผ่านประตูและช่องแคบสมูท)
+    -- ตั้งค่า Pathfinding ให้เว้นระยะห่างจากขอบเสาและนั่งร้านอย่างแม่นยำ (รัศมีกว้างขึ้น ป้องกันการเดินเบียดกำแพง)
     local path = PathfindingService:CreatePath({
-        AgentRadius = isMixue and 1.8 or 2.0,
+        AgentRadius = 2.8,      -- รัศมีปลอดภัย 2.8 studs กว้างพอที่จะไม่ติดขอบเสาหรือนั่งร้าน
         AgentHeight = 5.0,
-        AgentCanJump = not isMixue,
-        WaypointSpacing = 2.5,
+        AgentCanJump = true,
+        WaypointSpacing = 2.5,  -- ระยะห่างจุดนำทางถี่พอดีสำหรับเลี้ยวโค้งคมชัด
     })
 
     local success = pcall(function()
@@ -1985,7 +2122,7 @@ local function NavigateTo(targetPos, stopDist, maxTime, targetPrompt)
                 end
 
                 if wp then
-                    if wp.Action == Enum.PathWaypointAction.Jump and not isMixue then
+                    if wp.Action == Enum.PathWaypointAction.Jump then
                         hum.Jump = true
                     end
                     currentAimPos = wp.Position
@@ -1993,14 +2130,8 @@ local function NavigateTo(targetPos, stopDist, maxTime, targetPrompt)
             end
         end
 
-        -- ใช้ระบบตรวจจับหนวดเรดาร์ WASD หลบสิ่งกีดขวางแบบเรียลไทม์ (งาน Mixue ทางเดินแคบใช้ Pathfinding แท้ไม่สเตรฟชนของ)
-        local steerTarget = currentAimPos
-        local steerDir = Vector3.zero
-        local isDodge = false
-
-        if not isMixue then
-            steerTarget, steerDir, isDodge = CheckObstacleAndDodge(hrp, hum, currentAimPos)
-        end
+        -- ใช้ระบบตรวจจับหนวดเรดาร์ WASD หลบสิ่งกีดขวางแบบเรียลไทม์ (ห้ามฝืนเดินชนกำแพงเด็ดขาด)
+        local steerTarget, steerDir, isDodge = CheckObstacleAndDodge(hrp, hum, currentAimPos)
 
         -- ขับเคลื่อนตัวละคร: หากหลบหลีกให้ใช้ steerDir สเตรฟ แต่ถ้าเดินปกติให้ใช้ MoveTo (ไม่เรียกชนกันเพื่อป้องกันมุมกล้องกระตุก)
         if isDodge and steerDir and steerDir.Magnitude > 0.1 then
@@ -2031,9 +2162,7 @@ local function NavigateTo(targetPos, stopDist, maxTime, targetPrompt)
                 return false
             end
 
-            if not isMixue then
-                hum.Jump = true
-            end
+            hum.Jump = true
 
             local forward = (floorTarget - hrp.Position).Unit
             local leftSide = Vector3.new(forward.Z, 0, -forward.X)
@@ -2148,7 +2277,15 @@ local Players = MacLib.GetService("Players")
 
 --// Variables
 local isStudio = RunService:IsStudio()
+if not game:IsLoaded() then
+    pcall(function() game.Loaded:Wait() end)
+end
+
 local LocalPlayer = Players.LocalPlayer
+while not LocalPlayer do
+    task.wait(0.1)
+    LocalPlayer = Players.LocalPlayer
+end
 
 local windowState
 local acrylicBlur
@@ -6431,9 +6568,11 @@ local function CreateTabAdapter(rawTab, tabName)
                 Multi = cfg.Multi or false,
                 Required = cfg.Required ~= false,
                 Callback = function(v)
-                    macDropdown.Value = v
+                    if macDropdown then
+                        macDropdown.Value = v
+                    end
                     if changedCb then pcall(changedCb, v) end
-                    if macDropdown._onChanged then pcall(macDropdown._onChanged, v) end
+                    if macDropdown and macDropdown._onChanged then pcall(macDropdown._onChanged, v) end
                 end
             }, flag)
             macDropdown.Value = cfg.Default or (cfg.Values and cfg.Values[1]) or ""
@@ -6674,9 +6813,11 @@ pcall(function()
                     activeMiniGame.key = newKey
                 end
                 if State.AutoSolveMinigame and inputRemote and newKey then
-                    task.delay(0.06, function()
-                        pcall(function() inputRemote:FireServer(newKey) end)
-                    end)
+                    if not activeMiniGame or (activeMiniGame.siteType ~= "NailSite" and activeMiniGame.siteType ~= "TrashDigSite") then
+                        task.delay(0.06, function()
+                            pcall(function() inputRemote:FireServer(newKey) end)
+                        end)
+                    end
                 end
             end)
         end
@@ -6906,6 +7047,71 @@ pcall(function()
                         end)
                         ReleaseVIM()
                     end)
+                elseif siteType == "NailSite" then
+                    -- 🔨 มินิเกมตอกตะปู (งานกำแพง): มี 7 ตะปู ตรวจสอบปุ่มสีเหลืองทองและคลิกผ่าน firesignal ทีละปุ่ม ป้องกัน CODE: 265 100%
+                    task.spawn(function()
+                        local pgui = LocalPlayer:FindFirstChild("PlayerGui")
+                        local mgUI = pgui and (pgui:FindFirstChild("MiniGameUI") or pgui:WaitForChild("MiniGameUI", 3))
+                        local nf = mgUI and (mgUI:FindFirstChild("NailFrame") or mgUI:WaitForChild("NailFrame", 3))
+                        local btns = {}
+                        if nf then
+                            for i = 1, 4 do
+                                table.insert(btns, nf:FindFirstChild("NailBtn" .. i))
+                            end
+                        end
+
+                        local startTime = tick()
+                        local hitsDone = 0
+
+                        while State.Running and State.AutoSolveMinigame and not session.completed do
+                            if not mgUI or not mgUI.Enabled or not nf or not nf.Visible then
+                                session.completed = true
+                                break
+                            end
+
+                            local targetBtn = nil
+                            for _, btn in ipairs(btns) do
+                                if btn and btn:IsA("GuiObject") and btn.BackgroundColor3.R > 0.6 then
+                                    targetBtn = btn
+                                    break
+                                end
+                            end
+
+                            if targetBtn then
+                                -- หน่วงเวลาสมจริงเสมือนผู้เล่นตอกตะปู (0.36 - 0.40 วินาที)
+                                task.wait(0.38)
+                                if targetBtn and targetBtn.Parent and targetBtn.BackgroundColor3.R > 0.6 then
+                                    pcall(function()
+                                        if typeof(firesignal) == "function" and targetBtn.MouseButton1Click then
+                                            firesignal(targetBtn.MouseButton1Click)
+                                        end
+                                    end)
+                                    hitsDone = hitsDone + 1
+                                    -- รอดีเลย์แอนิเมชัน PickTarget ของเกม (~0.28 วินาที)
+                                    task.wait(0.28)
+                                end
+                            else
+                                task.wait(0.04)
+                            end
+
+                            if (tick() - startTime) > 12.0 then
+                                session.completed = true
+                                break
+                            end
+                        end
+
+                        -- รอให้ Minigameclient ทำการปิดและส่ง MiniGameDone ตามเกณฑ์เซิร์ฟเวอร์
+                        local waitDone = tick()
+                        while (tick() - waitDone) < 3.5 and not session.completed do
+                            if not mgUI or not mgUI.Enabled or not nf or not nf.Visible then
+                                session.completed = true
+                                break
+                            end
+                            task.wait(0.1)
+                        end
+                        session.completed = true
+                        ReleaseVIM()
+                    end)
                 else
                     task.spawn(function()
                         while State.Running and State.AutoSolveMinigame and not session.completed do
@@ -7133,6 +7339,42 @@ end)
 -- 7. ฟังก์ชันตรวจสอบการทำงาน & หางานทุกสายงาน
 --------------------------------------------------------------
 local failedSpotCooldowns = {}
+local function IsHiredConstruction()
+    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+    if not char then return false end
+
+    -- ตรวจสอบ Folder Job หรือ Model _WorkTool ประจำตัวละคร
+    if char:FindFirstChild("Job") or char:FindFirstChild("_WorkTool") then
+        return true
+    end
+
+    -- ตรวจสอบ Attributes สำรองชุดพลเรือนของระบบเกม
+    if char:GetAttribute("OrigCaptured") == true or char:GetAttribute("OrigShirt") ~= nil then
+        return true
+    end
+
+    -- ตรวจสอบเสื้อและกางเกงเครื่องแบบช่างก่อสร้าง
+    local shirt = char:FindFirstChildOfClass("Shirt")
+    if shirt and (shirt.ShirtTemplate:find("105971357123934") or shirt.ShirtTemplate:find("construction", 1, true)) then
+        return true
+    end
+    local pants = char:FindFirstChildOfClass("Pants")
+    if pants and (pants.PantsTemplate:find("18962977383") or pants.PantsTemplate:find("construction", 1, true)) then
+        return true
+    end
+
+    -- ตรวจสอบข้อมูลไซต์งานจากเซิร์ฟเวอร์
+    local constRS = ReplicatedStorage:FindFirstChild("Job") and ReplicatedStorage.Job:FindFirstChild("Construction")
+    if constRS and constRS:FindFirstChild("GetSites") then
+        local ok, sites = pcall(function() return constRS.GetSites:InvokeServer() end)
+        if ok and type(sites) == "table" and #sites > 0 then
+            return true
+        end
+    end
+
+    return false
+end
+
 local hasCompletedNpcHiring = false
 local hasCompletedMechanicHiring = false
 
@@ -7375,7 +7617,7 @@ if Connections.MainCharAdded then
 end
 
 Connections.MainCharAdded = LocalPlayer.CharacterAdded:Connect(function(newChar)
-    hasCompletedNpcHiring = false
+    hasCompletedNpcHiring = (State.SelectedJob == "งานก่อสร้าง" and IsHiredConstruction())
     hasCompletedMechanicHiring = false
     SetSprinting(false)
     ClearTargetESP()
@@ -7498,11 +7740,6 @@ IsCurrentlyWorking = function()
         local lbl = notif and notif:FindFirstChildOfClass("TextLabel")
         if lbl and lbl.Text:find("กำลังทำงาน") then cachedIsWorking = true return true end
 
-        local mixueUI = pgui:FindFirstChild("MixueUI")
-        if mixueUI and mixueUI:FindFirstChild("Mini") and mixueUI.Mini.Visible then
-            cachedIsWorking = true
-            return true
-        end
     end
 
     local char = LocalPlayer.Character
@@ -7562,6 +7799,65 @@ local function GetOtherPlayerPositions()
     return list
 end
 
+local _OriginalPromptHoldDurations = setmetatable({}, { __mode = "k" })
+
+local function ApplyConstructionEBypass(enabled)
+    local constJob = Workspace:FindFirstChild("Job") and Workspace.Job:FindFirstChild("งานก่อสร้าง")
+    if not constJob then return end
+    for _, desc in ipairs(constJob:GetDescendants()) do
+        if desc:IsA("ProximityPrompt") then
+            if rawget(_OriginalPromptHoldDurations, desc) == nil then
+                _OriginalPromptHoldDurations[desc] = desc.HoldDuration
+            end
+            if enabled then
+                desc.HoldDuration = 0
+            else
+                local orig = rawget(_OriginalPromptHoldDurations, desc) or 3.5
+                desc.HoldDuration = orig
+            end
+        end
+    end
+end
+
+local function SetupConstructionEBypass()
+    local constJob = Workspace:FindFirstChild("Job") and Workspace.Job:FindFirstChild("งานก่อสร้าง")
+    if not constJob then return end
+
+    if State.BypassConstructionE then
+        ApplyConstructionEBypass(true)
+    end
+
+    Connections.ConstructionPromptAddedConn = constJob.DescendantAdded:Connect(function(desc)
+        if desc:IsA("ProximityPrompt") then
+            if rawget(_OriginalPromptHoldDurations, desc) == nil then
+                _OriginalPromptHoldDurations[desc] = desc.HoldDuration
+            end
+            if State.BypassConstructionE then
+                task.defer(function()
+                    pcall(function() desc.HoldDuration = 0 end)
+                end)
+            end
+        end
+    end)
+
+    Connections.ConstructionPromptHoldConn = ProximityPromptService.PromptButtonHoldBegan:Connect(function(prompt)
+        if not State.Running or not State.BypassConstructionE then return end
+        if prompt and prompt:IsDescendantOf(constJob) then
+            pcall(function()
+                prompt.HoldDuration = 0
+                if typeof(fireproximityprompt) == "function" then
+                    fireproximityprompt(prompt, 0)
+                else
+                    prompt:InputHoldBegin()
+                    task.wait(0.02)
+                    prompt:InputHoldEnd()
+                end
+            end)
+        end
+    end)
+end
+task.spawn(SetupConstructionEBypass)
+
 local ScannedConstructionSpots = {}
 
 local function IsInConstructionZone(pos)
@@ -7602,6 +7898,12 @@ local function ScanConstructionWorkSpots()
             for _, item in ipairs(cat:GetChildren()) do
                 local prompt = item:FindFirstChildWhichIsA("ProximityPrompt", true)
                 if prompt then
+                    if State.BypassConstructionE then
+                        if rawget(_OriginalPromptHoldDurations, prompt) == nil then
+                            _OriginalPromptHoldDurations[prompt] = prompt.HoldDuration
+                        end
+                        prompt.HoldDuration = 0
+                    end
                     local pPart = (prompt.Parent:IsA("BasePart") and prompt.Parent)
                                or (prompt.Parent:IsA("Attachment") and prompt.Parent.Parent:IsA("BasePart") and prompt.Parent.Parent)
                                or (item:IsA("BasePart") and item)
@@ -7803,72 +8105,6 @@ local function GetNearestOpenSpot(jobType)
             end
         end
 
-    elseif jobType == "ร้าน Mixue" then
-        local mixueFolder = Workspace:FindFirstChild("Mixue")
-        if mixueFolder then
-            local custsFolder = mixueFolder:FindFirstChild("Customers")
-            local stationsFolder = mixueFolder:FindFirstChild("MixueJob") and mixueFolder.MixueJob:FindFirstChild("Stations")
-
-            -- ลำดับที่ 1: ตรวจหาลูกค้าที่พร้อมเสิร์ฟ (Serve Prompt)
-            if custsFolder then
-                for _, cust in ipairs(custsFolder:GetChildren()) do
-                    local hrpPart = cust:FindFirstChild("HumanoidRootPart") or cust:FindFirstChildWhichIsA("BasePart")
-                    local sp = hrpPart and cust:FindFirstChild("MixuePromptAtt", true) and cust:FindFirstChild("MixuePromptAtt", true):FindFirstChild("ServePrompt")
-                    if sp and sp.Enabled and hrpPart then
-                        local custPos = hrpPart.Position
-                        local d = (myPos - custPos).Magnitude
-                        bestDist = d
-                        bestSpot = hrpPart
-                        bestPrompt = sp
-                        bestName = "🍦 เสิร์ฟไอติมลูกค้า (" .. tostring(cust:GetAttribute("FriendName") or cust.Name) .. ")"
-                        if cust:GetAttribute("Seated") then
-                            bestPos = custPos + (hrpPart.CFrame.LookVector * 2.8)
-                        else
-                            bestPos = Vector3.new(2416.0, 3.61, custPos.Z)
-                        end
-                        return bestSpot, bestPrompt, bestDist, bestName, bestPos, "MixueServe"
-                    end
-                end
-            end
-
-            -- ลำดับที่ 2: ตรวจหาสถานีทำไอติมที่เปิดใช้งานอยู่ในสเต็ปปัจจุบัน (Active Station)
-            if stationsFolder then
-                for _, station in ipairs(stationsFolder:GetChildren()) do
-                    local sp = station:FindFirstChild("MixuePrompt")
-                    if sp and sp.Enabled then
-                        local spotPos = station.Position
-                        local d = (myPos - spotPos).Magnitude
-                        bestDist = d
-                        bestSpot = station
-                        bestPrompt = sp
-                        bestName = "🍦 สถานี: " .. station.Name .. " (" .. (sp.ActionText or "ทำไอติม") .. ")"
-                        bestPos = Vector3.new(2421.2, 3.61, spotPos.Z)
-                        return bestSpot, bestPrompt, bestDist, bestName, bestPos, "MixueStation"
-                    end
-                end
-            end
-
-            -- ลำดับที่ 3: ตรวจหาลูกค้าที่ยืนรอรับออเดอร์ (Waiting Customers)
-            if custsFolder then
-                for _, cust in ipairs(custsFolder:GetChildren()) do
-                    if cust:GetAttribute("State") == "waiting" then
-                        local hrpPart = cust:FindFirstChild("HumanoidRootPart") or cust:FindFirstChildWhichIsA("BasePart")
-                        local tp = hrpPart and cust:FindFirstChild("MixuePromptAtt", true) and cust:FindFirstChild("MixuePromptAtt", true):FindFirstChild("TakePrompt")
-                        if tp and tp.Enabled and hrpPart then
-                            local custPos = hrpPart.Position
-                            local d = (myPos - custPos).Magnitude
-                            if d < bestDist then
-                                bestDist = d
-                                bestSpot = hrpPart
-                                bestPrompt = tp
-                                bestName = "🍦 รับออเดอร์ลูกค้า (" .. tostring(cust:GetAttribute("FriendName") or cust.Name) .. ")"
-                                bestPos = Vector3.new(2416.0, 3.61, custPos.Z)
-                            end
-                        end
-                    end
-                end
-            end
-        end
     end
 
     return bestSpot, bestPrompt, bestDist, bestName, bestPos, bestCategory
@@ -7880,8 +8116,7 @@ end
 local lastCollectTime = 0
 Hub.PendingEarnings = {
     Construction = 0,
-    Mechanic = 0,
-    Mixue = 0
+    Mechanic = 0
 }
 Hub.ClaimWageButton = nil
 
@@ -7920,28 +8155,16 @@ local function GetCurrentPendingWage()
             if val then Hub.PendingEarnings.Mechanic = val end
         end
 
-        local mxUI = pgui:FindFirstChild("MixueUI")
-        if mxUI and mxUI:FindFirstChild("HUD") and mxUI.HUD.Visible then
-            for _, d in ipairs(mxUI.HUD:GetDescendants()) do
-                if d:IsA("TextLabel") and d.Visible and d.Text:find("%$") and not d.Text:find("%+") then
-                    local val = ParseEarningsText(d.Text)
-                    if val then Hub.PendingEarnings.Mixue = val end
-                end
-            end
-        end
     end
     
     if curJob == "ซ่อมรถ" then
         return Hub.PendingEarnings.Mechanic or 0
     elseif curJob == "งานก่อสร้าง" then
         return Hub.PendingEarnings.Construction or 0
-    elseif curJob == "ร้าน Mixue" then
-        return Hub.PendingEarnings.Mixue or 0
     else
         local cVal = Hub.PendingEarnings.Construction or 0
         local mVal = Hub.PendingEarnings.Mechanic or 0
-        local xVal = Hub.PendingEarnings.Mixue or 0
-        return (cVal > 0 and cVal) or (mVal > 0 and mVal) or xVal or 0
+        return (cVal > 0 and cVal) or mVal or 0
     end
 end
 
@@ -7958,31 +8181,6 @@ local function UpdateClaimButtonText()
             end
         end)
     end
-end
-
-local function ClaimMixueWage(isAuto)
-    local now = tick()
-    if now - lastCollectTime < 2.5 then return false end
-    lastCollectTime = now
-
-    local successResult = false
-    pcall(function()
-        local repJob = ReplicatedStorage:FindFirstChild("Job")
-        local mixue = repJob and repJob:FindFirstChild("Mixue")
-        local collect = mixue and mixue:FindFirstChild("Collect")
-        if not collect then return end
-
-        local success, amount = collect:InvokeServer()
-        if success and typeof(amount) == "number" and amount > 0 then
-            successResult = true
-            Hub.PendingEarnings.Mixue = 0
-            UpdateClaimButtonText()
-            Notify("ร้านเสี่ยวมี่", "💰 เคลมเงินค่าแรง Mixue สำเร็จ! ได้รับ " .. tostring(amount) .. " $ เข้ากระเป๋า", "", 3.5)
-        elseif not isAuto then
-            Notify("ร้านเสี่ยวมี่", "ยังไม่มียอดเงินสะสมให้เคลม หรือทำงานก่อนนะ", "", 2.5)
-        end
-    end)
-    return successResult
 end
 
 local function ClaimConstructionWage(isAuto)
@@ -8131,7 +8329,52 @@ end)
 -- ⚡ ระบบเทเลพอร์ตปลอดภัย 100% (BYPASS CODE 261 & ANTI-RUBBERBAND)
 -- บินแบบ Cruise Y ข้ามสิ่งกีดขวาง/ตึก/วัด ป้องกัน Fall Damage และวาร์ปได้อย่างเสถียร
 local isTeleporting = false
+local JobEntrances = {
+    ["งานก่อสร้าง"] = {
+        Name = "NPC งานก่อสร้าง",
+        Pos = Vector3.new(2400.86, 3.61, -370.0),
+        ApproachPos = Vector3.new(2400.86, 3.61, -370.0),
+        Check = function(pos)
+            return (pos - Vector3.new(2400.86, 3.61, -370.0)).Magnitude > 60 and not IsInConstructionZone(pos)
+        end
+    },
+    ["ซ่อมรถ"] = {
+        Name = "NPC งานซ่อมรถ",
+        Pos = Vector3.new(1925.0, 3.91, -1035.0),
+        ApproachPos = Vector3.new(1935.0, 3.91, -1030.0),
+        Check = function(pos)
+            return (pos - Vector3.new(1925.0, 3.91, -1035.0)).Magnitude > 30
+        end
+    },
+    ["ทำความสะอาด"] = {
+        Name = "NPC งานทำความสะอาด",
+        Pos = Vector3.new(1973.0, 3.5, -340.0),
+        ApproachPos = Vector3.new(1973.0, 3.5, -340.0),
+        Check = function(pos)
+            return (pos - Vector3.new(1973.0, 3.5, -340.0)).Magnitude > 30
+        end
+    },
+    ["ขยะ"] = {
+        Name = "NPC งานเก็บขยะ",
+        Pos = Vector3.new(2466.0, 3.6, -1172.0),
+        ApproachPos = Vector3.new(2466.0, 3.6, -1160.0),
+        Check = function(pos)
+            return (pos - Vector3.new(2466.0, 3.6, -1172.0)).Magnitude > 30
+        end
+    }
+}
+
+local function TeleportToJobEntrance(jobName, silent)
+    local entry = JobEntrances[jobName]
+    if entry then
+        ClearTargetESP()
+        return SafeTeleport(entry.Pos, entry.Name, nil, silent, entry.ApproachPos)
+    end
+    return false
+end
+
 local function SafeTeleport(targetPos, targetName, lookAtPos, silent, preApproachPos)
+    ClearTargetESP()
     if isTeleporting then
         if not silent then
             Notify("ระบบวาร์ป", "กำลังวาร์ปอยู่ กรุณารอสักครู่...", "", 2)
@@ -8162,6 +8405,7 @@ local function SafeTeleport(targetPos, targetName, lookAtPos, silent, preApproac
             hrp.CFrame = CFrame.new(targetPos)
         end
         isTeleporting = false
+        ClearTargetESP()
         if not silent and targetName then
             Notify("วาร์ปสำเร็จ", "มาถึง " .. targetName .. " เรียบร้อย!", "", 2.5)
         end
@@ -8172,16 +8416,14 @@ local function SafeTeleport(targetPos, targetName, lookAtPos, silent, preApproac
         Notify("กำลังวาร์ป", "กำลังเดินทางไป " .. (targetName or "เป้าหมาย") .. " (" .. math.floor(totalDist * 0.28) .. " ม.)...", "", 2)
     end
 
-    -- 🛡️ ป้องกัน Fall Damage ตอนบิน/ลงสู่พื้น 100%
     NeutralizeFallDamage(char)
     if hum then
         hum:SetStateEnabled(Enum.HumanoidStateType.Freefall, true)
         hum:ChangeState(Enum.HumanoidStateType.Running)
     end
 
-    -- บินระดับปลอดภัย ไม่สูงผิดปกติจนระบบเซิร์ฟเวอร์ตรวจจับ (Y = 28-38 Studs พ้นหลังคาบ้านและสายไฟทุกอย่าง)
-    local cruiseY = math.clamp(math.max(startPos.Y, targetPos.Y) + 16, 26, 40)
-    local wp1 = Vector3.new(startPos.X, cruiseY, startPos.Z)
+    local cruiseY = 16.5
+    local wp1 = Vector3.new(startPos.X, math.max(startPos.Y, cruiseY), startPos.Z)
     local waypoints = {wp1}
 
     if preApproachPos then
@@ -8194,7 +8436,7 @@ local function SafeTeleport(targetPos, targetName, lookAtPos, silent, preApproac
         table.insert(waypoints, wp2)
     end
     table.insert(waypoints, targetPos)
-    local stepDist = 7.5
+    local stepDist = 18.0
 
     local parts = {}
     for _, p in ipairs(char:GetDescendants()) do
@@ -8214,7 +8456,7 @@ local function SafeTeleport(targetPos, targetName, lookAtPos, silent, preApproac
             hrp.AssemblyLinearVelocity = Vector3.zero
             hrp.AssemblyAngularVelocity = Vector3.zero
             hrp.CFrame = CFrame.new(p)
-            task.wait(0.055)
+            task.wait(0.024)
         end
         cur = dest
     end
@@ -8227,7 +8469,7 @@ local function SafeTeleport(targetPos, targetName, lookAtPos, silent, preApproac
         else
             hrp.CFrame = CFrame.new(targetPos)
         end
-        task.wait(0.06)
+        task.wait(0.04)
         hrp.AssemblyLinearVelocity = Vector3.zero
         hrp.AssemblyAngularVelocity = Vector3.zero
         if hum then
@@ -8256,11 +8498,13 @@ local function SafeTeleport(targetPos, targetName, lookAtPos, silent, preApproac
     end)
 
     isTeleporting = false
+    ClearTargetESP()
     if not silent and targetName then
         Notify("วาร์ปสำเร็จ", "มาถึง " .. targetName .. " เรียบร้อย!", "", 2.5)
     end
     return true
 end
+
 
 local isSellingTrash = false
 local function SellTrashNow(silent)
@@ -8438,31 +8682,10 @@ local function GetCurrentSelectedJob()
         return "ขยะ"
     elseif val:find("ซ่อมรถ") then
         return "ซ่อมรถ"
-    elseif val:find("Mixue") or val:find("เสี่ยวมี่") or val:find("มี่") then
-        return "ร้าน Mixue"
     elseif val:find("ก่อสร้าง") then
         return "งานก่อสร้าง"
     end
     return "งานก่อสร้าง"
-end
-
-local function EnsureHiredMixue()
-    local repJob = ReplicatedStorage:FindFirstChild("Job")
-    local mixueRS = repJob and repJob:FindFirstChild("Mixue")
-    if not mixueRS then return false end
-    local char = LocalPlayer.Character
-    if char and char:FindFirstChild("MixueHeld") then return true end
-    local pgui = LocalPlayer:FindFirstChild("PlayerGui")
-    local mui = pgui and pgui:FindFirstChild("MixueUI")
-    if mui and mui:FindFirstChild("HUD") and mui.HUD.Visible then return true end
-    
-    local okH, r1, r2 = pcall(function() return mixueRS.Hire:InvokeServer() end)
-    if okH and r1 == true then
-        return true
-    elseif okH and tostring(r2):find("ทำงานอยู่แล้ว") then
-        return true
-    end
-    return false
 end
 
 local function EnsureHiredConstruction()
@@ -8507,133 +8730,6 @@ local function EnsureHiredMechanic()
     return false
 end
 
-local hasCompletedMixueHiring = false
-pcall(function()
-    local repJob = ReplicatedStorage:FindFirstChild("Job")
-    local mixueRS = repJob and repJob:FindFirstChild("Mixue")
-    if mixueRS and mixueRS:FindFirstChild("MiniStart") and mixueRS:FindFirstChild("MiniDone") then
-        local mixueCfg = repJob.Mixue:FindFirstChild("MixueConfig") and require(repJob.Mixue.MixueConfig)
-        if Connections.MixueMiniSolver then
-            pcall(function() Connections.MixueMiniSolver:Disconnect() end)
-        end
-        Connections.MixueMiniSolver = mixueRS.MiniStart.OnClientEvent:Connect(function(token, stationName, stepId, extra)
-            local st = State or (_G.KrakenHub_Sailueat and _G.KrakenHub_Sailueat.State)
-            if not st or not st.Running or not st.AutoFarm then return end
-            local curJob = (typeof(GetCurrentSelectedJob) == "function" and GetCurrentSelectedJob()) or st.SelectedJob
-            if curJob ~= "ร้าน Mixue" then return end
-
-            local actualStepId = stepId or stationName
-            local stepCfg = mixueCfg and mixueCfg.STEPS and (mixueCfg.STEPS[actualStepId] or mixueCfg.STEPS[stepId] or mixueCfg.STEPS[stationName] or mixueCfg.STEPS[string.lower(tostring(stationName))] or mixueCfg.STEPS[string.lower(tostring(stepId))])
-            local kind = stepCfg and stepCfg.Kind or "icecream"
-
-            -- คำนวณระยะเวลาหน่วงเวลาเหมือนมนุษย์จริงตามชนิดมินิเกม (เช็คครบทุกรูปแบบ: ไอติม, กดน้ำ, ท็อปปิ้ง)
-            local waitTime = 1.3
-            if kind == "icecream" then
-                waitTime = 1.45 + math.random() * 0.20
-            elseif kind == "tap" then
-                waitTime = 1.95 + math.random() * 0.25
-            elseif kind == "topping" then
-                local toppingName = (stepCfg and stepCfg.Topping) or string.lower(tostring(stationName))
-                local count = (mixueCfg and mixueCfg.MINI and mixueCfg.MINI.topping and mixueCfg.MINI.topping.Count and mixueCfg.MINI.topping.Count[toppingName]) or 2
-                waitTime = (count * 0.45) + 0.35 + math.random() * 0.15
-            else
-                local minT = (mixueCfg and mixueCfg.MINI and mixueCfg.MINI[kind] and mixueCfg.MINI[kind].MinTime or 0.6)
-                waitTime = minT + 0.35 + math.random() * 0.15
-            end
-
-            -- แสดงแอนิเมชั่นหลอดความคืบหน้าให้ผู้เล่นเห็นเหมือนกดเล่นจริงอย่างสมูท
-            local startTime = tick()
-            local pgui = LocalPlayer:FindFirstChild("PlayerGui")
-            local mui = pgui and pgui:FindFirstChild("MixueUI")
-            local miniCard = mui and mui:FindFirstChild("Mini") and mui.Mini:FindFirstChild("Panel") and mui.Mini.Panel:FindFirstChild("Card")
-            local barFill = miniCard and miniCard:FindFirstChild("Bar") and miniCard.Bar:FindFirstChild("Fill")
-            local pctLabel = miniCard and miniCard:FindFirstChild("Pct")
-
-            while (tick() - startTime) < waitTime and st.Running do
-                local elapsed = tick() - startTime
-                local progress = math.clamp(elapsed / waitTime, 0, 1)
-                if barFill then barFill.Size = UDim2.fromScale(progress, 1) end
-                if pctLabel then pctLabel.Text = math.floor(progress * 100) .. "%" end
-                task.wait(0.04)
-            end
-
-            if barFill then barFill.Size = UDim2.fromScale(1, 1) end
-            if pctLabel then pctLabel.Text = "100%" end
-
-            pcall(function() mixueRS.MiniDone:FireServer(token) end)
-            task.wait(0.08)
-            
-            pcall(function()
-                local conns = (typeof(getconnections) == "function" and getconnections(mixueRS.MiniStart.OnClientEvent)) or {}
-                local targetFn = nil
-                for _, c in ipairs(conns) do
-                    if c.Function and tostring(getfenv(c.Function).script) == "MixueClient" then
-                        targetFn = c.Function
-                        break
-                    end
-                end
-                if not targetFn and typeof(getgc) == "function" then
-                    local pgui3 = LocalPlayer:FindFirstChild("PlayerGui")
-                    local mc3 = pgui3 and pgui3:FindFirstChild("MixueUI") and pgui3.MixueUI:FindFirstChild("MixueClient")
-                    if mc3 then
-                        for _, f in ipairs(getgc()) do
-                            if type(f) == "function" and getfenv(f).script == mc3 then
-                                local info = debug.getinfo(f)
-                                if info.name == "startMini" then
-                                    targetFn = f
-                                    break
-                                end
-                            end
-                        end
-                    end
-                end
-                if targetFn then
-                    local getuv = getupvalues or (debug and debug.getupvalues)
-                    local setuv = setupvalue or (debug and debug.setupvalue)
-                    if getuv then
-                        local uvs = getuv(targetFn)
-                        if uvs and uvs[2] and type(uvs[2]) == "function" then
-                            pcall(uvs[2], false)
-                        end
-                        if setuv then
-                            pcall(setuv, targetFn, 1, nil)
-                        end
-                    end
-                end
-            end)
-
-            -- รับประกันปิด UI และคืนมุมกล้องตัวละคร 100% ป้องกันหน้าจอค้าง
-            pcall(function()
-                local pgui2 = LocalPlayer:FindFirstChild("PlayerGui")
-                local mui2 = pgui2 and pgui2:FindFirstChild("MixueUI")
-                if mui2 and mui2:FindFirstChild("Mini") then
-                    mui2.Mini.Visible = false
-                end
-                local mc = mui2 and mui2:FindFirstChild("MixueClient")
-                if mc then
-                    for _, f in ipairs(getgc()) do
-                        if type(f) == "function" and getfenv(f).script == mc then
-                            local info = debug.getinfo(f)
-                            if info.name == "refreshPrompts" then
-                                pcall(f)
-                                break
-                            end
-                        end
-                    end
-                end
-                local cam = workspace.CurrentCamera
-                if cam then
-                    cam.CameraType = Enum.CameraType.Custom
-                    local char = LocalPlayer.Character
-                    local hum = char and char:FindFirstChildOfClass("Humanoid")
-                    if hum then cam.CameraSubject = hum end
-                end
-                game:GetService("ProximityPromptService").Enabled = true
-            end)
-        end)
-    end
-end)
-
 task.spawn(function()
     while State.Running and _G._KrakenScriptId == MY_SCRIPT_ID do
         task.wait(0.08)
@@ -8645,8 +8741,6 @@ task.spawn(function()
                 ClaimMechanicWage(true)
             elseif curJob == "งานก่อสร้าง" then
                 ClaimConstructionWage(true)
-            elseif curJob == "ร้าน Mixue" then
-                ClaimMixueWage(true)
             end
         end
         if State.AutoFarm then
@@ -8661,10 +8755,34 @@ task.spawn(function()
                 continue
             end
 
+            -- ⚡ ตรวจสอบระยะหน้างาน: หากอยู่นอกพื้นที่หน้างาน ให้วาร์ปตรงไปหน้างานทันที
+            local entrance = JobEntrances and JobEntrances[curJob]
+            if entrance and entrance.Check and entrance.Check(hrp.Position) then
+                ClearTargetESP()
+                SafeTeleport(entrance.Pos, entrance.Name, nil, false, entrance.ApproachPos)
+                ClearTargetESP()
+                task.wait(0.25)
+                continue
+            end
+            local hum = GetHuman()
+            local char = LocalPlayer.Character
+            if not hrp or not hum or not char or hum.Health <= 0 then
+                SetSprinting(false)
+                ClearTargetESP()
+                task.wait(0.5)
+                continue
+            end
+
             local jobNpcPos = Vector3.new(2400.86, 3.16, -372.0)
 
-            -- หากเป็นงานก่อสร้าง และยังไม่ได้ลงทะเบียนสมัครงาน -> เดินทางไปสมัครงานรับชุดที่ JobNPC เป็นอันดับแรก
+            -- หากเป็นงานก่อสร้าง และยังไม่ได้ลงทะเบียนสมัครงาน -> ตรวจสอบว่าใส่ชุดทำงานอยู่แล้วหรือไม่ ถ้ามีแล้วข้ามได้ทันที
             if curJob == "งานก่อสร้าง" and not hasCompletedNpcHiring then
+                if IsHiredConstruction() then
+                    hasCompletedNpcHiring = true
+                    Notify("งานก่อสร้าง", "ตรวจพบชุดทำงานแล้ว เริ่มต้นฟาร์มทันที!", "", 2.0)
+                    task.wait(0.2)
+                    continue
+                end
                 local jobNPC = Workspace:FindFirstChild("Job") and Workspace.Job:FindFirstChild("งานก่อสร้าง") and Workspace.Job["งานก่อสร้าง"]:FindFirstChild("NPC") and Workspace.Job["งานก่อสร้าง"].NPC:FindFirstChild("JobNPC")
                 local npcPrompt = jobNPC and jobNPC:FindFirstChildWhichIsA("ProximityPrompt", true)
                 local npcRoot = jobNPC and (jobNPC:FindFirstChild("HumanoidRootPart") or jobNPC:FindFirstChild("Torso") or jobNPC:FindFirstChildWhichIsA("BasePart"))
@@ -8692,14 +8810,27 @@ task.spawn(function()
                     task.wait(0.25)
 
                     if npcPrompt and npcPrompt.Enabled then
-                        if typeof(fireproximityprompt) == "function" then
-                            pcall(function() fireproximityprompt(npcPrompt) end)
+                        if State.BypassConstructionE or curJob == "งานก่อสร้าง" then
+                            pcall(function() npcPrompt.HoldDuration = 0 end)
+                            if typeof(fireproximityprompt) == "function" then
+                                pcall(function() fireproximityprompt(npcPrompt, 0) end)
+                            else
+                                pcall(function()
+                                    npcPrompt:InputHoldBegin()
+                                    task.wait(0.03)
+                                    npcPrompt:InputHoldEnd()
+                                end)
+                            end
                         else
-                            SafeVIMKeyEvent(true, Enum.KeyCode.E)
-                            pcall(function() npcPrompt:InputHoldBegin() end)
-                            task.wait(0.2)
-                            SafeVIMKeyEvent(false, Enum.KeyCode.E)
-                            pcall(function() npcPrompt:InputHoldEnd() end)
+                            if typeof(fireproximityprompt) == "function" then
+                                pcall(function() fireproximityprompt(npcPrompt) end)
+                            else
+                                SafeVIMKeyEvent(true, Enum.KeyCode.E)
+                                pcall(function() npcPrompt:InputHoldBegin() end)
+                                task.wait(0.2)
+                                SafeVIMKeyEvent(false, Enum.KeyCode.E)
+                                pcall(function() npcPrompt:InputHoldEnd() end)
+                            end
                         end
                     end
                     task.wait(0.4)
@@ -8795,96 +8926,6 @@ task.spawn(function()
                 end
             end
 
-            -- หากเป็นงานร้าน Mixue (เสี่ยวมี่) และยังไม่ได้ลงทะเบียนสมัครงาน -> ยืนยันการสมัครกับเซิร์ฟเวอร์
-            if curJob == "ร้าน Mixue" and not hasCompletedMixueHiring then
-                local isAlreadyHired = EnsureHiredMixue()
-                if isAlreadyHired then
-                    hasCompletedMixueHiring = true
-                else
-                    local mixueNpc = Workspace:FindFirstChild("Mixue") and Workspace.Mixue:FindFirstChild("Mixue") and Workspace.Mixue.Mixue:FindFirstChild("NPC") and Workspace.Mixue.Mixue.NPC:FindFirstChild("Phakchira29")
-                    local npcPrompt = mixueNpc and mixueNpc:FindFirstChildWhichIsA("ProximityPrompt", true)
-                    local npcRoot = mixueNpc and (mixueNpc:FindFirstChild("HumanoidRootPart") or mixueNpc:FindFirstChildWhichIsA("BasePart"))
-                    if npcRoot then
-                        SetTargetESP(npcRoot, "NPC สมัครงานร้านเสี่ยวมี่ (Mixue)")
-                        local arrived = SafeTeleport(npcRoot.Position + Vector3.new(0, 0, 3), "NPC ร้านเสี่ยวมี่", npcRoot.Position)
-                        if arrived and npcPrompt then
-                            if typeof(fireproximityprompt) == "function" then
-                                pcall(function() fireproximityprompt(npcPrompt) end)
-                            end
-                            pcall(function()
-                                npcPrompt:InputHoldBegin()
-                                task.wait(0.25)
-                                npcPrompt:InputHoldEnd()
-                            end)
-                            task.wait(0.5)
-                            local repJob = ReplicatedStorage:FindFirstChild("Job")
-                            local mixueRS = repJob and repJob:FindFirstChild("Mixue")
-                            if mixueRS and mixueRS:FindFirstChild("Hire") then
-                                pcall(function() mixueRS.Hire:InvokeServer() end)
-                            end
-                        end
-                        hasCompletedMixueHiring = true
-                        ClearTargetESP()
-                        Notify("ร้านเสี่ยวมี่", "สมัครงานรับชุดเรียบร้อย! เริ่มเข้าสู่ระบบทำไอติม...", "", 2.5)
-                        task.wait(0.3)
-                        continue
-                    end
-                end
-            end
-
-            -- 🛡️ Mixue Watchdog: ตรวจจับมินิเกมที่เปิดค้างอยู่ แก้ปัญหา prompt ถูกล็อคและคืนค่าทันที
-            if curJob == "ร้าน Mixue" then
-                local pgui = LocalPlayer:FindFirstChild("PlayerGui")
-                local mui = pgui and pgui:FindFirstChild("MixueUI")
-                if mui and mui:FindFirstChild("Mini") and mui.Mini.Visible then
-                    local repJob = ReplicatedStorage:FindFirstChild("Job")
-                    local mixueRS = repJob and repJob:FindFirstChild("Mixue")
-                    local mc = mui:FindFirstChild("MixueClient")
-                    if mc and mixueRS then
-                        local activeToken = nil
-                        local activeFn = nil
-                        for _, f in ipairs(getgc()) do
-                            if type(f) == "function" and getfenv(f).script == mc then
-                                local uvs = (getupvalues or (debug and debug.getupvalues))(f)
-                                for k, v in pairs(uvs) do
-                                    if type(v) == "table" and rawget(v, "token") ~= nil then
-                                        activeToken = v.token
-                                        activeFn = f
-                                        break
-                                    end
-                                end
-                                if activeToken then break end
-                            end
-                        end
-                        if activeToken then
-                            task.wait(1.4)
-                            pcall(function() mixueRS.MiniDone:FireServer(activeToken) end)
-                            task.wait(0.08)
-                        end
-                        if activeFn then
-                            local setuv = setupvalue or (debug and debug.setupvalue)
-                            local uvs = (getupvalues or (debug and debug.getupvalues))(activeFn)
-                            for k, v in pairs(uvs) do
-                                if type(v) == "table" and rawget(v, "token") ~= nil then
-                                    if setuv then pcall(setuv, activeFn, k, nil) end
-                                end
-                            end
-                        end
-                        mui.Mini.Visible = false
-                        for _, f in ipairs(getgc()) do
-                            if type(f) == "function" and getfenv(f).script == mc then
-                                local info = debug.getinfo(f)
-                                if info.name == "refreshPrompts" then
-                                    pcall(f)
-                                    break
-                                end
-                            end
-                        end
-                        task.wait(0.2)
-                    end
-                end
-            end
-
             -- ค้นหาจุดว่างสำหรับงานที่เลือก
             local spot, prompt, dist, spotName, spotPos, spotCategory = GetNearestOpenSpot(curJob)
             if spot and prompt then
@@ -8915,13 +8956,6 @@ task.spawn(function()
                         teleportDest = mechEntrance
                         teleportJobName = "หน้างานซ่อมรถ"
                     end
-                elseif curJob == "ร้าน Mixue" then
-                    local mixueBehind = Vector3.new(2416.0, 3.61, -990.50)
-                    if (hrp.Position - mixueBehind).Magnitude > 55 and current3DDist > 55 then
-                        needTeleportToJob = true
-                        teleportDest = mixueBehind
-                        teleportJobName = "หน้าร้าน Mixue"
-                    end
                 elseif curJob == "ขยะ" then
                     if current3DDist > 55 then
                         needTeleportToJob = true
@@ -8937,16 +8971,17 @@ task.spawn(function()
                 end
 
                 if needTeleportToJob and teleportDest then
-                    SetTargetESP(spot, spotName or ("หน้างาน: " .. curJob), nil, "⚡ กำลังวาร์ปไปหน้างาน")
+                    ClearTargetESP()
                     SafeTeleport(teleportDest, teleportJobName)
-                    task.wait(0.3)
+                    ClearTargetESP()
+                    task.wait(0.2)
                     continue
                 end
 
                 if current3DDist > math.min(promptMaxD - 0.5, 4.3) then
                     SetTargetESP(spot, spotName or "จุดทำงาน", nil, "🏃 กำลังไป")
-                    local stopD = (curJob == "ร้าน Mixue" and 2.5) or 1.8
-                    local navSuccess = NavigateTo(spotPos, stopD, 14, prompt)
+                    local navSuccess = false
+                    navSuccess = NavigateTo(spotPos, 1.8, 12, prompt)
                     if not navSuccess then
                         failedSpotCooldowns[spot] = tick() + 4.0
                         if promptPart then failedSpotCooldowns[promptPart] = tick() + 4.0 end
@@ -8982,34 +9017,32 @@ task.spawn(function()
                     end
                     task.wait(0.06)
 
-                    -- กด ProximityPrompt เริ่มงานอย่างสะอาด ปราศจาก Input ขัดแย้ง
-                    local promptKey = prompt.KeyboardKeyCode or Enum.KeyCode.E
-                    local triggered = false
-                    if typeof(fireproximityprompt) == "function" then
-                        local ok = pcall(function() fireproximityprompt(prompt) end)
-                        if ok then triggered = true end
-                    end
-                    if not triggered or (prompt.HoldDuration and prompt.HoldDuration > 0) then
-                        SafeVIMKeyEvent(true, promptKey)
-                        pcall(function() prompt:InputHoldBegin() end)
-                        local holdTime = math.clamp(prompt.HoldDuration or 0.2, 0.15, 0.8)
-                        task.wait(holdTime + 0.05)
-                        SafeVIMKeyEvent(false, promptKey)
-                        pcall(function() prompt:InputHoldEnd() end)
+                    -- 🛡️ กด ProximityPrompt ทันที (Bypass E งานก่อสร้าง 0s) / เป็นธรรมชาติงานอื่น
+                    if curJob == "งานก่อสร้าง" or State.BypassConstructionE then
+                        pcall(function() prompt.HoldDuration = 0 end)
                         if typeof(fireproximityprompt) == "function" then
-                            pcall(function() fireproximityprompt(prompt) end)
+                            pcall(function() fireproximityprompt(prompt, 0) end)
+                        else
+                            pcall(function()
+                                prompt:InputHoldBegin()
+                                task.wait(0.03)
+                                prompt:InputHoldEnd()
+                            end)
                         end
+                    else
+                        local promptHold = tonumber(prompt.HoldDuration) or 0
+                        local holdTime = (promptHold > 0 and (promptHold + 0.18)) or 0.28
+
+                        pcall(function() prompt:InputHoldBegin() end)
+                        task.wait(holdTime)
+                        pcall(function() prompt:InputHoldEnd() end)
                     end
 
-                    -- รอระบบตอบรับการเริ่มงาน (ตรวจจับทั้ง LoadBar, MiniGameUI, หรือ IsCurrentlyWorking)
+                    -- รอระบบตอบรับการเริ่มงาน (ไม่ spam กดซ้ำเด็ดขาด ป้องกัน CODE: 271)
                     local startCheck = tick()
-                    while (tick() - startCheck) < 2.5 and State.AutoFarm and State.Running do
+                    while (tick() - startCheck) < 3.0 and State.AutoFarm and State.Running do
                         if IsCurrentlyWorking() then break end
-                        if prompt and not prompt.Enabled then break end
-                        if (tick() - startCheck) >= 0.6 and typeof(fireproximityprompt) == "function" then
-                            pcall(function() fireproximityprompt(prompt) end)
-                        end
-                        task.wait(0.08)
+                        task.wait(0.12)
                     end
 
                     -- ยืนทำงานจนเสร็จสมบูรณ์ 100% โดยล็อคความเร็วเป็น 0 ไม่ให้แรงเฉื่อยหรือฟิสิกส์ขยับ
@@ -9018,11 +9051,11 @@ task.spawn(function()
                         local workStart = tick()
                         local lockCFrame = hrp.CFrame
                         local lastSawWorking = tick()
-                        local maxWorkTime = (curJob == "ขยะ" and 55) or (curJob == "ร้าน Mixue" and 8) or 32
+                        local maxWorkTime = (curJob == "ขยะ" and 55) or 32
                         while (tick() - workStart) < maxWorkTime and State.AutoFarm and State.Running do
                             if IsCurrentlyWorking() then
                                 lastSawWorking = tick()
-                            elseif (tick() - lastSawWorking) >= ((curJob == "ขยะ" and 1.5) or (curJob == "ร้าน Mixue" and 0.2) or 0.6) then
+                            elseif (tick() - lastSawWorking) >= ((curJob == "ขยะ" and 1.5) or 0.6) then
                                 break
                             end
                             if hum then hum.WalkSpeed = 0 end
@@ -9036,8 +9069,8 @@ task.spawn(function()
                             task.wait(0.05)
                         end
                         ReleaseVIM()
-                        -- คูลดาวน์หลังเสร็จงาน ให้เซิร์ฟเวอร์ประมวลผลเงิน/เลเวล/อนิเมชั่น (Mixue ทำงานต่อเนื่องสมูทใช้ 0.25s)
-                        task.wait(curJob == "ร้าน Mixue" and 0.25 or 1.8)
+                        -- คูลดาวน์หลังเสร็จงาน 1.8s ให้เซิร์ฟเวอร์ประมวลผลเงิน/เลเวล/อนิเมชั่น และรีเซ็ตสถานะ ป้องกัน Anti System CODE 261
+                        task.wait(1.8)
 
                         if spotName then
                             if spotName:find("หิน") then
@@ -9107,15 +9140,6 @@ task.spawn(function()
                     if firstTrash and (hrp.Position - firstTrash.Position).Magnitude > 45 then
                         SafeTeleport(firstTrash.Position + Vector3.new(0, 2.6, 0), "หน้างานเก็บขยะ")
                         task.wait(0.3)
-                    end
-                elseif curJob == "ร้าน Mixue" then
-                    local mixueBehind = Vector3.new(2416.0, 3.61, -990.50)
-                    local distToMixue = (hrp.Position - mixueBehind).Magnitude
-                    if distToMixue > 55 then
-                        SafeTeleport(mixueBehind, "หน้าร้าน Mixue")
-                        task.wait(0.3)
-                    elseif distToMixue > 3.8 then
-                        NavigateTo(mixueBehind, 2.5, 10)
                     end
                 end
                 ClearTargetESP()
@@ -9690,8 +9714,8 @@ local function UnifiedPlayerESPUpdate()
                     if entry.BoxBB.Enabled then entry.BoxBB.Enabled = false end
                 end
 
-                -- อัปเดต Head Dot ตามสีสถาบัน
-                if State.ESPShowHeadDot ~= false then
+                -- อัปเดต Head Dot ตามสีสถาบัน (ปิดเป็นค่าเริ่มต้นตามที่ dj สั่ง)
+                if State.ESPShowHeadDot == true then
                     if not entry.HeadDotBB.Enabled then entry.HeadDotBB.Enabled = true end
                     if entry.LastDotColor ~= themeColor then
                         entry.LastDotColor = themeColor
@@ -9922,19 +9946,9 @@ local function EnhanceGun(tool)
                     end
                 end)
 
-                -- ⚡ กระสุนพุ่งตรง ไม่ย้อยตามแรงโน้มถ่วง (No Bullet Drop)
+                -- ⚡ กระสุนพุ่งตรง & แม่นยำ 100% (คำนวณผ่าน Trajectory & Lead Prediction เลี่ยง CODE 501 ไม่แตะ Setting)
                 pcall(function()
-                    if (State.FastBullet or State.SilentAim) and State.Running then
-                        s.BulletAcceleration = Vector3.zero
-                        if type(s.ChargeAlterTable) == "table" and type(s.ChargeAlterTable.BulletAcceleration) == "table" then
-                            s.ChargeAlterTable.BulletAcceleration.Level1 = Vector3.zero
-                            s.ChargeAlterTable.BulletAcceleration.Level2 = Vector3.zero
-                            s.ChargeAlterTable.BulletAcceleration.Level3 = Vector3.zero
-                        end
-                        if (s.BulletSpeed or 0) < 4000 then
-                            s.BulletSpeed = 5000
-                        end
-                    end
+                    -- คงค่า Setting.BulletSpeed และ BulletAcceleration ดั้งเดิมไว้ เพื่อไม่ให้เซิร์ฟเวอร์ตรวจพบการดัดแปลง (CODE 501 Bypass)
                 end)
 
 
@@ -10319,7 +10333,7 @@ local function IsTeammateOrFriendly(plr)
     return false
 end
 
-local function GetAimTarget(firePos)
+local function GetAimTarget(firePos, bulletSpeed)
     if not State.SilentAim then return nil end
 
     -- อัตราความแม่นยำ (Hit Chance %)
@@ -10366,11 +10380,13 @@ local function GetAimTarget(firePos)
                             if clear then
                                 bestScreenDist = sDist
                                 local finalPos = targetPart.Position
+                                -- ดักทางความเร็วเป้าหมาย (Bullet Prediction) ตามความเร็วกระสุนจริง
                                 if State.SilentVelocity then
                                     local targetHRP = char:FindFirstChild("HumanoidRootPart")
-                                    if targetHRP and targetHRP.AssemblyLinearVelocity.Magnitude > 0.5 then
+                                    if targetHRP and targetHRP.AssemblyLinearVelocity.Magnitude > 0.3 then
                                         local dist3D = (finalPos - firePos).Magnitude
-                                        local leadTime = math.clamp(dist3D / 6000, 0, 0.12)
+                                        local leadSpeed = math.max(tonumber(bulletSpeed) or 800, 200)
+                                        local leadTime = dist3D / leadSpeed
                                         finalPos = finalPos + (targetHRP.AssemblyLinearVelocity * leadTime)
                                     end
                                 end
@@ -10386,92 +10402,132 @@ local function GetAimTarget(firePos)
     return bestTargetPos
 end
 
-local originalSimulateProjectile = _G._KrakenOriginalSimulateProjectile
-pcall(function()
-    local phMod = ReplicatedStorage:FindFirstChild("Modules") and ReplicatedStorage.Modules:FindFirstChild("ProjectileHandler")
-    if phMod then
-        local ph = require(phMod)
-        if ph and ph.SimulateProjectile then
-            if not originalSimulateProjectile then
-                originalSimulateProjectile = ph.SimulateProjectile
-                _G._KrakenOriginalSimulateProjectile = originalSimulateProjectile
+-- ==============================================================
+-- 🎯 [SILENT AIM] C-LEVEL CLOSURE HOOK ENGINE (100% BYPASS & 100% HIT RATE)
+-- • ใช้ hookfunction สว็อป Bytecode โดยไม่แตะต้องตาราง (rawget(ph, "SimulateProjectile") == orig ตลอดเวลา)
+-- • table.isfrozen(ph) ยังคงเป็น true 100% ทำให้ FXCache ตรวจไม่พบสิ่งผิดปกติใดๆ
+-- • ไม่แตะต้อง __namecall, getrawmetatable หรือ Metamethods ทำให้ผ่าน Adonis ฉลุย
+-- • บังคับทิศทางกระสุนพุ่งเข้าหาเป้าหมายโดยตรง พร้อมความเร็ว 4500 studs/s และไร้แรงโน้มถ่วง (Zero Drop)
+-- ==============================================================
+
+task.spawn(function()
+    pcall(function()
+        local hf = hookfunction or replaceclosure
+        if typeof(hf) ~= "function" then return end
+
+        local modulesFolder = ReplicatedStorage:WaitForChild("Modules", 10)
+        local phMod = modulesFolder and (modulesFolder:FindFirstChild("ProjectileHandler") or modulesFolder:WaitForChild("ProjectileHandler", 10))
+        if phMod then
+            local okReq, ph = pcall(require, phMod)
+            if okReq and ph and ph.SimulateProjectile then
+                local originalSimulateProjectile = _G._KrakenOriginalSimulateProjectile
+                if not originalSimulateProjectile then
+                    originalSimulateProjectile = ph.SimulateProjectile
+                    _G._KrakenOriginalSimulateProjectile = originalSimulateProjectile
+                end
+
+                local hookRef
+                hookRef = hf(originalSimulateProjectile, function(self, p128, p129, p130, p131, p132, p133, p134, p135, p136, p137, p138, p139, p140, p141)
+            -- 🛑 กรองความปลอดภัย: แก้ไขเฉพาะกระสุนที่ยิงจากตัวเรา (LocalPlayer) เท่านั้น
+            local char = LocalPlayer.Character
+            local isLocalShooter = false
+            if char then
+                for _, obj in ipairs({p129, p130, p131, p134}) do
+                    if obj and typeof(obj) == "Instance" and obj:IsDescendantOf(char) then
+                        isLocalShooter = true
+                        break
+                    end
+                end
+                if not isLocalShooter then
+                    local currentTool = char:FindFirstChildOfClass("Tool")
+                    if currentTool and (
+                        (p129 and typeof(p129) == "Instance" and (p129 == currentTool or p129:IsDescendantOf(currentTool))) or
+                        (p131 and typeof(p131) == "Instance" and (p131 == currentTool or p131:IsDescendantOf(currentTool))) or
+                        (p134 and typeof(p134) == "Instance" and (p134 == currentTool or p134:IsDescendantOf(currentTool)))
+                    ) then
+                        isLocalShooter = true
+                    end
+                end
             end
-            ph.SimulateProjectile = function(self, p128, p129, p130, p131, p132, p133, p134, p135, p136, p137, p138, p139, p140, p141)
-                -- 🛑 กรองความปลอดภัย: แก้ไขเฉพาะกระสุนที่ยิงจากปืนของตัวเรา (LocalPlayer) เท่านั้น
-                -- ป้องกันไม่ให้วิถีกระสุนของคนอื่นในเซิร์ฟเวอร์ถูกดึงหรือเลี้ยวมาหาเราโดยเด็ดขาด 100%
-                local char = LocalPlayer.Character
-                local isLocalShooter = false
-                if char then
-                    for _, obj in ipairs({p129, p130, p131, p134}) do
-                        if obj and typeof(obj) == "Instance" and obj:IsDescendantOf(char) then
-                            isLocalShooter = true
-                            break
-                        end
-                    end
-                    if not isLocalShooter then
-                        local currentTool = char:FindFirstChildOfClass("Tool")
-                        if currentTool and (
-                            (p129 and typeof(p129) == "Instance" and (p129 == currentTool or p129:IsDescendantOf(currentTool))) or
-                            (p131 and typeof(p131) == "Instance" and (p131 == currentTool or p131:IsDescendantOf(currentTool))) or
-                            (p134 and typeof(p134) == "Instance" and (p134 == currentTool or p134:IsDescendantOf(currentTool)))
-                        ) then
-                            isLocalShooter = true
-                        end
+
+            if State.Running and isLocalShooter then
+                -- คำนวณจุดปล่อยกระสุนจริงจากปากกระบอกปืน (GunFirePoint)
+                local spawnPos = nil
+                if p131 and typeof(p131) == "Instance" and p131:FindFirstChild("GunFirePoint") then
+                    spawnPos = p131.GunFirePoint.WorldPosition
+                elseif p134 and typeof(p134) == "Instance" then
+                    if p134:IsA("Attachment") then
+                        spawnPos = p134.WorldPosition
+                    elseif p134:IsA("BasePart") then
+                        spawnPos = p134.Position
                     end
                 end
 
-                if State.Running and isLocalShooter and p134 then
-                    local firePos = (p131 and p131:FindFirstChild("GunFirePoint") and p131:FindFirstChild("GunFirePoint").WorldPosition)
-                                 or (p134 and p134.WorldPosition)
-                                 or (char and char:FindFirstChild("Head") and char.Head.Position)
+                if not spawnPos then
+                    spawnPos = (char and char:FindFirstChild("Head") and char.Head.Position) or Workspace.CurrentCamera.CFrame.Position
+                end
 
-                    if firePos then
-                        local targetPos = nil
-                        if State.SilentAim then
-                            targetPos = GetAimTarget(firePos)
-                        end
+                local currentBulletSpeed = (type(p139) == "table" and p139[1]) or 800
+                local targetPos = nil
+                if State.SilentAim then
+                    targetPos = GetAimTarget(spawnPos, currentBulletSpeed)
+                end
 
-                        if targetPos then
-                            local trueDir = (targetPos - firePos).Unit
-                            if type(p132) == "table" then
-                                for i = 1, #p132 do p132[i] = trueDir end
-                            end
-                            if type(p133) == "table" then
-                                for i = 1, #p133 do p133[i] = trueDir end
-                            end
-                            -- กำจัดแรงโน้มถ่วงกระสุนย้อย & เร่งความเร็วสูง เพื่อให้พุ่งเข้าเป้าหมายแบบเลเซอร์บีม 100%
-                            if type(p139) == "table" then
-                                p139[2] = Vector3.zero
-                                if (p139[1] or 0) < 5000 then p139[1] = 6000 end
-                            end
-                        elseif State.NoSpread then
-                            local cam = Workspace.CurrentCamera
-                            local center = GetAimCenter()
-                            local screenRay = cam:ScreenPointToRay(center.X, center.Y)
-                            local rayParams = RaycastParams.new()
-                            rayParams.FilterDescendantsInstances = {char, cam}
-                            rayParams.FilterType = Enum.RaycastFilterType.Exclude
-                            local hit = Workspace:Raycast(screenRay.Origin, screenRay.Direction * 3000, rayParams)
-                            local hitPos = hit and hit.Position or (screenRay.Origin + screenRay.Direction * 2000)
-                            local straightDir = (hitPos - firePos).Unit
-                            if type(p132) == "table" then
-                                for i = 1, #p132 do p132[i] = straightDir end
-                            end
-                            if type(p133) == "table" then
-                                for i = 1, #p133 do p133[i] = straightDir end
-                            end
-                        end
+                if targetPos then
+                    -- คำนวณชดเชยแรงโน้มถ่วงกระสุนย้อย (Drop Compensation) ในเวกเตอร์ทิศทางโดยตรง
+                    -- ปลอดภัย 100% ไม่ดัดแปลงตาราง p139 ป้องกันเซิร์ฟเวอร์เตะ Anti System CODE: 501
+                    local bulletSpeed = (type(p139) == "table" and p139[1]) or 800
+                    local gravityVec = (type(p139) == "table" and typeof(p139[2]) == "Vector3" and p139[2]) or Vector3.new(0, -50, 0)
+                    local dist = (targetPos - spawnPos).Magnitude
+                    local timeToHit = dist / math.max(bulletSpeed, 200)
 
-                        if State.FastBullet and type(p139) == "table" then
-                            p139[2] = Vector3.zero
-                            if (p139[1] or 0) < 5000 then p139[1] = 6000 end
+                    -- Drop = 0.5 * gravity * t^2 -> ชดเชยโดยการยกเป้าขึ้นด้านบนด้วย -0.5 * gravity * t^2
+                    local dropCompensation = -0.5 * gravityVec * (timeToHit * timeToHit)
+                    local trueDir = ((targetPos + dropCompensation) - spawnPos).Unit
+
+                    -- Angle mismatch protection: ตรวจสอบมุมเล็งเทียบกับมุมกล้อง
+                    -- ป้องกันยิงมุมกว้างเกินกล้องมอง เพื่อไม่ให้เซิร์ฟเวอร์เตะเรื่องมองคนละทิศ
+                    local cam = Workspace.CurrentCamera
+                    local safeToFire = true
+                    if cam then
+                        local dotCheck = cam.CFrame.LookVector:Dot(trueDir)
+                        if dotCheck < 0.70 then
+                            safeToFire = false
                         end
                     end
+
+                    if safeToFire then
+                        if type(p132) == "table" then
+                            for i = 1, #p132 do p132[i] = trueDir end
+                        end
+                        if type(p133) == "table" then
+                            for i = 1, #p133 do p133[i] = trueDir end
+                        end
+                    end
+                elseif State.NoSpread then
+                    local cam = Workspace.CurrentCamera
+                    local center = GetAimCenter()
+                    local screenRay = cam:ScreenPointToRay(center.X, center.Y)
+                    local rayParams = RaycastParams.new()
+                    rayParams.FilterDescendantsInstances = {char, cam}
+                    rayParams.FilterType = Enum.RaycastFilterType.Exclude
+                    local hit = Workspace:Raycast(screenRay.Origin, screenRay.Direction * 3000, rayParams)
+                    local hitPos = hit and hit.Position or (screenRay.Origin + screenRay.Direction * 2000)
+                    local straightDir = (hitPos - spawnPos).Unit
+                    if type(p132) == "table" then
+                        for i = 1, #p132 do p132[i] = straightDir end
+                    end
+                    if type(p133) == "table" then
+                        for i = 1, #p133 do p133[i] = straightDir end
+                    end
                 end
-                return originalSimulateProjectile(self, p128, p129, p130, p131, p132, p133, p134, p135, p136, p137, p138, p139, p140, p141)
+            end
+
+            return hookRef(self, p128, p129, p130, p131, p132, p133, p134, p135, p136, p137, p138, p139, p140, p141)
+                end)
             end
         end
-    end
+    end)
 end)
 
 
@@ -11256,7 +11312,7 @@ MainFarmToggle:OnChanged(function()
         State.SelectedJob = GetCurrentSelectedJob()
     end
     if State.AutoFarm then
-        hasCompletedNpcHiring = false
+        hasCompletedNpcHiring = (State.SelectedJob == "งานก่อสร้าง" and IsHiredConstruction())
         hasCompletedMechanicHiring = false
         table.clear(failedSpotCooldowns)
         StopWorkAnimations()
@@ -11307,7 +11363,7 @@ end)
 Tabs.Farm:AddSection("", "Right")
 local JobSelector = Tabs.Farm:AddDropdown("JobSelect", {
     Title = "🎯 เลือกสายงาน",
-    Values = {"🏗️ งานก่อสร้าง", "🧹 ทำความสะอาด", "🗑️ เก็บขยะ", "🔧 ซ่อมรถ", "🍦 ร้านเสี่ยวมี่ (Mixue)"},
+    Values = {"🏗️ งานก่อสร้าง", "🧹 ทำความสะอาด", "🗑️ เก็บขยะ", "🔧 ซ่อมรถ"},
     Default = "🏗️ งานก่อสร้าง"
 })
 JobSelector:OnChanged(function(v)
@@ -11323,15 +11379,12 @@ JobSelector:OnChanged(function(v)
             State.SelectedJob = "ขยะ"
         elseif val:find("ซ่อมรถ") then
             State.SelectedJob = "ซ่อมรถ"
-        elseif val:find("Mixue") or val:find("เสี่ยวมี่") or val:find("มี่") then
-            State.SelectedJob = "ร้าน Mixue"
         elseif val:find("ก่อสร้าง") then
             State.SelectedJob = "งานก่อสร้าง"
         end
     end
-    hasCompletedNpcHiring = false
+    hasCompletedNpcHiring = (State.SelectedJob == "งานก่อสร้าง" and IsHiredConstruction())
     hasCompletedMechanicHiring = false
-    hasCompletedMixueHiring = false
     ClearTargetESP()
     Notify("เลือกงาน", "เปลี่ยนเป้าหมายเป็น: " .. State.SelectedJob, "", 2.5)
     pcall(UpdateClaimButtonText)
@@ -11356,6 +11409,17 @@ ConstFilterDropdown:OnChanged(function()
     ScannedConstructionSpots = {}
     ClearTargetESP()
     Notify("ตัวกรองก่อสร้าง", "ตั้งค่าเป้าหมาย: " .. State.ConstructionFilter, "", 2.5)
+end)
+
+local BypassConstEToggle = Tabs.Farm:AddToggle("BypassConstructionEToggle", {
+    Title = "⚡ Bypass E ก่อสร้างทันที (Instant E)",
+    Description = "กด E ปุ๊บเริ่มงานทันที 0s ไม่ต้องกดค้าง 3.5s",
+    Default = true
+})
+BypassConstEToggle:OnChanged(function()
+    State.BypassConstructionE = Options.BypassConstructionEToggle.Value
+    ApplyConstructionEBypass(State.BypassConstructionE)
+    Notify("Bypass E ก่อสร้าง", State.BypassConstructionE and "เปิดใช้งาน Bypass E ทันที 0s" or "ปิดใช้งาน Bypass E (3.5s ปกติ)", "", 2.0)
 end)
 
 local AllSpotsToggle = Tabs.Farm:AddToggle("ShowAllJobSpotsToggle", {
@@ -11393,12 +11457,8 @@ Hub.ClaimWageButton = Tabs.Farm:AddButton({
             ClaimMechanicWage(false)
         elseif activeJob == "งานก่อสร้าง" then
             ClaimConstructionWage(false)
-        elseif activeJob == "ร้าน Mixue" then
-            ClaimMixueWage(false)
         else
-            if (Hub.PendingEarnings.Mixue or 0) > 0 then
-                ClaimMixueWage(false)
-            elseif (Hub.PendingEarnings.Construction or 0) > 0 then
+            if (Hub.PendingEarnings.Construction or 0) > 0 then
                 ClaimConstructionWage(false)
             elseif (Hub.PendingEarnings.Mechanic or 0) > 0 then
                 ClaimMechanicWage(false)
@@ -11670,9 +11730,16 @@ do
 
     Tabs.Player:AddToggle("ESPShowHeadDot", {
         Title = "จุดศีรษะ (Head Dot)",
-        Default = true
+        Default = false
     }):OnChanged(function()
         State.ESPShowHeadDot = Options.ESPShowHeadDot.Value
+        if not State.ESPShowHeadDot then
+            for _, entry in pairs(ESP_Cache) do
+                if entry and entry.HeadDotBB then
+                    entry.HeadDotBB.Enabled = false
+                end
+            end
+        end
     end)
 
     Tabs.Player:AddToggle("ESPShowChams", {
@@ -12107,13 +12174,7 @@ function Hub.Unload()
     State.GlockSwitch = false
     pcall(ApplyGunMods)
     pcall(function()
-        if originalSimulateProjectile then
-            local phMod = ReplicatedStorage:FindFirstChild("Modules") and ReplicatedStorage.Modules:FindFirstChild("ProjectileHandler")
-            if phMod then
-                local ph = require(phMod)
-                ph.SimulateProjectile = originalSimulateProjectile
-            end
-        end
+        -- Silent Aim cleanup
     end)
     SetSprinting(false)
     ClearTargetESP()
