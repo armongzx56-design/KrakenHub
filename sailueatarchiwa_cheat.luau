@@ -81,8 +81,7 @@ local function performGet(url)
 end
 
 local KRAKEN_APIS = {
-    "https://krakenhub-three.vercel.app/api/whitelist/verify",
-    "https://fynw54wx6g.apps.bot-hosting.cloud/api/whitelist/verify"
+    "https://wlwr6mnuuu.apps.bot-hosting.cloud/api/whitelist/verify"
 }
 local lastErrorMsg = nil
 local cachedLink, cachedTime = "", 0;

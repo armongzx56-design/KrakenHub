@@ -168,8 +168,7 @@ local function redeemKey(key)
 end
 
 local KRAKEN_APIS = {
-    "https://krakenhub-three.vercel.app/api/whitelist/verify",
-    "https://fynw54wx6g.apps.bot-hosting.cloud/api/whitelist/verify"
+    "https://wlwr6mnuuu.apps.bot-hosting.cloud/api/whitelist/verify"
 }
 local lastErrorMsg = nil
 
@@ -265,6 +264,8 @@ if not forceUI and preProvidedKey and type(preProvidedKey) == "string" and prePr
     local isValid, errReason = verifyKey(preProvidedKey)
     if isValid then
         SaveKeyToFile(preProvidedKey)
+        _G._KrakenKeyVerified = true
+        if typeof(getgenv) == "function" then getgenv()._KrakenKeyVerified = true end
         print("[KrakenHub] License verified (" .. preProvidedKey .. ")! Loading script...")
         loadstring(game:HttpGet(GetScriptUrlForGame()))()
         return
@@ -702,6 +703,8 @@ SubmitBtn.MouseButton1Click:Connect(function()
         Tween(CloseBtn, {BackgroundTransparency = 1, TextTransparency = 1}, 0.3)
         task.wait(0.45)
         ScreenGui:Destroy()
+        _G._KrakenKeyVerified = true
+        if typeof(getgenv) == "function" then getgenv()._KrakenKeyVerified = true end
         loadstring(game:HttpGet(GetScriptUrlForGame()))()
     else
         SubmitBtn.Text = "Verify Key"

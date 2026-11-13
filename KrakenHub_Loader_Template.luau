@@ -95,8 +95,7 @@ return (function()
         if string.sub(upperKey, 1, 7) == "KRAKEN-" then
             local hwid = (typeof(gethwid) == "function" and gethwid()) or (typeof(get_hwid) == "function" and get_hwid()) or tostring(game:GetService("Players").LocalPlayer.UserId)
             local krakenApis = {
-                "https://krakenhub-three.vercel.app/api/whitelist/verify",
-                "https://fynw54wx6g.apps.bot-hosting.cloud/api/whitelist/verify"
+                "https://wlwr6mnuuu.apps.bot-hosting.cloud/api/whitelist/verify"
             }
             
             for _, apiUrl in ipairs(krakenApis) do
